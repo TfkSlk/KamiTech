@@ -27,6 +27,16 @@
     <form id="modal-form" method="dialog"></form>
   </dialog>
 
+  <dialog id="confirm">
+    <form method="dialog" class="confirm-box">
+      <p id="confirm-msg"></p>
+      <div class="btn-row" style="justify-content:flex-end">
+        <button class="btn" value="cancel">Annuler</button>
+        <button class="btn danger" id="confirm-ok" value="ok">Confirmer</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>

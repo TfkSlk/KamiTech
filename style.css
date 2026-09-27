@@ -207,3 +207,7 @@ dialog::backdrop { background: rgba(10,12,16,.5); }
   .hide-sm { display: none; }
   .week-nav strong { min-width: 0; flex: 1; }
 }
+
+.confirm-box { padding: 20px; }
+.confirm-box p { margin: 0 0 18px; font-weight: 500; }
+#confirm { width: min(400px, calc(100vw - 24px)); }

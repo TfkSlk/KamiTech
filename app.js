@@ -53,6 +53,18 @@ const tag = a => `<span class="tag" style="--c:var(--${a})">${esc(EVENT_TYPES[a]
 const statusBadge = s => `<span class="status ${s}">${STATUTS[s]}</span>`;
 const dossier = id => state.dossiers.find(d => d.id === id);
 
+/* Confirmation intégrée à la page (les boîtes du navigateur ne sont pas toujours disponibles) */
+function confirmer(msg, label = 'Confirmer') {
+  return new Promise(resolve => {
+    const d = $('#confirm');
+    $('#confirm-msg').textContent = msg;
+    $('#confirm-ok').textContent = label;
+    d.onclose = () => resolve(d.returnValue === 'ok');
+    d.returnValue = '';
+    d.showModal();
+  });
+}
+
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
@@ -301,6 +313,7 @@ function parametres() {
       <p>Tes données sont enregistrées uniquement dans ce navigateur. Exporte-les régulièrement pour ne rien perdre, ou pour les transférer sur un autre appareil.</p>
       <div class="btn-row">
         <button class="btn primary" onclick="exporter()">Exporter (.json)</button>
+        <button class="btn" onclick="copier()">Copier la sauvegarde</button>
         <label class="btn">Importer…<input type="file" accept="application/json" hidden onchange="importer(this.files[0])"></label>
       </div>
     </div>
@@ -322,18 +335,25 @@ function exporter() {
   a.click();
   URL.revokeObjectURL(a.href);
 }
+function copier() {
+  const txt = JSON.stringify(state);
+  navigator.clipboard.writeText(txt).then(() => toast('Sauvegarde copiée : colle-la dans une note ou un e-mail'))
+    .catch(() => toast('Copie impossible ici, utilise Exporter'));
+}
 function importer(file) {
   if (!file) return;
   file.text().then(txt => {
     const data = JSON.parse(txt);
     if (!Array.isArray(data.dossiers) || !Array.isArray(data.events)) throw new Error();
-    if (!confirm('Remplacer les données actuelles par celles du fichier ?')) return;
-    state = { ...blank(), ...data };
-    save(); render(); toast('Sauvegarde importée');
-  }).catch(() => toast('Fichier invalide'));
+    return confirmer('Remplacer les données actuelles par celles du fichier ?', 'Remplacer').then(ok => {
+      if (!ok) return;
+      state = { ...blank(), ...data };
+      save(); render(); toast('Sauvegarde importée');
+    });
+  }).catch(() => toast("Ce fichier n'est pas une sauvegarde valide"));
 }
-function toutEffacer() {
-  if (!confirm('Effacer tous les dossiers et tâches ? Pense à exporter avant.')) return;
+async function toutEffacer() {
+  if (!await confirmer('Effacer tous les dossiers et tâches ? Pense à exporter avant.', 'Tout effacer')) return;
   state = { ...blank(), nom: state.nom };
   save(); render(); toast('Données effacées');
 }
@@ -387,8 +407,9 @@ function openDossier(id) {
   };
   modal().showModal();
 }
-function supprimerDossier(id) {
-  if (!confirm('Supprimer ce dossier ?')) return;
+async function supprimerDossier(id) {
+  modal().close();
+  if (!await confirmer('Supprimer ce dossier ?', 'Supprimer')) return;
   state.dossiers = state.dossiers.filter(d => d.id !== id);
   state.events.forEach(e => { if (e.dossierId === id) e.dossierId = ''; });
   save(); modal().close(); render(); toast('Dossier supprimé');
@@ -437,8 +458,8 @@ function supprimerEvent(id) {
 }
 
 /* ---------- Exemple ---------- */
-function loadDemo() {
-  if ((state.dossiers.length || state.events.length) && !confirm("Ajouter les données d'exemple à tes données actuelles ?")) return;
+async function loadDemo() {
+  if ((state.dossiers.length || state.events.length) && !await confirmer("Ajouter les données d'exemple à tes données actuelles ?", 'Ajouter')) return;
   const d = n => iso(addDays(new Date(), n));
   const ex = [
     { entreprise: 'Boulangerie Martin', activite: 'energie', statut: 'rdv', contact: 'M. Martin', ville: 'Strasbourg', partenaire: 'Fournisseur A', commEstimee: 450, dateRelance: d(2) },
