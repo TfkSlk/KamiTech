@@ -1,0 +1,11 @@
+{
+  "name": "kami-groupe-dashboard",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Tableau de bord Kami Groupe et cerveau Jarvis",
+  "engines": { "node": "22.x" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0"
+  }
+}

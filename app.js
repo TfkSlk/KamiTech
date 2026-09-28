@@ -25,7 +25,7 @@ const PERIODES = { semaine: 'Cette semaine', mois: 'Ce mois', annee: 'Cette ann�
 const KEY = 'kami-dashboard-v1';
 const blank = () => ({
   nom: 'Kami Groupe',
-  dossiers: [], events: [], abonnes: [],
+  dossiers: [], events: [], abonnes: [], memoire: [],
   /* Formules KamiFood : prix HT par site et par mois (stratégie du 17/07/2026) */
   formules: [
     { id: 'f1', nom: 'Essentiel', prix: 79 },
@@ -57,6 +57,7 @@ function load() {
 function migrate(s) {
   s.prefs = { periode: 'mois', ...(s.prefs || {}) };
   s.abonnes = s.abonnes || [];
+  s.memoire = s.memoire || [];
   s.events.forEach(e => {
     if (e.lien === undefined) e.lien = e.dossierId ? 'd:' + e.dossierId : '';
     delete e.dossierId;
@@ -180,7 +181,7 @@ function relances() {
 }
 
 /* ---------- Routage ---------- */
-const views = { dashboard, planning, kamifood, dossiers, gains: gainsView, parametres };
+const views = { dashboard, planning, kamifood, dossiers, gains: gainsView, jarvis: jarvisView, parametres };
 let weekStart = monday(new Date());
 let filtre = { activite: 'all', statut: 'actifs', q: '' };
 let planFiltre = 'all';
@@ -515,6 +516,22 @@ function parametres() {
       <div class="btn-row"><button class="btn" onclick="saveModele();state.rdvModele.push({titre:'Nouveau RDV',jours:0,duree:60,mode:'visio'});save();render()">+ RDV</button><button class="btn primary" onclick="saveModele();toast('RDV inclus enregistrés')">Enregistrer</button></div>
     </div>
     <div class="card">
+      <h2>Jarvis</h2>
+      <p>Le cerveau tourne sur Vercel (<code>/api/jarvis</code>). Le jeton doit être le même que <code>JARVIS_TOKEN</code> dans les variables d'environnement Vercel. Il est enregistré uniquement dans ce navigateur.</p>
+      <div class="rows">
+        <div class="row"><label for="j-nom" class="meta" style="min-width:90px">Son nom</label><input id="j-nom" type="text" value="${esc(jarvis.nom)}" placeholder="Jarvis" class="short"><span class="meta">= le mot d'activation en mains libres</span></div>
+        <div class="row"><label for="j-token" class="meta" style="min-width:90px">Jeton</label><input id="j-token" type="password" value="${esc(jarvis.token)}" autocomplete="off" placeholder="colle le jeton ici"></div>
+        <div class="row"><label for="j-endpoint" class="meta" style="min-width:90px">Adresse</label><input id="j-endpoint" type="text" value="${esc(jarvis.endpoint)}"></div>
+        <div class="row"><label for="j-voice" class="meta" style="min-width:90px">Voix</label><select id="j-voice">${voixOptions()}</select></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="jarvis.nom=$('#j-nom').value.trim()||'Jarvis';jarvis.token=$('#j-token').value.trim();jarvis.endpoint=$('#j-endpoint').value.trim()||'/api/jarvis';jarvis.voixNom=$('#j-voice').value;saveJarvis();toast('Réglages Jarvis enregistrés')">Enregistrer</button>
+        <button class="btn" onclick="testerJarvis()">Tester la connexion</button>
+        <button class="btn" onclick="parler('Bonjour Toufek, je suis prêt.')">Tester la voix</button>
+        <button class="btn danger" onclick="jarvis.historique=[];saveJarvis();toast('Conversation effacée')">Effacer la conversation</button>
+      </div>
+    </div>
+    <div class="card">
       <h2>Sauvegarde</h2>
       <p>Tes données restent dans ce navigateur. Exporte-les régulièrement pour ne rien perdre ou pour les passer sur un autre appareil.</p>
       <div class="btn-row">
@@ -726,6 +743,207 @@ function supprimerEvent(id) {
   state.events = state.events.filter(e => e.id !== id);
   save(); modal().close(); render(); toast('Supprimé');
 }
+
+/* ---------- Jarvis : le cerveau (API) + la voix (navigateur) ---------- */
+const JKEY = 'kami-jarvis';
+let jarvis = loadJarvis();
+function loadJarvis() {
+  const base = { endpoint: '/api/jarvis', token: '', nom: 'Jarvis', voix: true, mainsLibres: false, voixNom: '', historique: [] };
+  try { return { ...base, ...JSON.parse(localStorage.getItem(JKEY) || '{}') }; } catch (e) { return base; }
+}
+function saveJarvis() {
+  try { localStorage.setItem(JKEY, JSON.stringify({ ...jarvis, historique: jarvis.historique.slice(-40) })); } catch (e) { /* stockage indisponible */ }
+}
+let jarvisEtat = { texte: 'Vérification du cerveau…', ok: null };
+let jarvisOccupe = false;
+
+/* Ce que le cerveau reçoit : les données du tableau de bord + un résumé chiffré */
+function projection() {
+  const mois = bilan('mois'), annee = bilan('annee');
+  const t = today();
+  return {
+    resume: {
+      gagneMois: mois.tot.gagne, attenduMois: mois.tot.prevu, tempsMoisMin: mois.tot.total,
+      gagneAnnee: annee.tot.gagne, parSecteurAnnee: Object.fromEntries(annee.rows.map(r => [r.k, { gagne: r.gagne, tempsMin: r.total }])),
+      recurrentMensuelKamiFood: mrr(), abonnesActifs: state.abonnes.filter(a => a.statut === 'actif').length,
+      dossiersEnCours: state.dossiers.filter(d => ACTIFS.includes(d.statut)).length,
+      enRetard: relances().filter(r => r.date < t).length + state.events.filter(e => e.date < t && !e.fait).length,
+    },
+    formules: state.formules, rdvModele: state.rdvModele, memoire: state.memoire,
+    abonnes: state.abonnes, dossiers: state.dossiers, events: state.events,
+  };
+}
+
+/* Rejoue sur nos données ce que le cerveau a fait sur sa copie */
+function appliquer(actions) {
+  let nav = null;
+  for (const a of actions || []) {
+    if (a.op === 'add' && state[a.collection]) state[a.collection].push(a.item);
+    else if (a.op === 'update' && state[a.collection]) { const x = state[a.collection].find(i => i.id === a.id); if (x) Object.assign(x, a.fields); }
+    else if (a.op === 'delete' && state[a.collection]) state[a.collection] = state[a.collection].filter(i => i.id !== a.id);
+    else if (a.op === 'memoire') state.memoire.push(a.note);
+    else if (a.op === 'navigate') nav = a.vue;
+  }
+  if (actions && actions.length) save();
+  if (nav && nav !== 'jarvis') setTimeout(() => { location.hash = '#' + nav; }, 1200);
+}
+
+async function testerJarvis() {
+  jarvisEtat = { texte: 'Vérification…', ok: null };
+  try {
+    const r = await fetch(jarvis.endpoint, { cache: 'no-store' });
+    const j = await r.json();
+    if (!j.cleApi) jarvisEtat = { texte: 'Le cerveau répond, mais la clé API Anthropic manque sur Vercel.', ok: false };
+    else if (!j.tokenDefini) jarvisEtat = { texte: 'Le cerveau répond, mais JARVIS_TOKEN manque sur Vercel.', ok: false };
+    else if (!jarvis.token) jarvisEtat = { texte: `Cerveau prêt (${j.modele}). Colle ton jeton dans Réglages pour lui parler.`, ok: false };
+    else jarvisEtat = { texte: `Cerveau prêt · ${j.modele} · effort ${j.effort}`, ok: true };
+  } catch (e) {
+    jarvisEtat = { texte: location.protocol === 'file:' ? 'Le cerveau n\'est joignable qu\'en ligne (Vercel), pas depuis un fichier local.' : 'Le cerveau ne répond pas à cette adresse.', ok: false };
+  }
+  const el = $('#jarvis-etat'); if (el) { el.textContent = jarvisEtat.texte; el.className = jarvisEtat.ok ? 'ok' : (jarvisEtat.ok === false ? 'ko' : ''); }
+  if (location.hash === '#parametres') toast(jarvisEtat.texte);
+}
+
+async function jarvisEnvoyer(texte, viaVoix) {
+  texte = String(texte || '').trim();
+  if (!texte || jarvisOccupe) return;
+  if (!jarvis.token) { toast('Colle d\'abord ton jeton Jarvis dans Réglages'); location.hash = '#parametres'; return; }
+  jarvisOccupe = true;
+  jarvis.historique.push({ role: 'user', content: texte, voix: !!viaVoix });
+  majChat();
+  const now = new Date();
+  try {
+    const r = await fetch(jarvis.endpoint, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token },
+      body: JSON.stringify({
+        messages: jarvis.historique.filter(m => !m.erreur).slice(-20).map(m => ({ role: m.role, content: m.content })),
+        state: projection(), mode: viaVoix ? 'voice' : 'text', nom: jarvis.nom,
+        aujourdhui: today(), heure: `${pad(now.getHours())}:${pad(now.getMinutes())}`, now: now.toISOString(),
+      }),
+    });
+    const j = await r.json().catch(() => ({ erreur: `Réponse illisible (${r.status})` }));
+    if (!r.ok || j.erreur) throw new Error(j.erreur || `Erreur ${r.status}`);
+    appliquer(j.actions);
+    jarvis.historique.push({ role: 'assistant', content: j.texte, actions: (j.actions || []).length });
+    if (jarvis.voix && viaVoix) parler(j.texte);
+  } catch (e) {
+    jarvis.historique.push({ role: 'assistant', content: e.message || String(e), erreur: true });
+    if (viaVoix && jarvis.voix) parler('Désolé, je n\'ai pas pu répondre.');
+  }
+  jarvisOccupe = false;
+  saveJarvis(); majChat();
+}
+
+function bulles() {
+  if (!jarvis.historique.length) return `<div class="empty">Dis-moi ce que tu veux : « Qu'est-ce que j'ai demain ? », « Mets une visio avec Garage Central mardi à 14h », « Combien j'ai gagné ce mois en CEE ? »</div>`;
+  return jarvis.historique.slice(-40).map(m => `<div class="bulle ${m.role} ${m.erreur ? 'erreur' : ''}">${md(m.content)}${m.actions ? `<div class="meta">✓ ${m.actions} action(s) appliquée(s)</div>` : ''}</div>`).join('')
+    + (jarvisOccupe ? '<div class="bulle assistant pense">…</div>' : '');
+}
+function md(t) {
+  return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^(?:- |• )(.*)$/gm, '<div class="li">• $1</div>').replace(/\n/g, '<br>');
+}
+function majChat() {
+  const log = $('#chat-log'); if (!log) return;
+  log.innerHTML = bulles(); log.scrollTop = log.scrollHeight;
+  const b = $('#chat-send'); if (b) b.disabled = jarvisOccupe;
+}
+
+function jarvisView() {
+  setTimeout(testerJarvis, 0);
+  setTimeout(majChat, 0);
+  return `
+  <div class="page-head">
+    <div><h1>${esc(jarvis.nom)}</h1><p id="jarvis-etat" class="${jarvisEtat.ok ? 'ok' : jarvisEtat.ok === false ? 'ko' : ''}">${esc(jarvisEtat.texte)}</p></div>
+    <div class="btn-row">
+      <button class="btn ${jarvis.voix ? 'on' : ''}" onclick="jarvis.voix=!jarvis.voix;saveJarvis();render()" title="Jarvis répond à voix haute quand tu lui parles à la voix">🔊 Voix ${jarvis.voix ? 'on' : 'off'}</button>
+      ${SR ? `<button class="btn ${jarvis.mainsLibres ? 'primary' : ''}" onclick="mainsLibres(!jarvis.mainsLibres)" title="Il n'écoute que quand tu dis « Jarvis »">${jarvis.mainsLibres ? '● Mains libres actif' : '○ Mains libres'}</button>` : ''}
+      <button class="btn" onclick="parler('Bonjour Toufek, je suis prêt.')" title="Tester la voix">Test voix</button>
+    </div>
+  </div>
+  <div class="card chat">
+    <div id="chat-log"></div>
+    <form id="chat-form" onsubmit="event.preventDefault();const i=$('#chat-in');jarvisEnvoyer(i.value,false);i.value=''">
+      ${SR ? `<button type="button" class="btn mic" id="chat-mic" onclick="dicter()" aria-label="Parler">🎤</button>` : ''}
+      <input id="chat-in" type="text" placeholder="${SR ? 'Écris, ou appuie sur le micro et parle…' : 'Écris à Jarvis…'}" autocomplete="off">
+      <button class="btn primary" id="chat-send" ${jarvisOccupe ? 'disabled' : ''}>Envoyer</button>
+    </form>
+    ${SR ? '' : '<p class="note">Ton navigateur ne gère pas la reconnaissance vocale. Utilise Chrome ou Edge pour parler à Jarvis.</p>'}
+  </div>`;
+}
+
+/* --- Voix : reconnaissance (mot d'activation « Jarvis ») et synthèse --- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+let rec = null, ecoute = false, enTrainDeParler = false, dicteeSeule = false;
+
+function creerRec() {
+  const r = new SR();
+  r.lang = 'fr-FR'; r.continuous = true; r.interimResults = false; r.maxAlternatives = 1;
+  r.onresult = e => {
+    const t = e.results[e.results.length - 1][0].transcript.trim();
+    if (!t || enTrainDeParler) return;
+    if (dicteeSeule) { dicteeSeule = false; arreterEcoute(); jarvisEnvoyer(t, true); return; }
+    const texte = apresMotCle(t);
+    if (texte === null) return; // il n'écoute que si le mot d'activation ouvre la phrase
+    if (!texte) { parler('Oui ?'); return; }
+    jarvisEnvoyer(texte, true);
+  };
+  r.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { toast('Micro refusé : autorise-le dans le navigateur'); mainsLibres(false); } };
+  r.onend = () => { if (ecoute && !enTrainDeParler) { try { r.start(); } catch (e) { /* déjà lancé */ } } };
+  return r;
+}
+/* Renvoie ce qui suit le mot d'activation (« Jarvis », « Kami »…) s'il ouvre la phrase, sinon null.
+   Mot entier uniquement : « KamiFood » ne déclenche pas « Kami ». */
+const sansAccents = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+function apresMotCle(transcription) {
+  const nom = sansAccents(jarvis.nom || 'Jarvis').trim();
+  if (!nom) return transcription.trim();
+  const mots = sansAccents(transcription).replace(/[^a-z0-9 ]+/g, ' ').trim().split(/\s+/);
+  const n = nom.split(/\s+/);
+  const debut = mots.slice(0, 3 + n.length);
+  for (let i = 0; i <= Math.min(2, debut.length - n.length); i++) {
+    if (n.every((m, k) => debut[i + k] === m)) {
+      const originaux = transcription.trim().split(/\s+/);
+      return originaux.slice(i + n.length).join(' ').replace(/^[\s,.!?:]+/, '').trim();
+    }
+  }
+  return null;
+}
+function demarrerEcoute() { if (!SR) return; rec = rec || creerRec(); ecoute = true; try { rec.start(); } catch (e) { /* déjà lancé */ } majMic(); }
+function arreterEcoute() { ecoute = false; if (rec) { try { rec.stop(); } catch (e) { /* ignore */ } } majMic(); }
+function majMic() { const b = $('#chat-mic'); if (b) b.classList.toggle('on', ecoute); }
+function mainsLibres(on) {
+  jarvis.mainsLibres = !!on; saveJarvis();
+  if (on) { dicteeSeule = false; demarrerEcoute(); toast('Mains libres : dis « Jarvis, … »'); } else arreterEcoute();
+  render();
+}
+function dicter() {
+  if (ecoute && dicteeSeule) { dicteeSeule = false; arreterEcoute(); return; }
+  if (jarvis.mainsLibres) { toast('Mains libres déjà actif : dis « Jarvis, … »'); return; }
+  dicteeSeule = true; demarrerEcoute(); toast('Je t\'écoute…');
+}
+function voixDispo() {
+  try { return speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith('fr')); } catch (e) { return []; }
+}
+function voixOptions() {
+  const vs = voixDispo();
+  if (!vs.length) return '<option value="">Voix française du système</option>';
+  return `<option value="">Automatique</option>` + vs.map(v => `<option value="${esc(v.name)}" ${v.name === jarvis.voixNom ? 'selected' : ''}>${esc(v.name)}</option>`).join('');
+}
+function parler(texte) {
+  if (!('speechSynthesis' in window) || !texte) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(texte.replace(/[*_#`>]/g, ''));
+  u.lang = 'fr-FR'; u.rate = 1.02;
+  const vs = voixDispo();
+  const pref = vs.find(v => v.name === jarvis.voixNom) || vs.find(v => /google|microsoft|siri|premium|enhanced|neural/i.test(v.name)) || vs[0];
+  if (pref) u.voice = pref;
+  enTrainDeParler = true;
+  if (rec && ecoute) { try { rec.stop(); } catch (e) { /* ignore */ } }
+  u.onend = u.onerror = () => { enTrainDeParler = false; if (ecoute && rec) { try { rec.start(); } catch (e) { /* ignore */ } } };
+  speechSynthesis.speak(u);
+}
+if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = () => { const s = $('#j-voice'); if (s) s.innerHTML = voixOptions(); };
+if (jarvis.mainsLibres && SR) setTimeout(() => demarrerEcoute(), 500);
 
 /* ---------- Exemple ---------- */
 async function loadDemo() {
