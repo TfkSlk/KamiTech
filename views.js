@@ -140,17 +140,17 @@ function dashboard() {
   const t = today(), p = state.prefs.periode;
   const b = bilan(p), annee = bilan('annee'), semaine = bilan('semaine');
   const lundi = monday(new Date());
-  const todayEv = state.events.filter(e => e.date === t);
+  const todayEv = state.events.filter(e => surJour(e, t));
   const todayItems = [...todayEv, ...relances().filter(r => r.date === t)].sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
   const retard = [...relances().filter(r => r.date < t), ...state.events.filter(e => e.date < t && !e.fait)].sort((a, c) => a.date.localeCompare(c.date));
   const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
   const empty = !state.dossiers.length && !state.events.length && !state.abonnes.length;
   const serie = serieMois(6), spark = serie.map(m => m.parts.reduce((s, x) => s + x.value, 0));
-  const minJour = todayEv.filter(e => !e.fait).reduce((s, e) => s + num(e.duree), 0);
+  const minJour = todayEv.filter(e => !e.fait && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
   const h = new Date().getHours();
   const salut = h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
   const resume = [
-    `${todayEv.length ? `${todayEv.length} RDV aujourd'hui (${hrs(minJour)})` : 'Rien de prévu aujourd\'hui'}`,
+    `${todayEv.filter(e => !estPeriode(e)).length ? `${todayEv.filter(e => !estPeriode(e)).length} RDV aujourd'hui (${hrs(minJour)})` : 'Rien de prévu aujourd\'hui'}`,
     retard.length ? `${retard.length} en retard` : 'tout est à jour',
     `${eur(b.tot.gagne)} gagnés ${PERIODES[p].toLowerCase().replace('cette ', 'cette ').replace('ce ', 'ce ')}`,
   ].join(' · ');
@@ -257,8 +257,8 @@ function vueSemaine(all, lundi) {
     <div class="legend">${charge.map(([k, m]) => `<span><i style="background:var(--${k})"></i>${esc(SECTEURS[k].label)} ${esc(hrs(m))}</span>`).join('')}</div>
   </div>
   ${window.innerWidth < 760 ? jours.map(ds => {
-    const items = all.filter(e => e.date === ds).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-    const min = items.filter(e => !e.relance).reduce((s, e) => s + num(e.duree), 0);
+    const items = all.filter(e => surJour(e, ds)).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
+    const min = items.filter(e => !e.relance && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
     return `<div class="card day-card ${ds === t ? 'today' : ''}">
       <div class="card-head"><div><h2>${esc(cap(parse(ds).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' })))}</h2><p class="meta">${min ? esc(hrs(min)) : 'Libre'}</p></div><button class="btn small" onclick="openEvent(null,'${ds}')">+ RDV</button></div>
       ${itemList(items, false) || ''}</div>`;
@@ -266,8 +266,8 @@ function vueSemaine(all, lundi) {
 }
 function vueJour(all, d) {
   const ds = iso(d);
-  const items = all.filter(e => e.date === ds).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-  const min = items.filter(e => !e.relance).reduce((s, e) => s + num(e.duree), 0);
+  const items = all.filter(e => surJour(e, ds)).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
+  const min = items.filter(e => !e.relance && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
   return `<div class="jour-layout">
     ${grilleHeures([ds], all)}
     <div class="card jour-side">
@@ -283,12 +283,12 @@ function vueMois(all, d) {
   const nbSem = Math.ceil((Math.round((dernier - start) / 864e5) + 1) / 7);
   const cellules = [...Array(nbSem * 7)].map((_, i) => {
     const day = addDays(start, i), ds = iso(day);
-    const evs = all.filter(e => e.date === ds).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-    const min = evs.filter(e => !e.relance).reduce((s, e) => s + num(e.duree), 0);
+    const evs = all.filter(e => surJour(e, ds)).sort((a, c) => (estPeriode(a) ? 0 : 1) - (estPeriode(c) ? 0 : 1) || (a.heure || '99').localeCompare(c.heure || '99'));
+    const min = evs.filter(e => !e.relance && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
     const visibles = evs.slice(0, 3);
     return `<div class="mcell ${day.getMonth() !== d.getMonth() ? 'hors' : ''} ${ds === t ? 'today' : ''}" onclick="allerAuJour('${ds}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')allerAuJour('${ds}')">
       <div class="mhead"><b>${day.getDate()}</b>${min ? `<span class="meta">${esc(hrs(min))}</span>` : ''}</div>
-      ${visibles.map(e => `<div class="mchip ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''}" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.heure ? e.heure + ' · ' : ''}${e.titre}${e.relance ? '' : ' · ' + hrs(num(e.duree))}`)}"><i style="background:var(--${e.activite})"></i><span>${e.heure ? `<b>${esc(e.heure)}</b> ` : ''}${esc(e.titre)}</span></div>`).join('')}
+      ${visibles.map(e => `<div class="mchip ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${estPeriode(e) ? 'periode' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.heure ? e.heure + ' · ' : ''}${e.titre}${e.relance ? '' : ' · ' + hrs(num(e.duree))}`)}"><i style="background:var(--${e.activite})"></i><span>${e.important ? '⚠ ' : ''}${e.heure ? `<b>${esc(e.heure)}</b> ` : ''}${esc(e.titre)}</span></div>`).join('')}
       ${evs.length > 3 ? `<div class="mplus">+ ${evs.length - 3}</div>` : ''}
     </div>`;
   }).join('');
@@ -308,8 +308,15 @@ function grilleHeures(jours, all) {
     return `<div class="tg-day ${ds === t ? 'today' : ''}" onclick="allerAuJour('${ds}')"><span>${esc(d.toLocaleDateString('fr-FR', { weekday: jours.length > 1 ? 'short' : 'long' }).replace('.', ''))}</span><b>${d.getDate()}</b>${min ? `<em>${esc(hrs(min))}</em>` : ''}</div>`;
   }).join('');
   const allday = jours.map(ds => {
-    const items = all.filter(e => e.date === ds && (!e.heure || e.relance)).sort((a, c) => (a.relance ? 0 : 1) - (c.relance ? 0 : 1));
-    return `<div class="tg-allday-col">${items.map(e => `<div class="ev ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''}" style="--c:var(--${e.activite})" onclick="${ouvrir(e)}" data-tip="${tip(e.relance ? e.titre : `${e.titre} · ${MODES[e.mode] || ''} · ${hrs(num(e.duree))}`)}">${esc(e.titre)}</div>`).join('')}</div>`;
+    const items = all.filter(e => e.date === ds && !estPeriode(e) && (!e.heure || e.relance)).sort((a, c) => (a.relance ? 0 : 1) - (c.relance ? 0 : 1));
+    return `<div class="tg-allday-col">${items.map(e => `<div class="ev ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="${ouvrir(e)}" data-tip="${tip(e.relance ? e.titre : `${e.titre} · ${MODES[e.mode] || ''}${e.duree ? ' · ' + hrs(num(e.duree)) : ''}`)}">${e.important ? '⚠ ' : ''}${esc(e.titre)}</div>`).join('')}</div>`;
+  }).join('');
+  // périodes : un bandeau qui s'étale sur les jours couverts
+  const periodes = all.filter(e => estPeriode(e) && e.date <= jours[jours.length - 1] && e.fin >= jours[0]).sort((a, c) => a.date.localeCompare(c.date));
+  const bandeaux = periodes.map(e => {
+    const debut = Math.max(0, jours.indexOf(jours.find(d => d >= e.date) || jours[0]));
+    const fin = jours.reduce((m, d, i) => (d <= e.fin ? i : m), debut);
+    return `<div class="bandeau ${e.fait ? 'done' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite});grid-column:${debut + 2} / ${fin + 3}" onclick="${ouvrir(e)}" data-tip="${tip(`${e.titre}\n${fmtDate(e.date)} → ${fmtDate(e.fin)}${lienNom(e.lien) ? '\n' + lienNom(e.lien) : ''}`)}">${e.important ? '⚠ ' : ''}${esc(e.titre)}<span class="meta"> → ${esc(fmtDate(e.fin))}</span></div>`;
   }).join('');
   const cols = jours.map(ds => {
     const evs = all.filter(e => e.date === ds && e.heure && !e.relance).map(e => ({ e, s: minutesDe(e.heure), f: minutesDe(e.heure) + Math.max(15, num(e.duree) || 30) })).sort((a, c) => a.s - c.s);
@@ -333,6 +340,7 @@ function grilleHeures(jours, all) {
   }).join('');
   return `<div class="card tgrid" style="--cols:${jours.length};--ph:${PH}px">
     <div class="tg-head"><div class="tg-corner"></div>${head}</div>
+    ${bandeaux ? `<div class="tg-periodes"><div class="tg-corner meta">Périodes</div>${bandeaux}</div>` : ''}
     <div class="tg-allday"><div class="tg-corner meta">Journée</div>${allday}</div>
     <div class="tg-body">
       <div class="tg-hours">${heures.map(h => `<div style="height:${PH}px">${h} h</div>`).join('')}</div>

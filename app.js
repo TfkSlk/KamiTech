@@ -91,6 +91,9 @@ const tag = a => `<span class="tag" style="--c:var(--${a})">${esc(SECTEURS[a]?.l
 const statusBadge = s => `<span class="status ${s}">${STATUTS[s]}</span>`;
 const abBadge = s => `<span class="status ${s === 'actif' ? 'paye' : s === 'resilie' ? 'perdu' : 'signe'}">${STATUTS_AB[s]}</span>`;
 const dossier = id => state.dossiers.find(d => d.id === id);
+/* Un RDV avec une date de fin est une période (bandeau sur plusieurs jours) ; important = alerte */
+const estPeriode = e => !!(e.fin && e.fin > e.date);
+const surJour = (e, ds) => estPeriode(e) ? (e.date <= ds && ds <= e.fin) : e.date === ds;
 const abonne = id => state.abonnes.find(a => a.id === id);
 const formule = id => state.formules.find(f => f.id === id);
 const lienNom = l => {
@@ -205,15 +208,15 @@ function itemList(items, showDate) {
   const t = today();
   return `<ul class="list">${items.map(e => {
     const late = e.date < t && !e.fait;
-    const when = showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.relance ? 'Relance' : 'Dans la journée'));
+    const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.relance ? 'Relance' : 'Dans la journée'));
     const click = e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
     const client = lienNom(e.lien);
-    const meta = e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
-    return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''}">
+    const meta = e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? ['Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
+    return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''}">
       ${e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
       <div class="grow clickable" onclick="${click}">
         <div class="when ${late ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
-        <div class="title-txt">${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
+        <div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
       </div>
       <i class="dot" style="background:var(--${e.activite})" data-tip="${esc(SECTEURS[e.activite]?.label || '')}" aria-label="${esc(SECTEURS[e.activite]?.label || '')}"></i>
     </li>`;
@@ -575,16 +578,21 @@ function openEvent(id, date, lien, heure) {
     <div class="fields">
       ${field('titre', 'Titre *', inp('titre', e.titre, 'text', 'required'), true)}
       ${field('date', 'Date', inp('date', e.date, 'date', 'required'))}
+      ${field('fin', 'Jusqu\'au (pour une période)', inp('fin', e.fin, 'date'))}
       ${field('heure', 'Heure', inp('heure', e.heure, 'time'))}
       ${field('mode', 'Type', sel('mode', MODES, e.mode))}
       ${field('duree', 'Durée (minutes)', inp('duree', e.duree, 'number', 'min="0" step="5"'))}
       ${field('lien', 'Client lié', sel('lien', opts, e.lien || '').replace('<select', `<select onchange="const s=secteurDe(this.value);if(s)$('#f-activite').value=s"`))}
       ${field('activite', 'Secteur', sel('activite', SECTEURS, e.activite))}
       ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(e.notes || '')}</textarea>`, true)}
+      <label class="check full"><input type="checkbox" name="important" ${e.important ? 'checked' : ''}> ⚠ Alerte : à ne pas manquer (affichée en rouge, ex. « signature requise le jour de l'annonce des prix »)</label>
     </div>
     ${actions(id ? `<button type="button" class="btn danger" onclick="supprimerEvent('${id}')">Supprimer</button>` : '')}`,
   f => {
     f.duree = num(f.duree);
+    f.important = !!f.important;
+    if (f.fin && f.fin <= f.date) f.fin = '';
+    if (f.fin && !f.heure) { f.mode = 'tache'; f.duree = 0; }
     if (id) Object.assign(e, f);
     else state.events.push({ id: uid(), fait: false, ...f });
     save(); modal().close(); render(); toast(id ? 'RDV mis à jour' : 'Ajouté au planning');

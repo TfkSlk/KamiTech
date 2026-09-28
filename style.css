@@ -246,6 +246,18 @@ td.late { color: var(--danger); font-weight: 600; }
 .jour-layout { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
 .jour-side { position: sticky; top: 20px; }
 
+/* périodes et alertes */
+.tg-periodes { display: grid; grid-template-columns: var(--hours) repeat(var(--cols), minmax(0, 1fr)); gap: 4px 0; padding: 5px 0; border-bottom: 1px solid var(--border); background: var(--surface); }
+.bandeau { margin: 0 4px; padding: 3px 9px; border-radius: 99px; font-size: 12.5px; font-weight: 500; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: color-mix(in srgb, var(--c) 16%, var(--surface)); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent); color: var(--text); }
+.bandeau .meta { font-size: 12px; }
+.bandeau.done { opacity: .45; text-decoration: line-through; }
+.bandeau.alerte, .ev.alerte, .mchip.alerte, .tev.alerte { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--surface)); }
+.list li.alerte .title-txt { color: var(--danger); font-weight: 600; }
+.warn-ico { color: var(--danger); }
+.mchip.periode { background: color-mix(in srgb, var(--c) 16%, var(--surface)); border-radius: 4px; }
+.mchip.periode i { border-radius: 2px; width: 4px; height: 12px; }
+
 /* mois */
 .mois-card { padding: 0; overflow: hidden; }
 .mgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }

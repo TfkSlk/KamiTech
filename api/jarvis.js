@@ -32,7 +32,7 @@ const PERSONA = `Tu es Jarvis, l'assistant personnel de Toufek, fondateur de Kam
 # Les données que tu vois
 Le message système suivant contient la date du jour et une projection des données du tableau de bord : abonnés KamiFood, dossiers d'apport, RDV et tâches (planning), relances, notes mémorisées, résumé des gains. C'est la vérité du moment. Si une information n'y est pas, utilise l'outil chercher ou agenda avant de conclure qu'elle n'existe pas. N'invente jamais un client, un montant ou un RDV.
 
-Champs : un RDV a un titre, une date (AAAA-MM-JJ), une heure (HH:MM ou vide), une durée en minutes, un mode (place = sur place, visio, tel = téléphone, tache = tâche sans RDV), un secteur (activite : kamifood, cee, energie, foncier, perso), un lien optionnel vers un client ("a:<id>" pour un abonné KamiFood, "d:<id>" pour un dossier d'apport) et un état fait (true/false). Un dossier a entreprise, activite, statut, contact, tel, email, ville, partenaire, commEstimee, commRecue, dateRelance, dateSignature, datePaiement, notes. Un abonné a restaurant, formule (id), prix mensuel HT, statut (essai, actif, resilie), debut, engagement (mois), fin, contact, tel, email, ville, notes.
+Champs : un RDV a un titre, une date (AAAA-MM-JJ), une heure (HH:MM ou vide), une durée en minutes, une date de fin optionnelle (fin : s'il y en a une, c'est une PÉRIODE qui couvre plusieurs jours, ex. « réponse des fournisseurs d'énergie du 28 sept. au 4 oct. », durée 0), un drapeau important (alerte rouge à ne pas manquer, ex. « signature requise le jour de l'annonce des prix négociés »), un mode (place = sur place, visio, tel = téléphone, tache = tâche sans RDV), un secteur (activite : kamifood, cee, energie, foncier, perso), un lien optionnel vers un client ("a:<id>" pour un abonné KamiFood, "d:<id>" pour un dossier d'apport) et un état fait (true/false). Un dossier a entreprise, activite, statut, contact, tel, email, ville, partenaire, commEstimee, commRecue, dateRelance, dateSignature, datePaiement, notes. Un abonné a restaurant, formule (id), prix mensuel HT, statut (essai, actif, resilie), debut, engagement (mois), fin, contact, tel, email, ville, notes.
 
 # Comment tu agis
 - Tu utilises les outils pour toute modification (ajouter, modifier, supprimer, mémoriser). Ne dis jamais "c'est fait" sans avoir appelé l'outil. Après un outil, confirme en une phrase ce qui a été fait, avec la date et l'heure.
@@ -40,6 +40,7 @@ Champs : un RDV a un titre, une date (AAAA-MM-JJ), une heure (HH:MM ou vide), un
 - Si un RDV entre en conflit avec un autre RDV au même créneau, signale-le avant d'ajouter, sauf si Toufek a déjà dit de le faire quand même.
 - Pour supprimer ou résilier, demande confirmation si ce n'est pas explicite. Pour ajouter ou modifier, agis directement.
 - Quand un nouvel abonné KamiFood est créé, propose de planifier ses RDV inclus (outil ajouter_abonne avec planifier_rdv_inclus) si Toufek n'a pas précisé.
+- Quand Toufek décrit une fenêtre de temps (« d'aujourd'hui à dimanche », « toute la semaine prochaine »), crée une période (date + fin, sans heure, durée 0). Quand il dit « attention », « à ne pas rater », « obligatoire », « signature requise », mets important=true. Une période et son alerte associée sont deux entrées distinctes (la période, puis l'alerte à la bonne date ; si la date de l'alerte est inconnue, mets-la au dernier jour de la période et dis-le).
 - Quand Toufek te dit une information à retenir (préférence, fait sur un client, décision), utilise retenir.
 - Priorité de Toufek : bien gérer son temps. Quand c'est utile, dis-lui ce qui est en retard, ce qui est chargé, ce qu'il gagne par secteur. Sois franc : si une semaine est trop chargée ou si un dossier dort, dis-le.
 
@@ -64,6 +65,8 @@ const champsRdv = {
   duree: { type: 'integer', description: 'minutes' }, mode: { type: 'string', enum: Object.keys(MODES) },
   activite: { type: 'string', enum: Object.keys(SECTEURS) }, lien: { type: 'string', description: '"a:<id abonné>" ou "d:<id dossier>" ou vide' },
   notes: { type: 'string' }, fait: { type: 'boolean' },
+  fin: { type: 'string', description: 'AAAA-MM-JJ : date de fin pour une PÉRIODE qui s\'étale sur plusieurs jours (ex. fenêtre de réponse des fournisseurs). Vide pour un RDV simple.' },
+  important: { type: 'boolean', description: 'true = alerte à ne pas manquer (affichée en rouge), ex. signature requise le jour de l\'annonce des prix' },
 };
 const champsAbonne = {
   restaurant: { type: 'string' }, formule: { type: 'string', description: 'id de formule (voir contexte)' }, prix: { type: 'number', description: 'prix mensuel HT' },
@@ -131,8 +134,11 @@ function outils(state, actions) {
       if (!dateOk(f.date)) throw new Error('date attendue au format AAAA-MM-JJ');
       if (f.lien && !nomLien(f.lien)) throw new Error(`lien inconnu : ${f.lien}`);
       const mode = f.mode || (f.lien ? 'visio' : 'tache');
-      const item = { id: uid(), fait: false, heure: '', notes: '', lien: '', duree: mode === 'place' ? 60 : 30, mode, ...f };
-      item.duree = num(item.duree) || 30;
+      const item = { id: uid(), fait: false, heure: '', notes: '', lien: '', important: false, duree: mode === 'place' ? 60 : 30, mode, ...f };
+      if (item.fin && !dateOk(item.fin)) throw new Error('fin attendue au format AAAA-MM-JJ');
+      if (item.fin && item.fin <= item.date) delete item.fin;
+      item.duree = item.fin ? num(item.duree) : (num(item.duree) || 30);
+      if (item.fin && !item.heure) item.mode = 'tache';
       return { ok: true, rdv: add('events', item), client: nomLien(item.lien) };
     },
     modifier_rdv({ id, ...rest }) {
