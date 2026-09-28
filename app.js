@@ -26,16 +26,20 @@ const KEY = 'kami-dashboard-v1';
 const blank = () => ({
   nom: 'Kami Groupe',
   dossiers: [], events: [], abonnes: [],
+  /* Formules KamiFood : prix HT par site et par mois (stratégie du 17/07/2026) */
   formules: [
-    { id: 'f1', nom: 'Indépendant', prix: 0 },
-    { id: 'f2', nom: 'Deux établissements', prix: 0 },
-    { id: 'f3', nom: 'Groupe', prix: 0 },
-    { id: 'f4', nom: 'Sur mesure', prix: 0 },
+    { id: 'f1', nom: 'Essentiel', prix: 79 },
+    { id: 'f2', nom: 'Pro', prix: 149 },
+    { id: 'f3', nom: 'Premium', prix: 249 },
+    { id: 'f4', nom: 'Pro — tarif fondateur', prix: 99 },
   ],
+  /* RDV inclus dans la souscription, d'après le process d'installation client */
   rdvModele: [
-    { titre: 'Installation et reprise des données', jours: 2, duree: 90, mode: 'visio' },
-    { titre: "Formation de l'équipe", jours: 7, duree: 60, mode: 'place' },
-    { titre: 'Point de suivi', jours: 30, duree: 30, mode: 'visio' },
+    { titre: 'Création de l\'espace et des comptes', jours: 1, duree: 45, mode: 'visio' },
+    { titre: 'Installation sur site (tablette, sondes, étiquettes)', jours: 7, duree: 120, mode: 'place' },
+    { titre: 'Formation équipe (1 h)', jours: 7, duree: 60, mode: 'place' },
+    { titre: 'Activation : test, bot Telegram, 1er récap', jours: 10, duree: 45, mode: 'visio' },
+    { titre: 'Point de suivi à 1 mois', jours: 30, duree: 30, mode: 'visio' },
     { titre: 'Bilan trimestriel', jours: 90, duree: 45, mode: 'visio' },
   ],
   prefs: { periode: 'mois' },
