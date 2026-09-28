@@ -191,6 +191,7 @@ function render() {
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
   $('#brand-name').textContent = state.nom;
   document.title = state.nom;
+  const nj = document.querySelector('#nav a[data-view="jarvis"]'); if (nj) nj.lastChild.textContent = jarvis.nom || 'Kami';
   $('#main').innerHTML = views[view]();
 }
 window.addEventListener('hashchange', render);
@@ -519,13 +520,13 @@ function parametres() {
       <h2>Jarvis</h2>
       <p>Le cerveau tourne sur Vercel (<code>/api/jarvis</code>). Le jeton doit être le même que <code>JARVIS_TOKEN</code> dans les variables d'environnement Vercel. Il est enregistré uniquement dans ce navigateur.</p>
       <div class="rows">
-        <div class="row"><label for="j-nom" class="meta" style="min-width:90px">Son nom</label><input id="j-nom" type="text" value="${esc(jarvis.nom)}" placeholder="Jarvis" class="short"><span class="meta">= le mot d'activation en mains libres</span></div>
+        <div class="row"><label for="j-nom" class="meta" style="min-width:90px">Son nom</label><input id="j-nom" type="text" value="${esc(jarvis.nom)}" placeholder="Kami" class="short"><span class="meta">= le mot d'activation en mains libres</span></div>
         <div class="row"><label for="j-token" class="meta" style="min-width:90px">Jeton</label><input id="j-token" type="password" value="${esc(jarvis.token)}" autocomplete="off" placeholder="colle le jeton ici"></div>
         <div class="row"><label for="j-endpoint" class="meta" style="min-width:90px">Adresse</label><input id="j-endpoint" type="text" value="${esc(jarvis.endpoint)}"></div>
         <div class="row"><label for="j-voice" class="meta" style="min-width:90px">Voix</label><select id="j-voice">${voixOptions()}</select></div>
       </div>
       <div class="btn-row">
-        <button class="btn primary" onclick="jarvis.nom=$('#j-nom').value.trim()||'Jarvis';jarvis.token=$('#j-token').value.trim();jarvis.endpoint=$('#j-endpoint').value.trim()||'/api/jarvis';jarvis.voixNom=$('#j-voice').value;saveJarvis();toast('Réglages Jarvis enregistrés')">Enregistrer</button>
+        <button class="btn primary" onclick="jarvis.nom=$('#j-nom').value.trim()||'Kami';jarvis.token=$('#j-token').value.trim();jarvis.endpoint=$('#j-endpoint').value.trim()||'/api/jarvis';jarvis.voixNom=$('#j-voice').value;saveJarvis();toast('Réglages Jarvis enregistrés')">Enregistrer</button>
         <button class="btn" onclick="testerJarvis()">Tester la connexion</button>
         <button class="btn" onclick="parler('Bonjour Toufek, je suis prêt.')">Tester la voix</button>
         <button class="btn danger" onclick="jarvis.historique=[];saveJarvis();toast('Conversation effacée')">Effacer la conversation</button>
@@ -748,7 +749,7 @@ function supprimerEvent(id) {
 const JKEY = 'kami-jarvis';
 let jarvis = loadJarvis();
 function loadJarvis() {
-  const base = { endpoint: '/api/jarvis', token: '', nom: 'Jarvis', voix: true, mainsLibres: false, voixNom: '', historique: [] };
+  const base = { endpoint: '/api/jarvis', token: '', nom: 'Kami', voix: true, mainsLibres: false, voixNom: '', historique: [] };
   try { return { ...base, ...JSON.parse(localStorage.getItem(JKEY) || '{}') }; } catch (e) { return base; }
 }
 function saveJarvis() {
@@ -895,7 +896,7 @@ function creerRec() {
    Mot entier uniquement : « KamiFood » ne déclenche pas « Kami ». */
 const sansAccents = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 function apresMotCle(transcription) {
-  const nom = sansAccents(jarvis.nom || 'Jarvis').trim();
+  const nom = sansAccents(jarvis.nom || 'Kami').trim();
   if (!nom) return transcription.trim();
   const mots = sansAccents(transcription).replace(/[^a-z0-9 ]+/g, ' ').trim().split(/\s+/);
   const n = nom.split(/\s+/);

@@ -228,7 +228,7 @@ function preparer(body) {
   const now = body.now ? new Date(body.now) : new Date();
   const aujourdhui = dateOk(body.aujourdhui) ? body.aujourdhui : iso(now);
   const s = {
-    nom: String(body.nom || 'Jarvis').slice(0, 30),
+    nom: String(body.nom || 'Kami').slice(0, 30),
     aujourdhui,
     heure: body.heure || `${pad(now.getHours())}:${pad(now.getMinutes())}`,
     resume: st.resume || null,
