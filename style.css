@@ -5,7 +5,7 @@
   --border: #e2e4e9;
   --text: #16181d;
   --muted: #6b7280;
-  --accent: #b8862b;
+  --accent: #d40000;
   --accent-contrast: #ffffff;
   --danger: #c2413a;
   --ok: #2f8f5b;
@@ -20,15 +20,15 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1115; --surface: #171a21; --surface-2: #1f232c; --border: #2a2f3a;
-    --text: #eceef2; --muted: #9aa1ad; --accent: #d9a441; --accent-contrast: #111;
+    --bg: #000000; --surface: #121212; --surface-2: #1c1c1c; --border: #2a2a2a;
+    --text: #f2f2f2; --muted: #9a9a9a; --accent: #ff2a2a; --accent-contrast: #fff;
     --danger: #e0655d; --ok: #4cb87c; --cee: #4cb87c; --energie: #5a93ec; --foncier: #d9a441; --perso: #a882e0; --kamifood: #3bb8c4;
     --shadow: none; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1115; --surface: #171a21; --surface-2: #1f232c; --border: #2a2f3a;
-  --text: #eceef2; --muted: #9aa1ad; --accent: #d9a441; --accent-contrast: #111;
+  --bg: #000000; --surface: #121212; --surface-2: #1c1c1c; --border: #2a2a2a;
+  --text: #f2f2f2; --muted: #9a9a9a; --accent: #ff2a2a; --accent-contrast: #fff;
   --danger: #e0655d; --ok: #4cb87c; --cee: #4cb87c; --energie: #5a93ec; --foncier: #d9a441; --perso: #a882e0; --kamifood: #3bb8c4;
   --shadow: none; color-scheme: dark;
 }
@@ -49,8 +49,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; padding: 4px 8px 22px; }
 .logo {
-  width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
-  background: var(--accent); color: var(--accent-contrast); font-size: 18px;
+  width: 34px; height: 34px; border-radius: 9px; display: block;
 }
 #nav { display: flex; flex-direction: column; gap: 2px; }
 #nav a {
