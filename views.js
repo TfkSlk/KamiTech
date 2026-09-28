@@ -54,7 +54,7 @@ function tipInit() {
 const tip = s => esc(s).replace(/\n/g, '<br>');
 
 /* ---------- Graphiques (SVG, couleurs par jetons de thème) ---------- */
-function donut(parts, fmt = eur) {
+function donut(parts, fmt = eur, sub = '') {
   const vis = parts.filter(p => p.value > 0);
   const sum = vis.reduce((s, p) => s + p.value, 0);
   if (!sum) return '<div class="empty">Rien sur cette période.</div>';
@@ -71,10 +71,10 @@ function donut(parts, fmt = eur) {
   const principal = vis.reduce((m, p) => (p.value > m.value ? p : m), vis[0]);
   return `<div class="donut-wrap">
     <svg viewBox="0 0 200 200" class="donut" role="img" aria-label="Répartition par secteur">${arcs}
-      <text x="100" y="94" text-anchor="middle" class="donut-total">${esc(eurK(sum))}</text>
-      <text x="100" y="114" text-anchor="middle" class="donut-sub">${esc(SECTEURS[principal.k].label)} ${pct(principal.value, sum)} %</text>
+      <text x="100" y="${sub ? 96 : 106}" text-anchor="middle" class="donut-total">${esc(fmt === eur ? eurK(sum) : fmt(sum))}</text>
+      ${sub ? `<text x="100" y="116" text-anchor="middle" class="donut-sub">${esc(sub)}</text>` : ''}
     </svg>
-    <ul class="legend-list">${parts.map(p => `<li class="${p.value ? '' : 'dim'}"><i style="background:var(--${p.k})"></i><span class="grow">${esc(p.label)}</span><b>${esc(fmt(p.value))}</b><span class="meta">${pct(p.value, sum)} %</span></li>`).join('')}</ul>
+    <ul class="legend-list">${parts.map(p => `<li class="${p.value ? '' : 'dim'} ${p === principal ? 'principal' : ''}"><i style="background:var(--${p.k})"></i><span class="grow">${esc(p.label)}</span><b>${esc(fmt(p.value))}</b><span class="meta">${pct(p.value, sum)} %</span></li>`).join('')}</ul>
   </div>`;
 }
 
@@ -89,7 +89,8 @@ function colonnes(data, opts = {}) {
   const max = Math.max(...totals, 0);
   if (!max) return `<div class="empty">${esc(opts.vide || 'Pas encore de données.')}</div>`;
   const step = opts.pas ? opts.pas(max) : pas(max), top = Math.ceil(max / step) * step;
-  const n = data.length, W = Math.max(60 + n * 56, opts.minW || 0), H = 190, pl = 54, pt = 18, pb = 26, ih = H - pt - pb;
+  const mobile = window.innerWidth < 760;
+  const n = data.length, W = Math.max(60 + n * 56, mobile ? 0 : (opts.minW || 0)), H = 190, pl = 54, pt = 18, pb = 26, ih = H - pt - pb;
   const slot = (W - pl - 10) / n;
   const y = v => pt + ih - (v / top) * ih;
   const ticks = []; for (let v = 0; v <= top + 1e-9; v += step) ticks.push(v);
@@ -169,36 +170,37 @@ function dashboard() {
   ${empty ? `<div class="card notice"><div><h2>Ton tableau de bord est vide</h2><p class="empty">Ajoute un abonné, un dossier ou un RDV, ou charge un exemple pour voir comment tout se calcule.</p></div><button class="btn" onclick="loadDemo()">Charger un exemple</button></div>` : ''}
   <div class="grid kpis">
     <div class="card kpi"><div class="label">Gagné · ${PERIODES[p].toLowerCase()}</div><div class="value">${esc(eur(b.tot.gagne))}</div><div class="sub">+ ${esc(eur(b.tot.prevu))} encore attendu</div></div>
-    <div class="card kpi"><div class="label">Gagné cette année</div><div class="value">${esc(eur(annee.tot.gagne))}</div><div class="sub spark-row">${sparkline(spark)}<span>6 derniers mois</span></div></div>
-    <div class="card kpi"><div class="label">KamiFood · récurrent mensuel</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${state.abonnes.filter(a => a.statut === 'actif').length} abonné(s) actif(s)</div></div>
-    <div class="card kpi"><div class="label">Temps planifié cette semaine</div><div class="value">${esc(hrs(semaine.tot.total + semaine.perso.total))}</div><div class="sub">${semaine.tot.rdv} RDV · ${esc(parHeure(annee.tot.gagne, annee.tot.total))} / h sur l'année</div></div>
+    <div class="card kpi"><div class="label">Gagné · année</div><div class="value">${esc(eur(annee.tot.gagne))}</div><div class="sub spark-row">${sparkline(spark)}<span>6 derniers mois</span></div></div>
+    <div class="card kpi"><div class="label">KamiFood · par mois</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${state.abonnes.filter(a => a.statut === 'actif').length} abonné(s) actif(s)</div></div>
+    <div class="card kpi"><div class="label">Planifié · semaine</div><div class="value">${esc(hrs(semaine.tot.total + semaine.perso.total))}</div><div class="sub">${semaine.tot.rdv} RDV · ${esc(hrs(semaine.tot.fait + semaine.perso.fait))} réalisées</div></div>
   </div>
   <div class="grid cols-2 charts-row">
     <div class="card">
       <div class="card-head"><div><h2>Gains par secteur</h2><p class="meta">Encaissé · ${PERIODES[p].toLowerCase()}</p></div>${periodeSwitch()}</div>
-      ${donut(donutParts)}
+      ${donut(donutParts, eur, `Encaissé · ${PERIODES[p].toLowerCase()}`)}
     </div>
     <div class="card">
       <div class="card-head"><div><h2>Charge de la semaine</h2><p class="meta">Heures planifiées par jour · ${esc(hrs(semaine.tot.total + semaine.perso.total))} au total</p></div><a class="link" href="#planning">Planning →</a></div>
       ${colonnes(charge, { fmt: hrs, fmtTick: v => v ? hrs(v) : '0', pas: pasTemps, vide: 'Aucun RDV cette semaine.', aria: 'Heures par jour' })}
     </div>
   </div>
-  <div class="grid cols-3">
-    <div class="card"><h2>Aujourd'hui</h2>${itemList(todayItems, false) || '<div class="empty">Rien de prévu aujourd\'hui.</div>'}</div>
-    <div class="card"><h2>En retard</h2>${itemList(retard, true) || '<div class="empty">Tout est à jour.</div>'}</div>
-    <div class="card"><h2>7 prochains jours</h2>${itemList(next7, true) || '<div class="empty">Aucun RDV planifié.</div>'}</div>
+  <div class="grid cols-2 agenda-row">
+    <div class="card"><div class="card-head"><div><h2>Aujourd'hui</h2><p class="meta">${retard.length ? `${retard.length} en retard à traiter d'abord` : (todayEv.length ? `${todayEv.length} RDV · ${esc(hrs(minJour))}` : 'Journée libre')}</p></div><a class="link" href="#planning">Planning →</a></div>
+      ${itemList([...retard.map(e => ({ ...e, retard: true })), ...todayItems], false) || '<div class="empty">Rien de prévu aujourd\'hui, et rien en retard.</div>'}</div>
+    <div class="card"><div class="card-head"><div><h2>7 prochains jours</h2><p class="meta">${next7.length} RDV · ${esc(hrs(next7.reduce((s, e) => s + num(e.duree), 0)))}</p></div></div>
+      ${itemList(next7, true) || '<div class="empty">Aucun RDV planifié.</div>'}</div>
   </div>
   <div class="grid cols-4 sect-row">${b.rows.map(r => `<a class="card act-card" style="--c:var(--${r.k})" href="#${r.k === 'kamifood' ? 'kamifood' : 'dossiers'}" onclick="filtre.activite='${r.k === 'kamifood' ? 'all' : r.k}'">
-      <div class="title"><span>${esc(SECTEURS[r.k].label)}</span></div>
+      <div class="title"><span>${esc(SECTEURS[r.k].label)}</span><span class="meta">${PERIODES[p].toLowerCase()}</span></div>
       <div class="big">${esc(eur(r.gagne))}</div>
-      <dl><dt>Encore attendu</dt><dd>${esc(eur(r.prevu))}</dd><dt>Temps passé</dt><dd>${esc(hrs(r.total))}</dd><dt>Gain par heure</dt><dd>${esc(parHeure(r.gagne, r.total))}</dd>
+      <dl><dt>Attendu</dt><dd>${esc(eur(r.prevu))}</dd><dt>Planifié</dt><dd>${esc(hrs(r.total))}</dd><dt>€ / heure</dt><dd>${esc(parHeure(r.gagne, r.total))}</dd>
       ${r.k === 'kamifood' ? `<dt>Abonnés actifs</dt><dd>${state.abonnes.filter(a => a.statut === 'actif').length}</dd>` : `<dt>Dossiers en cours</dt><dd>${state.dossiers.filter(d => d.activite === r.k && ACTIFS.includes(d.statut)).length}</dd>`}</dl>
     </a>`).join('')}</div>`;
 }
 
 /* ---------- Planning ---------- */
 let planDate = null; // initialisé au premier affichage (app.js est chargé après)
-const H0 = 7, H1 = 21, PH = 44; // heures affichées, hauteur d'une heure en px
+const H0 = 7, H1 = 21, PH = 52; // heures affichées, hauteur d'une heure en px
 const planVue = () => state.prefs.planVue || 'semaine';
 function setPlanVue(v) { state.prefs.planVue = v; save(); render(); }
 function planNav(n) {
@@ -245,6 +247,7 @@ function planning() {
 
 function vueSemaine(all, lundi) {
   const jours = [...Array(7)].map((_, i) => iso(addDays(lundi, i)));
+  const t = today();
   const sem = state.events.filter(e => e.date >= jours[0] && e.date <= jours[6]);
   const totalMin = sem.reduce((s, e) => s + num(e.duree), 0);
   const charge = Object.keys(SECTEURS).map(k => [k, sem.filter(e => e.activite === k).reduce((s, e) => s + num(e.duree), 0)]).filter(([, m]) => m);
@@ -253,7 +256,13 @@ function vueSemaine(all, lundi) {
     <div class="stack">${charge.map(([k, m]) => `<span style="flex:${m};background:var(--${k})" data-tip="${tip(`${SECTEURS[k].label} : ${hrs(m)}`)}"></span>`).join('') || '<span class="stack-empty"></span>'}</div>
     <div class="legend">${charge.map(([k, m]) => `<span><i style="background:var(--${k})"></i>${esc(SECTEURS[k].label)} ${esc(hrs(m))}</span>`).join('')}</div>
   </div>
-  ${grilleHeures(jours, all)}`;
+  ${window.innerWidth < 760 ? jours.map(ds => {
+    const items = all.filter(e => e.date === ds).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
+    const min = items.filter(e => !e.relance).reduce((s, e) => s + num(e.duree), 0);
+    return `<div class="card day-card ${ds === t ? 'today' : ''}">
+      <div class="card-head"><div><h2>${esc(cap(parse(ds).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' })))}</h2><p class="meta">${min ? esc(hrs(min)) : 'Libre'}</p></div><button class="btn small" onclick="openEvent(null,'${ds}')">+ RDV</button></div>
+      ${itemList(items, false) || ''}</div>`;
+  }).join('') : grilleHeures(jours, all)}`;
 }
 function vueJour(all, d) {
   const ds = iso(d);
@@ -304,20 +313,25 @@ function grilleHeures(jours, all) {
   }).join('');
   const cols = jours.map(ds => {
     const evs = all.filter(e => e.date === ds && e.heure && !e.relance).map(e => ({ e, s: minutesDe(e.heure), f: minutesDe(e.heure) + Math.max(15, num(e.duree) || 30) })).sort((a, c) => a.s - c.s);
-    // voies : deux RDV qui se chevauchent se partagent la largeur
-    const lanes = [];
-    evs.forEach(x => { let i = lanes.findIndex(l => l.every(y => y.f <= x.s || y.s >= x.f)); if (i < 0) { i = lanes.length; lanes.push([]); } lanes[i].push(x); x.lane = i; });
-    const nb = Math.max(1, lanes.length);
-    const blocs = evs.map(({ e, s, f, lane }) => {
-      const top = ((s - H0 * 60) / 60) * PH, h = Math.max(22, ((f - s) / 60) * PH - 2);
+    // voies : seuls les RDV qui se chevauchent réellement se partagent la largeur (par groupe)
+    let groupe = [], fin = -1; const groupes = [];
+    evs.forEach(x => { if (groupe.length && x.s >= fin) { groupes.push(groupe); groupe = []; fin = -1; } groupe.push(x); fin = Math.max(fin, x.f); });
+    if (groupe.length) groupes.push(groupe);
+    groupes.forEach(g => {
+      const lanes = [];
+      g.forEach(x => { let i = lanes.findIndex(l => l.every(y => y.f <= x.s || y.s >= x.f)); if (i < 0) { i = lanes.length; lanes.push([]); } lanes[i].push(x); x.lane = i; });
+      g.forEach(x => { x.nb = lanes.length; });
+    });
+    const blocs = evs.map(({ e, s, f, lane, nb }) => {
+      const top = ((s - H0 * 60) / 60) * PH, h = Math.max(24, ((f - s) / 60) * PH - 2);
       const client = lienNom(e.lien);
-      return `<div class="tev ${e.fait ? 'done' : ''} ${h < 38 ? 'court' : ''}" style="--c:var(--${e.activite});top:${top}px;height:${h}px;left:calc(${(lane / nb) * 100}% + 2px);width:calc(${100 / nb}% - 4px)" onclick="${ouvrir(e)}" data-tip="${tip(`${e.heure} · ${e.titre}\n${MODES[e.mode] || ''} · ${hrs(num(e.duree))}${client ? '\n' + client : ''}`)}">
-        <b>${esc(e.heure)}</b> ${esc(e.titre)}${client && h > 40 ? `<small>${esc(client)}</small>` : ''}</div>`;
+      return `<div class="tev ${e.fait ? 'done' : ''} ${h < 44 ? 'court' : (nb > 1 ? 'etroit' : '')}" style="--c:var(--${e.activite});top:${top}px;height:${h}px;left:calc(${(lane / nb) * 100}% + 2px);width:calc(${100 / nb}% - 4px)" onclick="${ouvrir(e)}" data-tip="${tip(`${e.heure} · ${e.titre}\n${MODES[e.mode] || ''} · ${hrs(num(e.duree))}${client ? '\n' + client : ''}`)}">
+        <b>${esc(e.heure)}</b><span>${esc(e.titre)}</span>${client && h > 48 ? `<small>${esc(client)}</small>` : ''}</div>`;
     }).join('');
     const nowLine = ds === t && nowMin >= H0 * 60 && nowMin <= H1 * 60 ? `<div class="now" style="top:${((nowMin - H0 * 60) / 60) * PH}px"></div>` : '';
     return `<div class="tg-col ${ds === t ? 'today' : ''}" style="height:${(H1 - H0) * PH}px" onclick="if(event.target===this){openEvent(null,'${ds}',null,pad(Math.min(${H1 - 1},Math.floor(event.offsetY/${PH})+${H0}))+':00')}">${blocs}${nowLine}</div>`;
   }).join('');
-  return `<div class="card tgrid" style="--cols:${jours.length}">
+  return `<div class="card tgrid" style="--cols:${jours.length};--ph:${PH}px">
     <div class="tg-head"><div class="tg-corner"></div>${head}</div>
     <div class="tg-allday"><div class="tg-corner meta">Journée</div>${allday}</div>
     <div class="tg-body">
@@ -342,27 +356,32 @@ function gainsView() {
   <div class="grid kpis">
     <div class="card kpi"><div class="label">Gagné</div><div class="value">${esc(eur(b.tot.gagne))}</div><div class="sub">${PERIODES[p].toLowerCase()}</div></div>
     <div class="card kpi"><div class="label">Encore attendu</div><div class="value">${esc(eur(b.tot.prevu))}</div><div class="sub">commissions signées + abonnements</div></div>
-    <div class="card kpi"><div class="label">Temps pro</div><div class="value">${esc(hrs(b.tot.total))}</div><div class="sub">${b.tot.rdv} RDV · dont ${esc(hrs(b.tot.fait))} réalisé</div></div>
-    <div class="card kpi"><div class="label">Gain moyen par heure</div><div class="value">${esc(parHeure(b.tot.gagne, b.tot.total))}</div><div class="sub">tous secteurs</div></div>
+    <div class="card kpi"><div class="label">Temps planifié</div><div class="value">${esc(hrs(b.tot.total + b.perso.total))}</div><div class="sub">${esc(hrs(b.tot.total))} pro · ${esc(hrs(b.perso.total))} perso · ${esc(hrs(b.tot.fait))} réalisées</div></div>
+    <div class="card kpi"><div class="label">Gain par heure</div><div class="value">${esc(parHeure(b.tot.gagne, b.tot.total))}</div><div class="sub">sur ${esc(hrs(b.tot.total))} d'heures pro</div></div>
   </div>
   <div class="grid cols-2 charts-row">
-    <div class="card"><div class="card-head"><div><h2>Répartition des gains</h2><p class="meta">Encaissé · ${PERIODES[p].toLowerCase()}</p></div></div>${donut(donutParts)}</div>
-    <div class="card"><div class="card-head"><div><h2>Répartition du temps</h2><p class="meta">Heures planifiées · ${PERIODES[p].toLowerCase()}</p></div></div>${donut(tempsParts, hrs)}</div>
+    <div class="card"><div class="card-head"><div><h2>Répartition des gains</h2><p class="meta">Encaissé · ${PERIODES[p].toLowerCase()}</p></div></div>${donut(donutParts, eur, `Encaissé · ${PERIODES[p].toLowerCase()}`)}</div>
+    <div class="card"><div class="card-head"><div><h2>Répartition du temps</h2><p class="meta">Heures planifiées · ${PERIODES[p].toLowerCase()}, perso compris</p></div></div>${donut(tempsParts, hrs, 'Planifié, perso compris')}</div>
   </div>
   <div class="card chart-card">
     <div class="card-head"><div><h2>Gains par mois</h2><p class="meta">Encaissé sur les 6 derniers mois, par secteur</p></div></div>
     ${colonnes(mois, { fmt: eur, fmtTick: eurTick, minW: 760, vide: 'Aucun encaissement sur les 6 derniers mois.', aria: 'Gains par mois' })}
   </div>
-  <div class="card table-wrap">
+  <div class="card sect-rows only-sm">
+    ${b.rows.map(r => `<div class="sect-row"><div class="sr-head">${tag(r.k)}<b>${esc(eur(r.gagne))}</b></div><div class="meta">${esc(eur(r.prevu))} attendu · ${esc(hrs(r.total))} · ${r.rdv} RDV · ${esc(parHeure(r.gagne, r.total))} / h</div></div>`).join('')}
+    <div class="sect-row"><div class="sr-head">${tag('perso')}<b>—</b></div><div class="meta">${esc(hrs(b.perso.total))} · ${b.perso.rdv} RDV</div></div>
+    <div class="sect-row total"><div class="sr-head"><span>Ensemble pro</span><b>${esc(eur(b.tot.gagne))}</b></div><div class="meta">${esc(eur(b.tot.prevu))} attendu · ${esc(hrs(b.tot.total))} · ${b.tot.rdv} RDV · ${esc(parHeure(b.tot.gagne, b.tot.total))} / h</div></div>
+  </div>
+  <div class="card table-wrap hide-sm">
     <table>
-      <thead><tr><th>Secteur</th><th class="num">Gagné</th><th class="num">Attendu</th><th class="num">Temps</th><th class="num">RDV</th><th class="num">€ / heure</th></tr></thead>
+      <thead><tr><th>Secteur</th><th class="num">Gagné</th><th class="num">Attendu</th><th class="num">Temps planifié</th><th class="num">RDV</th><th class="num">€ / heure</th></tr></thead>
       <tbody>${b.rows.map(r => `<tr>
         <td>${tag(r.k)}</td><td class="num"><strong>${esc(eur(r.gagne))}</strong></td><td class="num">${esc(eur(r.prevu))}</td>
         <td class="num">${esc(hrs(r.total))}</td><td class="num">${r.rdv}</td><td class="num">${esc(parHeure(r.gagne, r.total))}</td></tr>`).join('')}
       <tr class="muted-row"><td>${tag('perso')}</td><td class="num">—</td><td class="num">—</td><td class="num">${esc(hrs(b.perso.total))}</td><td class="num">${b.perso.rdv}</td><td class="num">—</td></tr>
       </tbody>
-      <tfoot><tr><td>Ensemble</td><td class="num">${esc(eur(b.tot.gagne))}</td><td class="num">${esc(eur(b.tot.prevu))}</td><td class="num">${esc(hrs(b.tot.total))}</td><td class="num">${b.tot.rdv}</td><td class="num">${esc(parHeure(b.tot.gagne, b.tot.total))}</td></tr></tfoot>
+      <tfoot><tr><td>Ensemble pro <span class="meta">(hors perso)</span></td><td class="num">${esc(eur(b.tot.gagne))}</td><td class="num">${esc(eur(b.tot.prevu))}</td><td class="num">${esc(hrs(b.tot.total))}</td><td class="num">${b.tot.rdv}</td><td class="num">${esc(parHeure(b.tot.gagne, b.tot.total))}</td></tr></tfoot>
     </table>
   </div>
-  <p class="note">Le temps compte la durée de chaque RDV et tâche du planning. KamiFood compte un mois d'abonnement par mois actif (hors période d'essai). L'apport d'affaires compte les commissions reçues à leur date de paiement.</p>`;
+  <p class="note">Le temps est le temps planifié : la durée de chaque RDV et tâche du planning sur la période, RDV à venir compris. Le total « pro » exclut Perso / Groupe. KamiFood compte un mois d'abonnement par mois actif (hors période d'essai). L'apport d'affaires compte les commissions reçues à leur date de paiement.</p>`;
 }

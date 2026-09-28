@@ -204,20 +204,21 @@ function itemList(items, showDate) {
   if (!items.length) return '';
   const t = today();
   return `<ul class="list">${items.map(e => {
-    const when = showDate ? fmtDate(e.date) + (e.heure ? ' ' + e.heure : '') : (e.heure || '—');
+    const late = e.date < t && !e.fait;
+    const when = showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.relance ? 'Relance' : 'Dans la journée'));
     const click = e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
     const client = lienNom(e.lien);
-    const meta = e.relance ? '' : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
-    return `<li class="${e.fait ? 'done' : ''}">
+    const meta = e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
+    return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''}">
       ${e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
-      <span class="when ${e.date < t && !e.fait ? 'late' : ''}">${esc(when)}</span>
-      <div class="grow clickable" onclick="${click}"><div class="title-txt">${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}</div>
+      <div class="grow clickable" onclick="${click}">
+        <div class="when ${late ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
+        <div class="title-txt">${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
+      </div>
       <i class="dot" style="background:var(--${e.activite})" data-tip="${esc(SECTEURS[e.activite]?.label || '')}" aria-label="${esc(SECTEURS[e.activite]?.label || '')}"></i>
     </li>`;
   }).join('')}</ul>`;
 }
-
-/* ---------- Planning ---------- */
 
 /* ---------- KamiFood ---------- */
 function kamifood() {
