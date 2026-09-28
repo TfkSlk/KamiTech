@@ -55,7 +55,7 @@ function load() {
   return migrate(s);
 }
 function migrate(s) {
-  s.prefs = { periode: 'mois', ...(s.prefs || {}) };
+  s.prefs = { periode: 'mois', theme: 'light', planVue: 'semaine', ...(s.prefs || {}) };
   s.abonnes = s.abonnes || [];
   s.memoire = s.memoire || [];
   s.events.forEach(e => {
@@ -182,96 +182,23 @@ function relances() {
 
 /* ---------- Routage ---------- */
 const views = { dashboard, planning, kamifood, dossiers, gains: gainsView, jarvis: jarvisView, parametres };
-let weekStart = monday(new Date());
 let filtre = { activite: 'all', statut: 'actifs', q: '' };
 let planFiltre = 'all';
 
 function render() {
+  document.documentElement.dataset.theme = state.prefs.theme === 'dark' ? 'dark' : 'light';
   const view = views[location.hash.slice(1)] ? location.hash.slice(1) : 'dashboard';
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
   $('#brand-name').textContent = state.nom;
   document.title = state.nom;
-  const nj = document.querySelector('#nav a[data-view="jarvis"]'); if (nj) nj.lastChild.textContent = jarvis.nom || 'Kami';
+  const nj = document.querySelector('#nav a[data-view="jarvis"]'); if (nj) nj.querySelector('span').textContent = jarvis.nom || 'Kami';
   $('#main').innerHTML = views[view]();
 }
 window.addEventListener('hashchange', render);
 
-function periodeSwitch() {
-  return `<div class="seg" role="group" aria-label="Période">${Object.entries(PERIODES).map(([k, l]) =>
-    `<button class="${state.prefs.periode === k ? 'on' : ''}" onclick="state.prefs.periode='${k}';save();render()">${l}</button>`).join('')}</div>`;
-}
 
 /* ---------- Tableau de bord ---------- */
-function dashboard() {
-  const t = today();
-  const p = state.prefs.periode;
-  const b = bilan(p);
-  const annee = bilan('annee');
-  const semaine = bilan('semaine');
-  const maxG = Math.max(1, ...b.rows.map(r => r.gagne + r.prevu));
 
-  const todayItems = [...state.events.filter(e => e.date === t), ...relances().filter(r => r.date === t)]
-    .sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-  const retard = [...relances().filter(r => r.date < t), ...state.events.filter(e => e.date < t && !e.fait)]
-    .sort((a, c) => a.date.localeCompare(c.date));
-  const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7)))
-    .sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
-  const empty = !state.dossiers.length && !state.events.length && !state.abonnes.length;
-
-  const secteurCards = b.rows.map(r => {
-    const extra = r.k === 'kamifood'
-      ? `<dt>Abonnés actifs</dt><dd>${state.abonnes.filter(a => a.statut === 'actif').length}</dd>`
-      : `<dt>Dossiers en cours</dt><dd>${state.dossiers.filter(d => d.activite === r.k && ACTIFS.includes(d.statut)).length}</dd>`;
-    return `<div class="card act-card" style="--c:var(--${r.k})">
-      <div class="title"><span>${SECTEURS[r.k].label}</span><a class="link" href="#${r.k === 'kamifood' ? 'kamifood' : 'dossiers'}" onclick="filtre.activite='${r.k === 'kamifood' ? 'all' : r.k}'">Voir</a></div>
-      <div class="big">${eur(r.gagne)}</div>
-      <div class="bar"><span style="width:${(r.gagne / maxG) * 100}%"></span><span class="ghost" style="width:${(r.prevu / maxG) * 100}%"></span></div>
-      <dl>
-        <dt>Encore attendu</dt><dd>${eur(r.prevu)}</dd>
-        <dt>Temps passé</dt><dd>${hrs(r.total)}</dd>
-        <dt>Gain par heure</dt><dd>${parHeure(r.gagne, r.total)}</dd>
-        ${extra}
-      </dl>
-    </div>`;
-  }).join('');
-
-  return `
-  <div class="page-head">
-    <div><h1>Bonjour</h1><p style="text-transform:capitalize">${fmtLong(new Date())}</p></div>
-    <div class="btn-row">
-      <button class="btn" onclick="openEvent()">+ RDV / tâche</button>
-      <button class="btn" onclick="openAbonne()">+ Abonné KamiFood</button>
-      <button class="btn primary" onclick="openDossier()">+ Dossier apport</button>
-    </div>
-  </div>
-  ${empty ? `<div class="card notice">
-    <div><h2>Ton tableau de bord est vide</h2><p class="empty">Ajoute un abonné, un dossier ou un RDV, ou charge un exemple pour voir comment tout se calcule.</p></div>
-    <button class="btn" onclick="loadDemo()">Charger un exemple</button></div>` : ''}
-  <div class="grid kpis">
-    <div class="card kpi"><div class="label">Gagné · ${PERIODES[p].toLowerCase()}</div><div class="value">${eur(b.tot.gagne)}</div><div class="sub">+ ${eur(b.tot.prevu)} encore attendu</div></div>
-    <div class="card kpi"><div class="label">Gagné cette année</div><div class="value">${eur(annee.tot.gagne)}</div><div class="sub">tous secteurs</div></div>
-    <div class="card kpi"><div class="label">KamiFood · récurrent mensuel</div><div class="value">${eur(mrr())}</div><div class="sub">${state.abonnes.filter(a => a.statut === 'actif').length} abonné(s) actif(s)</div></div>
-    <div class="card kpi"><div class="label">Temps planifié cette semaine</div><div class="value">${hrs(semaine.tot.total + semaine.perso.total)}</div><div class="sub">${semaine.tot.rdv} RDV · ${parHeure(annee.tot.gagne, annee.tot.total)} / h sur l'année</div></div>
-  </div>
-  <div class="section-head"><h2>Par secteur</h2>${periodeSwitch()}</div>
-  <div class="grid cols-4">${secteurCards}</div>
-  <div class="grid cols-2">
-    <div class="card"><h2>Aujourd'hui</h2>${itemList(todayItems, false) || '<div class="empty">Rien de prévu aujourd\'hui.</div>'}</div>
-    <div class="card"><h2>En retard</h2>${itemList(retard, true) || '<div class="empty">Tout est à jour.</div>'}</div>
-    <div class="card"><h2>7 prochains jours</h2>${itemList(next7, true) || '<div class="empty">Aucun RDV planifié.</div>'}</div>
-    <div class="card"><h2>Temps par secteur · cette semaine</h2>${chargeBars(semaine)}</div>
-  </div>`;
-}
-
-function chargeBars(b) {
-  const rows = [...b.rows.map(r => ({ k: r.k, total: r.total })), { k: 'perso', total: b.perso.total }];
-  const max = Math.max(1, ...rows.map(r => r.total));
-  if (!rows.some(r => r.total)) return '<div class="empty">Aucun RDV cette semaine.</div>';
-  return `<ul class="list bars">${rows.map(r => `<li>
-    <span class="bar-label">${esc(SECTEURS[r.k].label)}</span>
-    <span class="bar grow"><span style="width:${(r.total / max) * 100}%;background:var(--${r.k})"></span></span>
-    <span class="when">${r.total ? hrs(r.total) : '—'}</span></li>`).join('')}</ul>`;
-}
 
 function itemList(items, showDate) {
   if (!items.length) return '';
@@ -285,59 +212,12 @@ function itemList(items, showDate) {
       ${e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
       <span class="when ${e.date < t && !e.fait ? 'late' : ''}">${esc(when)}</span>
       <div class="grow clickable" onclick="${click}"><div class="title-txt">${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}</div>
-      ${tag(e.activite)}
+      <i class="dot" style="background:var(--${e.activite})" data-tip="${esc(SECTEURS[e.activite]?.label || '')}" aria-label="${esc(SECTEURS[e.activite]?.label || '')}"></i>
     </li>`;
   }).join('')}</ul>`;
 }
 
 /* ---------- Planning ---------- */
-function planning() {
-  const t = today();
-  const end = addDays(weekStart, 6);
-  const [from, to] = [iso(weekStart), iso(end)];
-  const all = [...state.events, ...relances()].filter(e => planFiltre === 'all' || e.activite === planFiltre);
-  const label = `${weekStart.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} – ${end.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}`;
-  const semaine = state.events.filter(e => e.date >= from && e.date <= to);
-  const charge = Object.keys(SECTEURS).map(k => [k, semaine.filter(e => e.activite === k).reduce((s, e) => s + num(e.duree), 0)]).filter(([, m]) => m);
-  const totalMin = charge.reduce((s, [, m]) => s + m, 0);
-
-  const days = [...Array(7)].map((_, i) => {
-    const d = addDays(weekStart, i), ds = iso(d);
-    const evs = all.filter(e => e.date === ds).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-    const dayMin = evs.filter(e => !e.relance).reduce((s, e) => s + num(e.duree), 0);
-    return `<div class="day ${ds === t ? 'today' : ''}">
-      <div class="day-head"><span>${d.toLocaleDateString('fr-FR', { weekday: 'long' })}</span><b>${d.getDate()}</b></div>
-      ${dayMin ? `<div class="day-load">${hrs(dayMin)}</div>` : ''}
-      ${evs.map(e => `<div class="ev ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''}" style="--c:var(--${e.activite})"
-          onclick="${e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`}">
-        <div class="t">${[e.heure, e.relance ? 'Relance' : MODES[e.mode], e.relance ? '' : hrs(num(e.duree))].filter(Boolean).map(esc).join(' · ')}</div>
-        ${esc(e.titre)}${lienNom(e.lien) && !e.relance ? `<div class="t">${esc(lienNom(e.lien))}</div>` : ''}</div>`).join('')}
-      <button class="add" onclick="openEvent(null,'${ds}')">+ Ajouter</button>
-    </div>`;
-  }).join('');
-
-  const chips = [['all', 'Tout'], ...Object.entries(SECTEURS).map(([k, s]) => [k, s.label])]
-    .map(([k, l]) => `<button class="chip ${planFiltre === k ? 'on' : ''}" onclick="planFiltre='${k}';render()">${l}</button>`).join('');
-
-  return `
-  <div class="page-head">
-    <div><h1>Planning</h1><p>Tous tes RDV : KamiFood, apport d'affaires et perso</p></div>
-    <div class="week-nav">
-      <button class="btn" onclick="shiftWeek(-7)" aria-label="Semaine précédente">‹</button>
-      <strong>${label}</strong>
-      <button class="btn" onclick="shiftWeek(7)" aria-label="Semaine suivante">›</button>
-      <button class="btn" onclick="shiftWeek(0)">Aujourd'hui</button>
-    </div>
-  </div>
-  <div class="card load-card">
-    <div class="load-head"><strong>Charge de la semaine : ${hrs(totalMin)}</strong><span class="meta">${semaine.filter(e => e.mode !== 'tache').length} RDV · ${semaine.filter(e => e.mode === 'visio').length} en visio</span></div>
-    <div class="stack">${charge.map(([k, m]) => `<span style="flex:${m};background:var(--${k})" title="${esc(SECTEURS[k].label)} : ${hrs(m)}"></span>`).join('') || '<span class="stack-empty"></span>'}</div>
-    <div class="legend">${charge.map(([k, m]) => `<span><i style="background:var(--${k})"></i>${esc(SECTEURS[k].label)} ${hrs(m)}</span>`).join('')}</div>
-  </div>
-  <div class="toolbar">${chips}</div>
-  <div class="week">${days}</div>`;
-}
-function shiftWeek(n) { weekStart = n ? addDays(weekStart, n) : monday(new Date()); render(); }
 
 /* ---------- KamiFood ---------- */
 function kamifood() {
@@ -450,46 +330,20 @@ function marquerPaye(id) {
 }
 
 /* ---------- Gains et temps ---------- */
-function gainsView() {
-  const p = state.prefs.periode;
-  const b = bilan(p);
-  const max = Math.max(1, ...b.rows.map(r => r.gagne));
-  return `
-  <div class="page-head">
-    <div><h1>Gains et temps</h1><p>Ce que tu gagnes par secteur, et ce que ça te coûte en heures</p></div>
-    ${periodeSwitch()}
-  </div>
-  <div class="grid kpis">
-    <div class="card kpi"><div class="label">Gagné</div><div class="value">${eur(b.tot.gagne)}</div><div class="sub">${PERIODES[p].toLowerCase()}</div></div>
-    <div class="card kpi"><div class="label">Encore attendu</div><div class="value">${eur(b.tot.prevu)}</div><div class="sub">commissions signées + abonnements</div></div>
-    <div class="card kpi"><div class="label">Temps pro</div><div class="value">${hrs(b.tot.total)}</div><div class="sub">${b.tot.rdv} RDV · dont ${hrs(b.tot.fait)} réalisé</div></div>
-    <div class="card kpi"><div class="label">Gain moyen par heure</div><div class="value">${parHeure(b.tot.gagne, b.tot.total)}</div><div class="sub">tous secteurs</div></div>
-  </div>
-  <div class="card table-wrap">
-    <table>
-      <thead><tr><th>Secteur</th><th class="num">Gagné</th><th class="hide-sm"></th><th class="num">Attendu</th><th class="num">Temps</th><th class="num">RDV</th><th class="num">€ / heure</th></tr></thead>
-      <tbody>${b.rows.map(r => `<tr>
-        <td>${tag(r.k)}</td>
-        <td class="num"><strong>${eur(r.gagne)}</strong></td>
-        <td class="hide-sm" style="width:30%"><span class="bar"><span style="width:${(r.gagne / max) * 100}%;background:var(--${r.k})"></span></span></td>
-        <td class="num">${eur(r.prevu)}</td>
-        <td class="num">${hrs(r.total)}</td>
-        <td class="num">${r.rdv}</td>
-        <td class="num">${parHeure(r.gagne, r.total)}</td>
-      </tr>`).join('')}
-      <tr class="muted-row"><td>${tag('perso')}</td><td class="num">—</td><td class="hide-sm"></td><td class="num">—</td><td class="num">${hrs(b.perso.total)}</td><td class="num">${b.perso.rdv}</td><td class="num">—</td></tr>
-      </tbody>
-      <tfoot><tr><td>Ensemble</td><td class="num">${eur(b.tot.gagne)}</td><td class="hide-sm"></td><td class="num">${eur(b.tot.prevu)}</td><td class="num">${hrs(b.tot.total)}</td><td class="num">${b.tot.rdv}</td><td class="num">${parHeure(b.tot.gagne, b.tot.total)}</td></tr></tfoot>
-    </table>
-  </div>
-  <p class="note">Le temps compte la durée de chaque RDV et tâche du planning sur la période. KamiFood compte un mois d'abonnement par mois actif (hors période d'essai). L'apport d'affaires compte les commissions reçues à leur date de paiement.</p>`;
-}
 
 /* ---------- Paramètres ---------- */
 function parametres() {
   return `
   <div class="page-head"><div><h1>Paramètres</h1><p>Nom, formules KamiFood, RDV inclus et sauvegarde</p></div></div>
   <div class="settings">
+    <div class="card">
+      <h2>Apparence</h2>
+      <p>Clair par défaut. Le mode sombre reste disponible.</p>
+      <div class="theme-pick">
+        <button class="${state.prefs.theme !== 'dark' ? 'on' : ''}" onclick="state.prefs.theme='light';save();render()"><i style="background:#f3f4f7"></i>Clair</button>
+        <button class="${state.prefs.theme === 'dark' ? 'on' : ''}" onclick="state.prefs.theme='dark';save();render()"><i style="background:#191c23"></i>Sombre</button>
+      </div>
+    </div>
     <div class="card">
       <h2>Nom affiché</h2>
       <div class="toolbar" style="margin:0"><input type="text" id="nom" value="${esc(state.nom)}" style="max-width:320px">
@@ -707,9 +561,9 @@ async function supprimerDossier(id) {
 }
 
 const secteurDe = l => l ? (l[0] === 'a' ? 'kamifood' : dossier(l.slice(2))?.activite) : null;
-function openEvent(id, date, lien) {
+function openEvent(id, date, lien, heure) {
   const e = id ? state.events.find(x => x.id === id)
-    : { date: date || today(), heure: '', duree: 60, mode: 'visio', activite: secteurDe(lien) || (planFiltre !== 'all' ? planFiltre : 'perso'), lien: lien || '', titre: lien ? `RDV ${lienNom(lien)}` : '' };
+    : { date: date || today(), heure: heure || '', duree: 60, mode: 'visio', activite: secteurDe(lien) || (planFiltre !== 'all' ? planFiltre : 'perso'), lien: lien || '', titre: lien ? `RDV ${lienNom(lien)}` : '' };
   const opts = {
     '': '— Aucun —',
     ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),

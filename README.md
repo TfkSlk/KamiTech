@@ -9,11 +9,11 @@ Tableau de bord personnel pour piloter toutes les activités du groupe :
 
 ## Fonctionnalités
 
-- **Tableau de bord** : dossiers actifs, commissions potentielles / à encaisser / encaissées, vue par activité, tâches du jour et en retard.
-- **Planning** : semaine en cours, RDV et tâches, relances de dossiers affichées automatiquement.
+- **Accueil** : gains de la période, tendance sur 6 mois, camembert par secteur, charge de la semaine, agenda du jour, retards, 7 prochains jours.
+- **Planning** : vues Jour / Semaine / Mois, grille horaire (clic sur un créneau pour ajouter), charge par jour et par secteur, relances affichées automatiquement.
 - **Apport** : suivi des prospects et clients (Prospect → RDV → Étude → Signé → Payé / Perdu), filtres et recherche.
 - **KamiFood** : abonnés, formules, revenu récurrent mensuel, RDV inclus planifiés automatiquement.
-- **Gains et temps** : gagné / attendu / heures / € par heure, par secteur et au total (semaine, mois, année).
+- **Gains et temps** : répartition des gains et du temps (camemberts), gains par mois sur 6 mois, tableau par secteur avec € par heure.
 - **Jarvis** : le cerveau (Claude) qui connaît tes données, parle français, ajoute/modifie RDV, dossiers, abonnés, mémorise, et répond à la voix (mot d'activation configurable, « Jarvis » ou « Kami »).
 - **Réglages** : nom, formules KamiFood, RDV inclus, export / import de sauvegarde.
 
