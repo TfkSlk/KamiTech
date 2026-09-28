@@ -13,6 +13,7 @@
   --energie: #2b6cd4;
   --foncier: #b8862b;
   --perso: #8a5cc7;
+  --kamifood: #0e7c86;
   --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
   --radius: 12px;
   color-scheme: light;
@@ -21,14 +22,14 @@
   :root:not([data-theme="light"]) {
     --bg: #0f1115; --surface: #171a21; --surface-2: #1f232c; --border: #2a2f3a;
     --text: #eceef2; --muted: #9aa1ad; --accent: #d9a441; --accent-contrast: #111;
-    --danger: #e0655d; --ok: #4cb87c; --cee: #4cb87c; --energie: #5a93ec; --foncier: #d9a441; --perso: #a882e0;
+    --danger: #e0655d; --ok: #4cb87c; --cee: #4cb87c; --energie: #5a93ec; --foncier: #d9a441; --perso: #a882e0; --kamifood: #3bb8c4;
     --shadow: none; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f1115; --surface: #171a21; --surface-2: #1f232c; --border: #2a2f3a;
   --text: #eceef2; --muted: #9aa1ad; --accent: #d9a441; --accent-contrast: #111;
-  --danger: #e0655d; --ok: #4cb87c; --cee: #4cb87c; --energie: #5a93ec; --foncier: #d9a441; --perso: #a882e0;
+  --danger: #e0655d; --ok: #4cb87c; --cee: #4cb87c; --energie: #5a93ec; --foncier: #d9a441; --perso: #a882e0; --kamifood: #3bb8c4;
   --shadow: none; color-scheme: dark;
 }
 
@@ -211,3 +212,48 @@ dialog::backdrop { background: rgba(10,12,16,.5); }
 .confirm-box { padding: 20px; }
 .confirm-box p { margin: 0 0 18px; font-weight: 500; }
 #confirm { width: min(400px, calc(100vw - 24px)); }
+
+/* v2 : KamiFood, gains et temps */
+.cols-4 { grid-template-columns: repeat(4, 1fr); margin-bottom: 16px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 24px 0 12px; }
+.section-head h2 { margin: 0; }
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 2px; }
+.seg button { border: 0; background: none; padding: 5px 12px; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); }
+.seg button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow), 0 0 0 1px var(--border); }
+.act-card .big { font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.act-card .bar { margin: 8px 0 12px; }
+.link { color: var(--muted); font-size: 13px; font-weight: 500; text-decoration: none; }
+.link:hover { color: var(--accent); }
+.bar { display: flex; height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--c, var(--accent)); }
+.bar > span.ghost { opacity: .3; }
+.bars li { gap: 12px; }
+.bar-label { width: 110px; font-size: 13px; flex: none; }
+.notice { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.notice h2 { margin: 0 0 2px; }
+.load-card { margin-bottom: 16px; display: grid; gap: 10px; }
+.load-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.meta { color: var(--muted); font-size: 13px; }
+.stack { display: flex; height: 10px; border-radius: 99px; overflow: hidden; background: var(--surface-2); gap: 2px; }
+.stack span { display: block; }
+.stack-empty { flex: 1; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+.day-load { font-size: 12px; color: var(--muted); margin-top: -4px; }
+.rows { display: grid; gap: 8px; margin-bottom: 12px; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.row input, .row select { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 7px 9px; min-width: 0; flex: 1 1 180px; }
+.row input.short { flex: 0 1 110px; }
+.row input.tiny { flex: 0 1 72px; }
+.row select { flex: 0 1 130px; }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; background: var(--surface-2); padding: 10px 12px; border-radius: 8px; }
+.note { color: var(--muted); font-size: 13px; max-width: 70ch; margin-top: 12px; }
+.muted-row td { color: var(--muted); }
+td.late { color: var(--danger); font-weight: 600; }
+.relance-ico { width: 18px; text-align: center; color: var(--muted); flex: none; }
+@media (max-width: 1100px) { .cols-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px) {
+  .cols-4 { grid-template-columns: 1fr; }
+  #nav a { font-size: 10px; padding: 6px 2px; }
+  .seg button { padding: 5px 9px; }
+}
