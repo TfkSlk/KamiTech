@@ -1,11 +1,11 @@
-# Kami Groupe — Tableau de bord
+# Kami Groupe — Tableau de bord (KGD)
 
 Tableau de bord personnel pour piloter toutes les activités du groupe :
 
 - **KamiFood** — abonnements des restaurants et RDV inclus dans la souscription
 - **CEE** — certificats d'économie d'énergie
-- **Énergie** — fournisseurs d'énergie pour les pros
-- **Taxe foncière** — récupération pour les professionnels
+- **Énergie** — négociation des fournitures énergétiques pour les pros
+- **Foncier & CFE** — récupération de taxe foncière et de CFE pour les professionnels
 
 ## Fonctionnalités
 

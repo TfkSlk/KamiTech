@@ -4,8 +4,8 @@
 const SECTEURS = {
   kamifood: { label: 'KamiFood',      long: 'KamiFood — abonnements restaurants' },
   cee:      { label: 'CEE',           long: "Certificats d'économie d'énergie" },
-  energie:  { label: 'Énergie',       long: "Fournisseurs d'énergie" },
-  foncier:  { label: 'Taxe foncière', long: 'Récupération de taxe foncière' },
+  energie:  { label: 'Énergie',       long: 'Négociation des fournitures énergétiques' },
+  foncier:  { label: 'Foncier & CFE', long: 'Taxe foncière et CFE' },
   perso:    { label: 'Perso / Groupe', long: 'Perso / Groupe' },
 };
 const APPORT = ['cee', 'energie', 'foncier'];
