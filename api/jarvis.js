@@ -26,7 +26,7 @@ const PERSONA = `Tu es Jarvis, l'assistant personnel de Toufek, fondateur de Kam
 
 # Les activités du groupe
 - KamiFood : logiciel (SaaS) pour restaurants. Les restaurants s'abonnent à une formule mensuelle (Essentiel 79 €, Pro 149 €, Premium 249 € HT par site ; tarif fondateur Pro 99 €). La souscription inclut des RDV : création de l'espace, installation sur site (tablette, sondes de température, étiquettes), formation de l'équipe, activation (bot Telegram, premier récap), points de suivi.
-- Apport d'affaires pour les professionnels, trois secteurs : CEE (certificats d'économie d'énergie), fournisseurs d'énergie, récupération de taxe foncière. Toufek touche des commissions des partenaires (délégataires, fournisseurs, cabinets). Un dossier suit les statuts : prospect → RDV fixé → étude en cours → signé → payé (ou perdu).
+- Apport d'affaires pour les professionnels, trois secteurs : CEE (certificats d'économie d'énergie), négociation des fournitures énergétiques (électricité, gaz : mise en concurrence des fournisseurs, prix négociés, signature le jour de l'annonce), taxe foncière et CFE (récupération du trop-payé pour les professionnels). Toufek touche des commissions des partenaires (délégataires, fournisseurs, cabinets). Un dossier suit les statuts : prospect → RDV fixé → étude en cours → signé → payé (ou perdu).
 - Perso / Groupe : la holding, la compta, la vie de Toufek (il a un fils, il protège ses créneaux perso).
 
 # Les données que tu vois
@@ -82,7 +82,7 @@ export const TOOLS = [
   { name: 'ajouter_rdv', description: 'Ajoute un RDV ou une tâche au planning.', input_schema: obj(champsRdv, ['titre', 'date', 'activite']) },
   { name: 'modifier_rdv', description: 'Modifie un RDV existant (déplacer, renommer, marquer fait...). Ne passe que les champs qui changent.', input_schema: obj({ id: { type: 'string' }, ...champsRdv }, ['id']) },
   { name: 'supprimer_rdv', description: 'Supprime un RDV ou une tâche.', input_schema: obj({ id: { type: 'string' } }, ['id']) },
-  { name: 'ajouter_dossier', description: "Crée un dossier d'apport d'affaires (CEE, énergie, taxe foncière).", input_schema: obj(champsDossier, ['entreprise', 'activite']) },
+  { name: 'ajouter_dossier', description: "Crée un dossier d'apport d'affaires (CEE, négociation énergie, taxe foncière et CFE).", input_schema: obj(champsDossier, ['entreprise', 'activite']) },
   { name: 'modifier_dossier', description: 'Modifie un dossier (statut, commission, relance, notes...). Ne passe que les champs qui changent.', input_schema: obj({ id: { type: 'string' }, ...champsDossier }, ['id']) },
   { name: 'ajouter_abonne', description: 'Crée un abonné KamiFood (restaurant). Avec planifier_rdv_inclus=true, planifie aussi les RDV inclus dans la souscription à partir de la date de début.', input_schema: obj({ ...champsAbonne, planifier_rdv_inclus: { type: 'boolean' } }, ['restaurant']) },
   { name: 'modifier_abonne', description: 'Modifie un abonné KamiFood (formule, prix, statut, résiliation...).', input_schema: obj({ id: { type: 'string' }, ...champsAbonne }, ['id']) },
