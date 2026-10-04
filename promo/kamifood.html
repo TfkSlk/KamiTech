@@ -116,6 +116,13 @@ body.v .plans { flex-direction: column; align-items: center; }
 .url { margin-top: 26px; font-size: 32px; color: var(--gris); letter-spacing: .02em; }
 .url b { color: #fff; }
 
+/* écran de lancement (le son ne peut démarrer qu'après un clic) */
+.splash { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: #000; cursor: pointer; text-align: center; font-family: var(--head); }
+.splash-k { font-size: 120px; font-weight: 800; letter-spacing: -.04em; line-height: 1; }
+.splash-k span { color: var(--rouge); }
+.splash b { display: block; font-size: 36px; margin-top: 14px; }
+.splash p { color: var(--gris); font-family: var(--font); font-size: 18px; margin-top: 10px; }
+.splash.off { display: none; }
 /* barre de progression + commandes */
 .bar { position: absolute; left: 0; bottom: 0; height: 6px; background: var(--rouge); width: 0; }
 .ui { position: fixed; right: 16px; bottom: 16px; display: flex; gap: 8px; font-size: 13px; z-index: 9; }
@@ -227,7 +234,9 @@ body.v .plans { flex-direction: column; align-items: center; }
   <div class="bar"></div>
 </div>
 
+<div class="splash" id="splash" onclick="demarrer()"><div><div class="splash-k">K<span>神</span></div><b>KamiFood</b><p>Cliquer pour lancer avec le son</p></div></div>
 <div class="ui">
+  <button id="sndbtn" onclick="toggleSon()">🔊 Son</button>
   <button onclick="togglePause()">⏯ Pause</button>
   <button onclick="restart()">↺ Rejouer</button>
   <a href="?v=1">9:16</a><a href="?">16:9</a>
@@ -244,11 +253,12 @@ body.v .plans { flex-direction: column; align-items: center; }
   const T = 24000;
   const scenes = [...document.querySelectorAll('.scene')].map(el => ({ el, s: parseFloat(el.style.getPropertyValue('--s')) * 1000, e: parseFloat(el.style.getPropertyValue('--e')) * 1000 }));
   const bar = document.querySelector('.bar');
-  let start = performance.now(), paused = false, pausedAt = 0, current = null;
+  let start = null, paused = false, pausedAt = 0, current = null, son = true;
   function replay(el) { el.querySelectorAll('.up, .scale, .line, .paper').forEach(x => { x.style.animation = 'none'; x.offsetHeight; x.style.animation = ''; }); }
   function tick(now) {
-    if (!paused) {
+    if (start !== null && !paused) {
       const t = (now - start) % T;
+      if (current && t < current.s) { boucle(); }
       const sc = scenes.find(x => t >= x.s && t < x.e);
       if (sc && sc !== current) { if (current) current.el.classList.remove('on'); current = sc; sc.el.classList.add('on'); replay(sc.el); }
       bar.style.width = (t / T * 100) + '%';
@@ -256,8 +266,71 @@ body.v .plans { flex-direction: column; align-items: center; }
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
-  function togglePause() { paused = !paused; document.body.classList.toggle('paused', paused); if (paused) pausedAt = performance.now(); else start += performance.now() - pausedAt; }
-  function restart() { start = performance.now(); if (current) { current.el.classList.remove('on'); current = null; } paused = false; document.body.classList.remove('paused'); }
+
+  /* ---------- Son : voix off (mp3) + musique synthétisée ---------- */
+  // Voix off générée avec Higgsfield (Seed Audio, voix Elodie). Si un fichier promo/voix.mp3 existe à côté, il est utilisé en priorité.
+  const VOIX_DISTANTE = 'https://d8j0ntlcm91z4.cloudfront.net/user_3FSCALVvGfQhq2dux5ItS0z3T3W/hf_20261004_042313_688c8a25-29c3-4507-82b1-5d1859ece3d6.mp3';
+  let ctx, master, musicGain, voix, voixOk = false;
+  function audioInit() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = son ? 1 : 0; master.connect(ctx.destination);
+    musicGain = ctx.createGain(); musicGain.gain.value = 0.55; musicGain.connect(master);
+    // La voix est lue par un simple élément audio (pas de mixage : un fichier distant sans en-têtes CORS serait rendu muet).
+    voix = new Audio('voix.mp3'); voix.preload = 'auto'; voix.volume = 1;
+    voix.addEventListener('canplaythrough', () => { voixOk = true; }, { once: true });
+    voix.addEventListener('error', () => { if (voix.src.endsWith('voix.mp3')) { voix.src = VOIX_DISTANTE; voix.load(); } else voixOk = false; }, { once: false });
+  }
+  // Musique : nappe en La mineur (Am · F · C · G), pulsation douce, montée vers la fin. 24 s, calée sur la timeline.
+  function musique(t0) {
+    const bpm = 96, beat = 60 / bpm, bar = beat * 4;
+    const accords = [[220, 261.63, 329.63], [174.61, 220, 261.63], [130.81, 164.81, 196], [196, 246.94, 293.66]]; // Am F C G
+    const total = T / 1000;
+    // nappe
+    for (let b = 0; b * bar < total; b++) {
+      const chord = accords[b % 4], at = t0 + b * bar;
+      chord.forEach((f, i) => {
+        [1, 2].forEach(oct => {
+          const o = ctx.createOscillator(); o.type = i === 0 ? 'sawtooth' : 'triangle'; o.frequency.value = f * oct * (i === 0 && oct === 1 ? 0.5 : 1);
+          const g = ctx.createGain(); g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(oct === 1 ? 0.045 : 0.018, at + 0.6); g.gain.setValueAtTime(oct === 1 ? 0.045 : 0.018, at + bar - 0.5); g.gain.linearRampToValueAtTime(0, at + bar);
+          const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(600 + 1400 * Math.min(1, (b * bar) / total), at); lp.Q.value = 0.7;
+          o.connect(lp); lp.connect(g); g.connect(musicGain); o.start(at); o.stop(at + bar + 0.1);
+        });
+      });
+    }
+    // pulsation (kick feutré) à partir de la scène 3, plus présente sur la fin
+    for (let n = 0; n * beat < total; n++) {
+      const at = t0 + n * beat; if (at - t0 < 7) continue;
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(130, at); o.frequency.exponentialRampToValueAtTime(42, at + 0.14);
+      const g = ctx.createGain(); const v = (at - t0) > 17 ? 0.5 : 0.32; g.gain.setValueAtTime(v, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.28);
+      o.connect(g); g.connect(musicGain); o.start(at); o.stop(at + 0.3);
+      if (n % 2 === 1 && (at - t0) > 13) { // charley discret sur les contretemps
+        const len = 0.05, buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate), d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+        const sN = ctx.createBufferSource(); sN.buffer = buf; const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+        const gN = ctx.createGain(); gN.gain.value = 0.07; sN.connect(hp); hp.connect(gN); gN.connect(musicGain); sN.start(at + beat / 2);
+      }
+    }
+    // accent final : cymbale inversée vers la scène 6 puis nappe qui s'ouvre
+    const rise = ctx.createBufferSource(); const L = 1.6, buf = ctx.createBuffer(1, ctx.sampleRate * L, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(i / d.length, 3);
+    rise.buffer = buf; const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3000; const rg = ctx.createGain(); rg.gain.value = 0.12;
+    rise.connect(bp); bp.connect(rg); rg.connect(musicGain); rise.start(t0 + 20 - L);
+  }
+  function boucle() { // relance musique + voix à chaque tour
+    if (!ctx) return;
+    musique(ctx.currentTime + 0.05);
+    if (voixOk) { voix.currentTime = 0; voix.play().catch(() => {}); }
+  }
+  function demarrer() {
+    document.getElementById('splash').classList.add('off');
+    audioInit(); ctx.resume();
+    start = performance.now() + 150;
+    setTimeout(() => { musique(ctx.currentTime + 0.05); if (voixOk || voix.readyState >= 3) { voix.currentTime = 0; voix.play().catch(() => {}); voixOk = true; } else { voix.addEventListener('canplaythrough', () => { if (!paused) { voix.currentTime = Math.max(0, (performance.now() - start) / 1000); voix.play().catch(() => {}); } }, { once: true }); } }, 150);
+  }
+  function toggleSon() { son = !son; if (master) master.gain.value = son ? 1 : 0; if (voix) voix.muted = !son; document.getElementById('sndbtn').textContent = son ? '🔊 Son' : '🔇 Muet'; }
+  function togglePause() { paused = !paused; document.body.classList.toggle('paused', paused); if (paused) { pausedAt = performance.now(); if (ctx) ctx.suspend(); voix && voix.pause(); } else { start += performance.now() - pausedAt; if (ctx) ctx.resume(); voix && voix.play().catch(() => {}); } }
+  function restart() { if (current) { current.el.classList.remove('on'); current = null; } paused = false; document.body.classList.remove('paused'); if (ctx) { ctx.close(); ctx = null; } demarrer(); }
 </script>
 </body>
 </html>
