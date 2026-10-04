@@ -14,10 +14,10 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: #000; color: var(--blanc); font-family: var(--font); overflow: hidden; }
-body { display: grid; place-items: center; }
+body { position: relative; }
 
 /* Scène 16:9 ; passe en 9:16 avec ?v=1 */
-.stage { position: relative; width: 1920px; height: 1080px; background: var(--noir); overflow: hidden; transform-origin: center; }
+.stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; background: var(--noir); overflow: hidden; transform-origin: 0 0; }
 body.v .stage { width: 1080px; height: 1920px; }
 
 /* fond vivant */
@@ -237,7 +237,7 @@ body.v .plans { flex-direction: column; align-items: center; }
 <script>
   if (location.search.includes('v=1')) document.body.classList.add('v');
   const stage = document.getElementById('stage');
-  function fit() { const s = Math.min(innerWidth / stage.offsetWidth, innerHeight / stage.offsetHeight); stage.style.transform = `scale(${s})`; }
+  function fit() { const s = Math.min(innerWidth / stage.offsetWidth, innerHeight / stage.offsetHeight); stage.style.transform = `translate(-50%, -50%) scale(${s})`; }
   addEventListener('resize', fit); fit();
 
   // Timeline pilotée en JS : chaque scène a une fenêtre [--s, --e] en secondes
