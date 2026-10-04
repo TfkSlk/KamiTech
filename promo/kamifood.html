@@ -240,7 +240,6 @@ body.v .plans { flex-direction: column; align-items: center; }
   <button onclick="togglePause()">⏯ Pause</button>
   <button onclick="restart()">↺ Rejouer</button>
   <a href="?v=1">9:16</a><a href="?">16:9</a>
-  <a href="?voix=1">Voix 1</a><a href="?voix=2">Voix 2</a>
   <span class="hint" style="color:#888;padding:8px 4px">Enregistrer : Win+G ou OBS, 24 s en boucle</span>
 </div>
 
@@ -270,13 +269,8 @@ body.v .plans { flex-direction: column; align-items: center; }
 
   /* ---------- Son : voix off (mp3) + musique synthétisée ---------- */
   // Voix off générée avec Higgsfield (Seed Audio, voix Elodie). Si un fichier promo/voix.mp3 existe à côté, il est utilisé en priorité.
-  // Voix disponibles (ElevenLabs via Higgsfield). ?voix=2 pour la seconde. Un fichier promo/voix.mp3 local passe avant.
-  const VOIX = {
-    1: 'https://d8j0ntlcm91z4.cloudfront.net/user_3FSCALVvGfQhq2dux5ItS0z3T3W/hf_20261004_112014_30e62019-f82c-4e80-8403-bc52d009fdcc.mp3', // Arthur
-    2: 'https://d8j0ntlcm91z4.cloudfront.net/user_3FSCALVvGfQhq2dux5ItS0z3T3W/hf_20261004_112043_3cd13fc5-6813-46db-b85e-887a90b72e0e.mp3', // Caspian
-  };
-  const choixVoix = new URLSearchParams(location.search).get('voix') || '1';
-  const VOIX_DISTANTE = VOIX[choixVoix] || VOIX[1];
+  // Voix off retenue : Arthur (ElevenLabs via Higgsfield). Un fichier promo/voix.mp3 local passe avant.
+  const VOIX_DISTANTE = 'https://d8j0ntlcm91z4.cloudfront.net/user_3FSCALVvGfQhq2dux5ItS0z3T3W/hf_20261004_112014_30e62019-f82c-4e80-8403-bc52d009fdcc.mp3';
   let ctx, master, musicGain, voix, voixOk = false;
   function audioInit() {
     if (ctx) return;
