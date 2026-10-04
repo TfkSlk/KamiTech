@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KamiFood — vidéo promo</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --noir: #07090c; --encre: #0f1318; --blanc: #f6f7f9; --gris: #9aa3b2;
+  --rouge: #e11d2e; --vert: #22c55e; --orange: #f59e0b; --bleu: #3b82f6;
+  --font: Inter, system-ui, sans-serif; --head: Sora, Inter, system-ui, sans-serif;
+  --T: 24s; /* durée totale */
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: var(--blanc); font-family: var(--font); overflow: hidden; }
+body { display: grid; place-items: center; }
+
+/* Scène 16:9 ; passe en 9:16 avec ?v=1 */
+.stage { position: relative; width: 1920px; height: 1080px; background: var(--noir); overflow: hidden; transform-origin: center; }
+body.v .stage { width: 1080px; height: 1920px; }
+
+/* fond vivant */
+.bg { position: absolute; inset: 0; background:
+  radial-gradient(1200px 700px at 20% 10%, rgba(225,29,46,.18), transparent 60%),
+  radial-gradient(900px 600px at 85% 90%, rgba(59,130,246,.12), transparent 60%),
+  linear-gradient(180deg, #0a0d12, #07090c); }
+.grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 80px 80px; mask-image: radial-gradient(ellipse at center, #000 40%, transparent 80%); animation: drift var(--T) linear infinite; }
+@keyframes drift { to { background-position: 80px 80px, 80px 80px; } }
+.noise { position: absolute; inset: 0; opacity: .05; background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='.9' numOctaves='2'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>"); }
+
+/* chaque scène a une fenêtre [début, fin] sur la timeline */
+.scene { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; pointer-events: none; transition: opacity .45s ease; }
+.scene.on { opacity: 1; }
+.scene:not(.on) * { animation: none !important; }
+.inner { width: 1600px; max-width: 86%; text-align: center; }
+body.v .inner { width: 940px; }
+
+h1, h2 { font-family: var(--head); margin: 0; letter-spacing: -.02em; text-wrap: balance; }
+.kicker { font-size: 28px; font-weight: 600; color: var(--rouge); text-transform: uppercase; letter-spacing: .22em; margin-bottom: 26px; }
+.big { font-size: 118px; line-height: 1.02; font-weight: 800; }
+.mid { font-size: 76px; line-height: 1.08; font-weight: 700; }
+.sub { font-size: 36px; color: var(--gris); margin-top: 34px; line-height: 1.4; }
+body.v .big { font-size: 96px; } body.v .mid { font-size: 66px; } body.v .sub { font-size: 32px; }
+
+/* animations d'entrée réutilisables */
+.up { opacity: 0; transform: translateY(40px); animation: up .9s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: var(--d, 0s); }
+@keyframes up { to { opacity: 1; transform: none; } }
+.scale { opacity: 0; transform: scale(.92); animation: scale 1s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: var(--d, 0s); }
+@keyframes scale { to { opacity: 1; transform: none; } }
+
+/* S1 logo */
+.logo { display: inline-flex; align-items: center; gap: 28px; }
+.logo .k { width: 150px; height: 150px; border-radius: 34px; background: #000; display: grid; place-items: center; box-shadow: 0 30px 80px rgba(225,29,46,.35), inset 0 0 0 2px rgba(255,255,255,.08); }
+.logo .k svg { width: 118px; height: 118px; }
+.logo .name { font-family: var(--head); font-size: 120px; font-weight: 800; letter-spacing: -.03em; }
+.logo .name b { color: var(--rouge); font-weight: 800; }
+.line { width: 0; height: 6px; background: linear-gradient(90deg, transparent, var(--rouge), transparent); margin: 44px auto 0; animation: line 1.2s .6s cubic-bezier(.2,.8,.2,1) forwards; }
+@keyframes line { to { width: 520px; } }
+
+/* S2 problème : pile de papiers qui tombent */
+.papers { position: relative; height: 380px; width: 100%; margin-top: 10px; }
+.paper { position: absolute; left: 50%; top: 20px; width: 420px; padding: 26px 30px; border-radius: 14px; background: #fff; color: #222; text-align: left; font-size: 26px; line-height: 1.35; box-shadow: 0 30px 60px rgba(0,0,0,.5); opacity: 0; transform: translate(-50%, -80px) rotate(var(--r)); animation: fall .8s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: var(--d); }
+.paper b { display: block; font-size: 15px; color: #999; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 8px; }
+.paper .x { position: absolute; right: 18px; top: 16px; color: var(--rouge); font-weight: 800; font-size: 28px; }
+@keyframes fall { to { opacity: 1; transform: translate(calc(-50% + var(--x)), var(--y)) rotate(var(--r)); } }
+
+/* S3 tablette avec l'application */
+.tablet { width: 1060px; aspect-ratio: 16 / 9.6; border-radius: 34px; background: #0b0e13; border: 3px solid #2a2f3a; box-shadow: 0 50px 120px rgba(0,0,0,.6), 0 0 0 12px #111, 0 0 0 14px #1f232b; padding: 26px; position: relative; margin: 0 auto; }
+body.v .tablet { width: 920px; }
+.screen { width: 100%; height: 100%; border-radius: 18px; background: #f3f4f7; color: #15171c; display: grid; grid-template-columns: 220px 1fr; overflow: hidden; text-align: left; }
+.side { background: #0f1114; color: #a9aeba; padding: 22px 14px; font-size: 18px; display: flex; flex-direction: column; gap: 6px; }
+.side .b { color: #fff; font-family: var(--head); font-weight: 700; font-size: 19px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+.side .b i { width: 28px; height: 28px; border-radius: 7px; background: #000; display: inline-grid; place-items: center; font-size: 14px; color: #fff; font-style: normal; }
+.side span { padding: 9px 12px; border-radius: 8px; }
+.side span.on { background: #1c1f26; color: #fff; box-shadow: inset 3px 0 0 var(--rouge); }
+.main { padding: 26px 28px; display: grid; gap: 16px; align-content: start; }
+.main h3 { margin: 0; font-family: var(--head); font-size: 26px; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.tile { background: #fff; border: 1px solid #e3e5ea; border-radius: 14px; padding: 16px 18px; }
+.tile small { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #6b7080; font-weight: 600; }
+.tile b { display: block; font-family: var(--head); font-size: 32px; margin-top: 4px; }
+.tile .ok { color: var(--vert); } .tile .warn { color: var(--orange); }
+.rows { background: #fff; border: 1px solid #e3e5ea; border-radius: 14px; padding: 6px 18px; }
+.row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #eceef2; font-size: 18px; }
+.row:first-child { border-top: 0; }
+.row i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.row em { margin-left: auto; font-style: normal; color: #6b7080; font-size: 15px; }
+.badge { position: absolute; right: -40px; top: -30px; background: var(--vert); color: #04240f; font-weight: 700; font-size: 26px; padding: 14px 24px; border-radius: 99px; box-shadow: 0 20px 50px rgba(34,197,94,.4); --d: 1.4s; }
+
+/* S4 piliers */
+.pillars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 26px; margin-top: 50px; }
+body.v .pillars { grid-template-columns: 1fr 1fr; }
+.pill { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 26px; padding: 40px 30px; text-align: left; }
+.pill .ic { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; font-size: 30px; margin-bottom: 22px; background: rgba(225,29,46,.15); color: var(--rouge); }
+.pill h3 { font-family: var(--head); font-size: 32px; margin: 0 0 10px; }
+.pill p { margin: 0; color: var(--gris); font-size: 23px; line-height: 1.4; }
+
+/* S5 chiffres */
+.stats { display: flex; justify-content: center; gap: 110px; margin-top: 50px; }
+body.v .stats { flex-direction: column; gap: 40px; }
+.stat b { display: block; font-family: var(--head); font-size: 120px; font-weight: 800; line-height: 1; letter-spacing: -.03em; }
+.stat b span { color: var(--rouge); }
+.stat small { display: block; font-size: 28px; color: var(--gris); margin-top: 10px; }
+
+/* S6 offre + CTA */
+.plans { display: flex; justify-content: center; gap: 26px; margin: 46px 0; }
+body.v .plans { flex-direction: column; align-items: center; }
+.plan { width: 380px; border-radius: 24px; padding: 30px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); text-align: left; }
+.plan.star { border-color: var(--rouge); background: rgba(225,29,46,.1); box-shadow: 0 30px 80px rgba(225,29,46,.25); transform: scale(1.06); }
+.plan small { font-size: 20px; color: var(--gris); font-weight: 600; text-transform: uppercase; letter-spacing: .12em; }
+.plan b { display: block; font-family: var(--head); font-size: 58px; margin: 8px 0 2px; }
+.plan b i { font-style: normal; font-size: 22px; color: var(--gris); font-weight: 500; }
+.plan p { margin: 0; color: var(--gris); font-size: 20px; line-height: 1.4; }
+.cta { display: inline-block; background: var(--rouge); color: #fff; font-weight: 700; font-size: 40px; padding: 26px 56px; border-radius: 99px; box-shadow: 0 30px 80px rgba(225,29,46,.45); margin-top: 10px; }
+.url { margin-top: 26px; font-size: 32px; color: var(--gris); letter-spacing: .02em; }
+.url b { color: #fff; }
+
+/* barre de progression + commandes */
+.bar { position: absolute; left: 0; bottom: 0; height: 6px; background: var(--rouge); width: 0; }
+.ui { position: fixed; right: 16px; bottom: 16px; display: flex; gap: 8px; font-size: 13px; z-index: 9; }
+.ui button, .ui a { background: #1a1f27; color: #fff; border: 1px solid #333; border-radius: 8px; padding: 8px 12px; cursor: pointer; text-decoration: none; font: inherit; }
+.paused .scene.on * { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) { .ui .hint { display: none; } }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="bg"></div><div class="grid"></div><div class="noise"></div>
+
+  <!-- S1 · 0-3 s : logo -->
+  <section class="scene" style="--s:0;--e:3">
+    <div class="inner">
+      <div class="logo scale">
+        <div class="k"><svg viewBox="0 0 512 512"><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#b9b9b9"/></linearGradient><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff1a1a"/><stop offset="1" stop-color="#b80000"/></linearGradient></defs><text x="60" y="380" font-family="Arial Black, Arial, sans-serif" font-size="330" font-weight="900" fill="url(#g1)">K</text><text x="262" y="392" font-family="IPAGothic, 'Noto Sans JP', sans-serif" font-size="250" font-weight="700" fill="url(#g2)">神</text></svg></div>
+        <div class="name">Kami<b>Food</b></div>
+      </div>
+      <div class="line"></div>
+      <div class="sub up" style="--d:.9s">Le logiciel qui pilote votre restaurant</div>
+    </div>
+  </section>
+
+  <!-- S2 · 3-7 s : le problème -->
+  <section class="scene" style="--s:3;--e:7">
+    <div class="inner">
+      <div class="kicker up">Chaque jour, dans votre cuisine</div>
+      <h2 class="mid up" style="--d:.2s">Relevés frigo, DLC, stocks, factures…<br>tout sur papier, tout à refaire.</h2>
+      <div class="papers">
+        <div class="paper" style="--x:-440px;--y:60px;--r:-7deg;--d:.6s"><b>Relevé températures</b>Frigo n°2 : 9 °C <span class="x">!</span><br>Signé : ______</div>
+        <div class="paper" style="--x:-20px;--y:90px;--r:3deg;--d:.9s"><b>DLC à vérifier</b>Mozzarella — 28/09<br>Filet de bœuf — 29/09 <span class="x">!</span></div>
+        <div class="paper" style="--x:400px;--y:70px;--r:9deg;--d:1.2s"><b>Facture fournisseur</b>Metro — en retard 60 j <span class="x">!</span><br>Pomona — à pointer</div>
+      </div>
+      <div class="sub up" style="--d:1.9s">Et le jour du contrôle, il manque toujours une feuille.</div>
+    </div>
+  </section>
+
+  <!-- S3 · 7-13 s : l'application -->
+  <section class="scene" style="--s:7;--e:13">
+    <div class="inner">
+      <div class="kicker up">Avec KamiFood</div>
+      <h2 class="mid up" style="--d:.15s">Tout votre restaurant, sur une tablette.</h2>
+      <div class="tablet scale" style="--d:.5s; margin-top: 34px">
+        <div class="screen">
+          <div class="side">
+            <div class="b"><i>神</i>KamiFood</div>
+            <span class="on">Hygiène</span><span>Stock & DLC</span><span>Fournisseurs</span><span>Personnel</span><span>Food cost</span><span>Dossier de contrôle</span>
+          </div>
+          <div class="main">
+            <h3>La Gazelle d'Or · aujourd'hui</h3>
+            <div class="tiles">
+              <div class="tile up" style="--d:1s"><small>Températures</small><b class="ok">6/6 ✓</b></div>
+              <div class="tile up" style="--d:1.15s"><small>DLC sous 48 h</small><b class="warn">3</b></div>
+              <div class="tile up" style="--d:1.3s"><small>Food cost</small><b>28,4 %</b></div>
+            </div>
+            <div class="rows">
+              <div class="row up" style="--d:1.5s"><i style="background:var(--vert)"></i>Frigo A · 3 °C · relevé 09:12 par Yanis<em>conforme</em></div>
+              <div class="row up" style="--d:1.65s"><i style="background:var(--orange)"></i>Mozzarella · DLC demain · 4 kg<em>à utiliser</em></div>
+              <div class="row up" style="--d:1.8s"><i style="background:var(--vert)"></i>Nettoyage salle · photo validée<em>08:40</em></div>
+              <div class="row up" style="--d:1.95s"><i style="background:var(--bleu)"></i>Pointage · 7 présents<em>service du midi</em></div>
+            </div>
+          </div>
+        </div>
+        <div class="badge scale">Contrôle DDPP : prêt ✓</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S4 · 13-17 s : piliers -->
+  <section class="scene" style="--s:13;--e:17">
+    <div class="inner">
+      <h2 class="mid up">Conforme. Rentable. Serein.</h2>
+      <div class="pillars">
+        <div class="pill up" style="--d:.2s"><div class="ic">🌡</div><h3>Hygiène HACCP</h3><p>Sondes connectées, relevés automatiques, alertes en temps réel.</p></div>
+        <div class="pill up" style="--d:.35s"><div class="ic">📦</div><h3>Stock & DLC</h3><p>Code-barres, pertes évitées, commandes au bon moment.</p></div>
+        <div class="pill up" style="--d:.5s"><div class="ic">👥</div><h3>Équipe</h3><p>Pointage badge, habilitations, planning à jour.</p></div>
+        <div class="pill up" style="--d:.65s"><div class="ic">📊</div><h3>Food cost</h3><p>Marge plat par plat, bilans hebdo, multi-sites.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S5 · 17-20 s : chiffres -->
+  <section class="scene" style="--s:17;--e:20">
+    <div class="inner">
+      <div class="kicker up">Installé chez vous en une journée</div>
+      <div class="stats">
+        <div class="stat up" style="--d:.2s"><b>0</b><small>logiciel à installer</small></div>
+        <div class="stat up" style="--d:.4s"><b>1<span>h</span></b><small>de formation équipe</small></div>
+        <div class="stat up" style="--d:.6s"><b>24<span>/7</span></b><small>alertes sur votre téléphone</small></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S6 · 20-24 s : offre et appel -->
+  <section class="scene" style="--s:20;--e:24">
+    <div class="inner">
+      <h2 class="mid up">Une formule pour chaque restaurant</h2>
+      <div class="plans">
+        <div class="plan up" style="--d:.2s"><small>Essentiel</small><b>79 € <i>HT / mois</i></b><p>HACCP, nettoyage, alertes, registre</p></div>
+        <div class="plan star up" style="--d:.35s"><small>Pro</small><b>149 € <i>HT / mois</i></b><p>+ stock, personnel, fournisseurs, food cost</p></div>
+        <div class="plan up" style="--d:.5s"><small>Premium</small><b>249 € <i>HT / mois</i></b><p>+ multi-sites, assistant vocal, support prioritaire</p></div>
+      </div>
+      <div class="cta scale" style="--d:.8s">Demandez une démo</div>
+      <div class="url up" style="--d:1s"><b>kamifood.fr</b> · une solution Kami Groupe</div>
+    </div>
+  </section>
+
+  <div class="bar"></div>
+</div>
+
+<div class="ui">
+  <button onclick="togglePause()">⏯ Pause</button>
+  <button onclick="restart()">↺ Rejouer</button>
+  <a href="?v=1">9:16</a><a href="?">16:9</a>
+  <span class="hint" style="color:#888;padding:8px 4px">Enregistrer : Win+G ou OBS, 24 s en boucle</span>
+</div>
+
+<script>
+  if (location.search.includes('v=1')) document.body.classList.add('v');
+  const stage = document.getElementById('stage');
+  function fit() { const s = Math.min(innerWidth / stage.offsetWidth, innerHeight / stage.offsetHeight); stage.style.transform = `scale(${s})`; }
+  addEventListener('resize', fit); fit();
+
+  // Timeline pilotée en JS : chaque scène a une fenêtre [--s, --e] en secondes
+  const T = 24000;
+  const scenes = [...document.querySelectorAll('.scene')].map(el => ({ el, s: parseFloat(el.style.getPropertyValue('--s')) * 1000, e: parseFloat(el.style.getPropertyValue('--e')) * 1000 }));
+  const bar = document.querySelector('.bar');
+  let start = performance.now(), paused = false, pausedAt = 0, current = null;
+  function replay(el) { el.querySelectorAll('.up, .scale, .line, .paper').forEach(x => { x.style.animation = 'none'; x.offsetHeight; x.style.animation = ''; }); }
+  function tick(now) {
+    if (!paused) {
+      const t = (now - start) % T;
+      const sc = scenes.find(x => t >= x.s && t < x.e);
+      if (sc && sc !== current) { if (current) current.el.classList.remove('on'); current = sc; sc.el.classList.add('on'); replay(sc.el); }
+      bar.style.width = (t / T * 100) + '%';
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+  function togglePause() { paused = !paused; document.body.classList.toggle('paused', paused); if (paused) pausedAt = performance.now(); else start += performance.now() - pausedAt; }
+  function restart() { start = performance.now(); if (current) { current.el.classList.remove('on'); current = null; } paused = false; document.body.classList.remove('paused'); }
+</script>
+</body>
+</html>
