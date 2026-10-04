@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KamiFood — 15 secondes</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root { --blanc: #f7f4ef; --gris: #a8a39b; --rouge: #e11d2e; --vert: #35c76b; --orange: #ffb15c; --font: Inter, system-ui, sans-serif; --head: Sora, Inter, sans-serif; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: var(--blanc); font-family: var(--font); overflow: hidden; }
+body { position: relative; }
+.stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 0 0; background: #0b0a09; }
+body.v .stage { width: 1080px; height: 1920px; }
+
+/* cuisine : inox brossé + lumière chaude + grain */
+.inox { position: absolute; inset: 0; background:
+  repeating-linear-gradient(90deg, rgba(255,255,255,.028) 0 1px, transparent 1px 3px),
+  linear-gradient(180deg, #1a1816 0%, #0e0d0c 45%, #141210 100%); }
+.warm { position: absolute; inset: 0; background: radial-gradient(900px 600px at 72% 18%, rgba(255,150,70,.22), transparent 62%), radial-gradient(700px 500px at 18% 85%, rgba(225,29,46,.14), transparent 60%); }
+.grain { position: absolute; inset: 0; opacity: .07; background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence baseFrequency='.8' numOctaves='2'/></filter><rect width='220' height='220' filter='url(%23n)'/></svg>"); animation: grain .4s steps(2) infinite; }
+@keyframes grain { to { transform: translate(-6px, 4px); } }
+.vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.75)); }
+
+.scene { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity .35s ease; pointer-events: none; }
+.scene.on { opacity: 1; }
+.scene:not(.on) * { animation: none !important; }
+.inner { width: 1640px; max-width: 88%; display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center; }
+body.v .inner { grid-template-columns: 1fr; gap: 50px; width: 960px; }
+h1 { font-family: var(--head); font-weight: 800; font-size: 108px; line-height: .98; letter-spacing: -.03em; margin: 0; text-wrap: balance; }
+h1 em { font-style: normal; color: var(--orange); }
+.sub { font-size: 34px; color: var(--gris); margin-top: 26px; line-height: 1.35; }
+body.v h1 { font-size: 92px; text-align: center; } body.v .sub { text-align: center; }
+.up { opacity: 0; transform: translateY(34px); animation: up .8s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: var(--d, 0s); }
+@keyframes up { to { opacity: 1; transform: none; } }
+.pop { opacity: 0; transform: scale(.9); animation: pop .55s cubic-bezier(.2,.9,.2,1.2) forwards; animation-delay: var(--d, 0s); }
+@keyframes pop { to { opacity: 1; transform: none; } }
+
+/* S1 : frigo + fiche papier */
+.fridge { position: relative; width: 420px; height: 620px; margin: 0 auto; border-radius: 22px; background: linear-gradient(90deg, #4a4b4d, #8a8c8f 40%, #5c5e61 70%, #3b3c3e); box-shadow: 0 50px 100px rgba(0,0,0,.7), inset 0 0 0 3px rgba(255,255,255,.08); }
+.fridge::before { content: ""; position: absolute; left: 0; right: 0; top: 36%; height: 4px; background: #1b1b1b; }
+.fridge .handle { position: absolute; right: 34px; top: 60px; width: 14px; height: 180px; border-radius: 8px; background: linear-gradient(90deg, #ddd, #888); box-shadow: 0 6px 14px rgba(0,0,0,.5); }
+.fridge .handle.b { top: 44%; height: 300px; }
+.sheet { position: absolute; left: 48px; top: 90px; width: 260px; padding: 20px 22px; background: #f3efe6; color: #222; border-radius: 4px; transform: rotate(-4deg); box-shadow: 0 18px 40px rgba(0,0,0,.5); font-size: 20px; line-height: 1.4; animation: swing 3s ease-in-out infinite; transform-origin: 20px 0; }
+.sheet b { display: block; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #8a8378; margin-bottom: 8px; }
+.sheet .line { border-bottom: 1px solid #bbb; height: 24px; }
+.sheet .bad { color: var(--rouge); font-weight: 700; }
+.sheet .tape { position: absolute; left: 50%; top: -12px; width: 90px; height: 26px; background: rgba(255,255,255,.45); transform: translateX(-50%) rotate(2deg); }
+@keyframes swing { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(-2.5deg); } }
+.clock { position: absolute; right: -40px; bottom: -30px; width: 150px; height: 150px; border-radius: 50%; background: #111; border: 6px solid #333; box-shadow: 0 20px 50px rgba(0,0,0,.6); }
+.clock i { position: absolute; left: 50%; bottom: 50%; width: 5px; height: 56px; background: var(--rouge); transform-origin: bottom; transform: translateX(-50%) rotate(0deg); animation: tick 1s steps(1) infinite; border-radius: 3px; }
+.clock i.h { height: 40px; background: #ddd; animation: none; transform: translateX(-50%) rotate(300deg); }
+@keyframes tick { 0% { transform: translateX(-50%) rotate(0deg) } 25% { transform: translateX(-50%) rotate(90deg) } 50% { transform: translateX(-50%) rotate(180deg) } 75% { transform: translateX(-50%) rotate(270deg) } }
+
+/* S2 : tablette au mur + relevés qui se valident */
+.wall { position: relative; width: 640px; margin: 0 auto; }
+.tab { position: relative; border-radius: 28px; background: #0a0a0a; padding: 22px; box-shadow: 0 40px 90px rgba(0,0,0,.7), 0 0 0 10px #171717, 0 0 0 12px #2a2a2a; }
+.scr { border-radius: 16px; background: #f4f5f7; color: #15171c; padding: 26px 28px; min-height: 520px; }
+.scr .top { display: flex; justify-content: space-between; align-items: center; font-family: var(--head); font-weight: 700; font-size: 24px; margin-bottom: 20px; }
+.scr .top span { font-family: var(--font); font-weight: 500; font-size: 16px; color: #6b7080; }
+.item { display: flex; align-items: center; gap: 16px; padding: 18px 20px; background: #fff; border: 1px solid #e3e5ea; border-radius: 14px; margin-bottom: 12px; font-size: 24px; opacity: 0; transform: translateX(-16px); animation: item .5s cubic-bezier(.2,.8,.2,1) forwards; animation-delay: var(--d); }
+@keyframes item { to { opacity: 1; transform: none; } }
+.item .chk { width: 40px; height: 40px; border-radius: 50%; border: 3px solid #cfd3db; display: grid; place-items: center; flex: none; position: relative; }
+.item .chk::after { content: "✓"; color: #fff; font-weight: 800; font-size: 22px; opacity: 0; }
+.item.ok .chk { animation: chk .35s calc(var(--d) + .55s) forwards; }
+@keyframes chk { to { background: var(--vert); border-color: var(--vert); } }
+.item.ok .chk::after { animation: chkt .2s calc(var(--d) + .75s) forwards; }
+@keyframes chkt { to { opacity: 1; } }
+.item small { margin-left: auto; color: #6b7080; font-size: 17px; }
+.finger { position: absolute; width: 70px; height: 70px; border-radius: 50%; background: rgba(255,255,255,.35); border: 3px solid rgba(255,255,255,.8); left: 70px; top: 120px; opacity: 0; animation: finger 4.2s .4s ease-in-out forwards; }
+@keyframes finger { 0% { opacity: 0; transform: scale(1.4); } 8% { opacity: 1; transform: scale(.9); } 14% { transform: scale(1.1); } 30% { top: 120px; } 40% { top: 206px; transform: scale(.9); } 46% { transform: scale(1.1); } 62% { top: 206px; } 72% { top: 292px; transform: scale(.9); } 78% { transform: scale(1.1); } 100% { top: 292px; opacity: 0; } }
+
+/* S3 : preuve */
+.proof { display: grid; gap: 22px; }
+.pcard { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); border-radius: 22px; padding: 30px 34px; display: flex; align-items: center; gap: 24px; backdrop-filter: blur(6px); }
+.pcard .n { font-family: var(--head); font-size: 72px; font-weight: 800; letter-spacing: -.03em; color: var(--orange); min-width: 140px; }
+.pcard .t { font-size: 28px; line-height: 1.3; }
+.pcard .t small { display: block; color: var(--gris); font-size: 20px; margin-top: 4px; }
+
+/* S4 : signature */
+.logo { display: inline-flex; align-items: center; gap: 26px; }
+.logo .k { width: 140px; height: 140px; border-radius: 32px; background: #000; display: grid; place-items: center; box-shadow: 0 30px 80px rgba(225,29,46,.4), inset 0 0 0 2px rgba(255,255,255,.08); }
+.logo .k svg { width: 112px; height: 112px; }
+.logo .name { font-family: var(--head); font-size: 112px; font-weight: 800; letter-spacing: -.03em; }
+.logo .name b { color: var(--rouge); }
+.tag { font-family: var(--head); font-size: 64px; font-weight: 700; margin-top: 30px; letter-spacing: -.02em; }
+.url { font-size: 34px; color: var(--gris); margin-top: 22px; }
+.url b { color: var(--blanc); }
+.center { text-align: center; grid-column: 1 / -1; }
+
+.splash { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: #000; cursor: pointer; text-align: center; font-family: var(--head); }
+.splash-k { font-size: 120px; font-weight: 800; letter-spacing: -.04em; line-height: 1; } .splash-k span { color: var(--rouge); }
+.splash b { display: block; font-size: 36px; margin-top: 14px; } .splash p { color: var(--gris); font-family: var(--font); font-size: 18px; margin-top: 10px; }
+.splash.off { display: none; }
+.bar { position: absolute; left: 0; bottom: 0; height: 6px; background: var(--rouge); width: 0; }
+.ui { position: fixed; right: 16px; bottom: 16px; display: flex; gap: 8px; font-size: 13px; z-index: 9; }
+.ui button, .ui a { background: #1a1f27; color: #fff; border: 1px solid #333; border-radius: 8px; padding: 8px 12px; cursor: pointer; text-decoration: none; font: inherit; }
+.paused .scene.on * { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) { .grain { animation: none; } }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <div class="inox"></div><div class="warm"></div><div class="grain"></div><div class="vignette"></div>
+
+  <!-- S1 · 0-3.5 s : la peur -->
+  <section class="scene" style="--s:0;--e:3.5">
+    <div class="inner">
+      <div class="pop"><div class="fridge"><div class="handle"></div><div class="handle b"></div>
+        <div class="sheet"><div class="tape"></div><b>Relevé températures</b>Frigo n°2 : <span class="bad">9 °C</span><div class="line"></div>Signé : <div class="line"></div></div>
+        <div class="clock"><i class="h"></i><i></i></div></div></div>
+      <div><h1 class="up" style="--d:.5s">Le contrôle,<br><em>c'est quand ?</em></h1><div class="sub up" style="--d:.9s">Et vos feuilles, elles sont où ?</div></div>
+    </div>
+  </section>
+
+  <!-- S2 · 3.5-9.5 s : la solution, en 3 gestes -->
+  <section class="scene" style="--s:3.5;--e:9.5">
+    <div class="inner">
+      <div class="wall pop"><div class="tab"><div class="scr">
+        <div class="top">La Gazelle d'Or <span>Service du midi</span></div>
+        <div class="item ok" style="--d:.5s"><div class="chk"></div>Frigo A · 3 °C<small>09:12 · Yanis</small></div>
+        <div class="item ok" style="--d:1.7s"><div class="chk"></div>DLC mozzarella · demain<small>4 kg · à utiliser</small></div>
+        <div class="item ok" style="--d:2.9s"><div class="chk"></div>Stock filet de bœuf<small>commande envoyée</small></div>
+        <div class="item ok" style="--d:4.1s"><div class="chk"></div>Dossier de contrôle<small>archivé · 1 clic</small></div>
+      </div></div><div class="finger"></div></div>
+      <div><h1 class="up">Relevés. DLC. Stocks.</h1><h1 class="up" style="--d:.9s"><em>Faits. Prouvés. Archivés.</em></h1><div class="sub up" style="--d:1.4s">En deux secondes, sur la tablette de la cuisine.</div></div>
+    </div>
+  </section>
+
+  <!-- S3 · 9.5-13 s : la preuve -->
+  <section class="scene" style="--s:9.5;--e:13">
+    <div class="inner">
+      <div><h1 class="up">Déjà en cuisine<br><em>à La Gazelle d'Or.</em></h1></div>
+      <div class="proof">
+        <div class="pcard up" style="--d:.3s"><div class="n">6</div><div class="t">établissements pilotés<small>une seule application</small></div></div>
+        <div class="pcard up" style="--d:.6s"><div class="n">1<span style="font-size:40px"> clic</span></div><div class="t">dossier de contrôle complet<small>relevés, photos, signatures, archives</small></div></div>
+        <div class="pcard up" style="--d:.9s"><div class="n">24/7</div><div class="t">alertes sur votre téléphone<small>frigo en panne, DLC, facture en retard</small></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- S4 · 13-15.5 s : signature -->
+  <section class="scene" style="--s:13;--e:15.5">
+    <div class="inner"><div class="center">
+      <div class="logo pop"><div class="k"><svg viewBox="0 0 512 512"><defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#b9b9b9"/></linearGradient><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff1a1a"/><stop offset="1" stop-color="#b80000"/></linearGradient></defs><text x="60" y="380" font-family="Arial Black, Arial, sans-serif" font-size="330" font-weight="900" fill="url(#g1)">K</text><text x="262" y="392" font-family="IPAGothic, 'Noto Sans JP', sans-serif" font-size="250" font-weight="700" fill="url(#g2)">神</text></svg></div><div class="name">Kami<b>Food</b></div></div>
+      <div class="tag up" style="--d:.5s">Dormez tranquille.</div>
+      <div class="url up" style="--d:.8s"><b>kamifood.fr</b> · démo gratuite</div>
+    </div></div>
+  </section>
+  <div class="bar"></div>
+</div>
+
+<div class="splash" id="splash" onclick="demarrer()"><div><div class="splash-k">K<span>神</span></div><b>KamiFood</b><p>Cliquer pour lancer avec le son</p></div></div>
+<div class="ui">
+  <button id="sndbtn" onclick="toggleSon()">🔊 Son</button>
+  <button onclick="togglePause()">⏯ Pause</button>
+  <button onclick="restart()">↺ Rejouer</button>
+  <a href="?v=1">9:16</a><a href="?">16:9</a>
+</div>
+
+<script>
+  if (location.search.includes('v=1')) document.body.classList.add('v');
+  const stage = document.getElementById('stage');
+  function fit() { const w = stage.offsetWidth, h = stage.offsetHeight, s = Math.min(innerWidth / w, innerHeight / h); stage.style.transform = `translate(${(innerWidth - w * s) / 2}px, ${(innerHeight - h * s) / 2}px) scale(${s})`; }
+  addEventListener('resize', fit); fit();
+
+  let T = 15500;
+  const scenes = [...document.querySelectorAll('.scene')].map(el => ({ el, s: parseFloat(el.style.getPropertyValue('--s')) * 1000, e: parseFloat(el.style.getPropertyValue('--e')) * 1000 }));
+  const bar = document.querySelector('.bar');
+  let start = null, paused = false, pausedAt = 0, current = null, son = true;
+  function replay(el) { el.querySelectorAll('.up, .pop, .item, .finger').forEach(x => { x.style.animation = 'none'; x.offsetHeight; x.style.animation = ''; }); }
+  function tick(now) {
+    if (start !== null && !paused) {
+      const t = (now - start) % T;
+      if (current && t < current.s) boucle();
+      const sc = scenes.find(x => t >= x.s && t < x.e);
+      if (sc && sc !== current) { if (current) current.el.classList.remove('on'); current = sc; sc.el.classList.add('on'); replay(sc.el); }
+      bar.style.width = (t / T * 100) + '%';
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  /* ---------- Son : design sonore synchronisé + voix off optionnelle ---------- */
+  // Voix off : laisser vide tant qu'elle n'est pas générée ; un fichier promo/voix-15.mp3 local passe avant.
+  const VOIX_DISTANTE = '';
+  let ctx, master, voix, voixOk = false;
+  function audioInit() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = son ? 1 : 0; master.connect(ctx.destination);
+    voix = new Audio('voix-15.mp3'); voix.preload = 'auto';
+    voix.addEventListener('canplaythrough', () => { voixOk = true; }, { once: true });
+    voix.addEventListener('error', () => { if (VOIX_DISTANTE && !voix.src.startsWith('http')) { voix.src = VOIX_DISTANTE; voix.load(); } else voixOk = false; });
+  }
+  const bruit = (len) => { const b = ctx.createBuffer(1, Math.max(1, ctx.sampleRate * len | 0), ctx.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; };
+  function tic(at, f = 2200, v = .25) { const s = ctx.createBufferSource(); s.buffer = bruit(.03); const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 6; const g = ctx.createGain(); g.gain.setValueAtTime(v, at); g.gain.exponentialRampToValueAtTime(.001, at + .06); s.connect(bp); bp.connect(g); g.connect(master); s.start(at); }
+  function ding(at, f = 1320) { [f, f * 1.5].forEach((fr, i) => { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = fr; const g = ctx.createGain(); g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(i ? .08 : .18, at + .012); g.gain.exponentialRampToValueAtTime(.001, at + .5); o.connect(g); g.connect(master); o.start(at); o.stop(at + .55); }); }
+  function kick(at, v = .5) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(140, at); o.frequency.exponentialRampToValueAtTime(40, at + .16); const g = ctx.createGain(); g.gain.setValueAtTime(v, at); g.gain.exponentialRampToValueAtTime(.001, at + .32); o.connect(g); g.connect(master); o.start(at); o.stop(at + .35); }
+  function nappe(at, dur, freqs, vol, cutoff) { freqs.forEach(f => { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; const o2 = ctx.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = f * 1.004; const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(cutoff, at); lp.frequency.linearRampToValueAtTime(cutoff * 2.2, at + dur); const g = ctx.createGain(); g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(vol, at + .8); g.gain.setValueAtTime(vol, at + dur - .6); g.gain.linearRampToValueAtTime(0, at + dur); o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(master); o.start(at); o2.start(at); o.stop(at + dur + .1); o2.stop(at + dur + .1); }); }
+  function musique(t0) {
+    // S1 : tension, tic-tac et basse sourde
+    for (let i = 0; i < 7; i++) tic(t0 + i * .5, i % 2 ? 1800 : 2400, .22);
+    nappe(t0, 3.6, [55, 82.41], .09, 180);
+    // S2 : la nappe s'ouvre (Ré majeur), un ding par validation, pulsation légère
+    nappe(t0 + 3.5, 6.2, [146.83, 220, 293.66, 369.99], .05, 500);
+    [1.05, 2.25, 3.45, 4.65].forEach((d, i) => ding(t0 + 3.5 + d, 1320 + i * 90));
+    for (let n = 0; n < 12; n++) kick(t0 + 3.5 + n * .5, .22);
+    // S3 : montée, pulsation plus présente
+    nappe(t0 + 9.5, 3.6, [146.83, 220, 293.66, 440], .07, 900);
+    for (let n = 0; n < 7; n++) kick(t0 + 9.5 + n * .5, .38);
+    [.3, .6, .9].forEach(d => tic(t0 + 9.5 + d, 3000, .18));
+    // S4 : impact final + accord tenu
+    kick(t0 + 13, .8); ding(t0 + 13.02, 660); nappe(t0 + 13, 2.4, [146.83, 220, 293.66, 369.99, 587.33], .09, 1400);
+  }
+  function boucle() { if (!ctx) return; musique(ctx.currentTime + .05); if (voixOk) { voix.currentTime = 0; voix.play().catch(() => {}); } }
+  function demarrer() {
+    document.getElementById('splash').classList.add('off');
+    audioInit(); ctx.resume();
+    start = performance.now() + 150;
+    setTimeout(() => { musique(ctx.currentTime + .05); if (voixOk) { voix.currentTime = 0; voix.play().catch(() => {}); } }, 150);
+  }
+  function toggleSon() { son = !son; if (master) master.gain.value = son ? 1 : 0; if (voix) voix.muted = !son; document.getElementById('sndbtn').textContent = son ? '🔊 Son' : '🔇 Muet'; }
+  function togglePause() { paused = !paused; document.body.classList.toggle('paused', paused); if (paused) { pausedAt = performance.now(); ctx && ctx.suspend(); voix && voix.pause(); } else { start += performance.now() - pausedAt; ctx && ctx.resume(); voix && voixOk && voix.play().catch(() => {}); } }
+  function restart() { if (current) { current.el.classList.remove('on'); current = null; } paused = false; document.body.classList.remove('paused'); if (ctx) { ctx.close(); ctx = null; } demarrer(); }
+</script>
+</body>
+</html>
