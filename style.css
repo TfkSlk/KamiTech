@@ -403,3 +403,8 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
   .tev { font-size: 11.5px; padding: 3px 5px; }
   .bulle { max-width: 92%; } .chat { min-height: 0; } #chat-log { max-height: 55vh; }
 }
+
+/* À voir */
+.avoir-card { margin-top: 16px; }
+.list li .btn.small { flex-shrink: 0; }
+.list li .title-txt .meta { font-weight: 400; }

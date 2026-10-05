@@ -17,6 +17,11 @@ const MODES = { place: 'Sur place', visio: 'Visio', tel: 'Téléphone', tache: '
 const STATUTS = { prospect: 'Prospect', rdv: 'RDV fixé', etude: 'Étude en cours', signe: 'Signé', paye: 'Payé', perdu: 'Perdu' };
 const ACTIFS = ['prospect', 'rdv', 'etude', 'signe'];
 
+/* Personnes à voir : pas encore de RDV, mais on est censé se voir */
+const STATUTS_AV = { contacter: 'À contacter', attente: 'En attente de réponse', planifier: 'À planifier', planifie: 'RDV planifié', vu: 'Vu' };
+const AV_OUVERTS = ['contacter', 'attente', 'planifier'];
+const PRIORITES = { haute: 'Haute', normale: 'Normale', basse: 'Basse' };
+
 const STATUTS_AB = { essai: "Période d'essai", actif: 'Actif', resilie: 'Résilié' };
 
 const PERIODES = { semaine: 'Cette semaine', mois: 'Ce mois', annee: 'Cette année' };
@@ -25,7 +30,7 @@ const PERIODES = { semaine: 'Cette semaine', mois: 'Ce mois', annee: 'Cette ann�
 const KEY = 'kami-dashboard-v1';
 const blank = () => ({
   nom: 'Kami Groupe',
-  dossiers: [], events: [], abonnes: [], memoire: [],
+  dossiers: [], events: [], abonnes: [], aVoir: [], memoire: [],
   /* Formules KamiFood : prix HT par site et par mois (stratégie du 17/07/2026) */
   formules: [
     { id: 'f1', nom: 'Essentiel', prix: 79 },
@@ -58,6 +63,7 @@ function migrate(s) {
   s.prefs = { periode: 'mois', theme: 'light', planVue: 'semaine', ...(s.prefs || {}) };
   s.abonnes = s.abonnes || [];
   s.memoire = s.memoire || [];
+  s.aVoir = s.aVoir || [];
   s.events.forEach(e => {
     if (e.lien === undefined) e.lien = e.dossierId ? 'd:' + e.dossierId : '';
     delete e.dossierId;
@@ -95,6 +101,8 @@ const dossier = id => state.dossiers.find(d => d.id === id);
 const estPeriode = e => !!(e.fin && e.fin > e.date);
 const surJour = (e, ds) => estPeriode(e) ? (e.date <= ds && ds <= e.fin) : e.date === ds;
 const abonne = id => state.abonnes.find(a => a.id === id);
+const aVoir = id => state.aVoir.find(v => v.id === id);
+const avBadge = s => `<span class="status ${s === 'planifie' || s === 'vu' ? 'paye' : s === 'attente' ? 'signe' : ''}">${STATUTS_AV[s] || s}</span>`;
 const formule = id => state.formules.find(f => f.id === id);
 const lienNom = l => {
   if (!l) return '';
@@ -184,7 +192,8 @@ function relances() {
 }
 
 /* ---------- Routage ---------- */
-const views = { dashboard, planning, kamifood, dossiers, gains: gainsView, jarvis: jarvisView, parametres };
+const views = { dashboard, planning, avoir: aVoirView, kamifood, dossiers, gains: gainsView, jarvis: jarvisView, parametres };
+let avFiltre = 'ouverts';
 let filtre = { activite: 'all', statut: 'actifs', q: '' };
 let planFiltre = 'all';
 
@@ -401,8 +410,10 @@ function parametres() {
     </div>
     <div class="card">
       <h2>Données</h2>
-      <p>${state.abonnes.length} abonné(s), ${state.dossiers.length} dossier(s), ${state.events.length} RDV / tâche(s).</p>
+      <p>${state.abonnes.length} abonné(s), ${state.dossiers.length} dossier(s), ${state.events.length} RDV / tâche(s), ${state.aVoir.length} personne(s) à voir.</p>
+      ${aDemo() ? '<p class="meta">Des données d\'exemple sont chargées. « Retirer l\'exemple » ne touche qu\'à elles : tes vraies données restent.</p>' : ''}
       <div class="btn-row">
+        ${aDemo() ? '<button class="btn primary" onclick="retirerExemple()">Retirer l\'exemple</button>' : ''}
         <button class="btn" onclick="loadDemo()">Charger un exemple</button>
         <button class="btn danger" onclick="toutEffacer()">Tout effacer</button>
       </div>
@@ -565,9 +576,9 @@ async function supprimerDossier(id) {
 }
 
 const secteurDe = l => l ? (l[0] === 'a' ? 'kamifood' : dossier(l.slice(2))?.activite) : null;
-function openEvent(id, date, lien, heure) {
+function openEvent(id, date, lien, heure, apres, prefill) {
   const e = id ? state.events.find(x => x.id === id)
-    : { date: date || today(), heure: heure || '', duree: 60, mode: 'visio', activite: secteurDe(lien) || (planFiltre !== 'all' ? planFiltre : 'perso'), lien: lien || '', titre: lien ? `RDV ${lienNom(lien)}` : '' };
+    : { date: date || today(), heure: heure || '', duree: 60, mode: 'visio', activite: secteurDe(lien) || (planFiltre !== 'all' ? planFiltre : 'perso'), lien: lien || '', titre: lien ? `RDV ${lienNom(lien)}` : '', ...(prefill || {}) };
   const opts = {
     '': '— Aucun —',
     ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
@@ -593,10 +604,107 @@ function openEvent(id, date, lien, heure) {
     f.important = !!f.important;
     if (f.fin && f.fin <= f.date) f.fin = '';
     if (f.fin && !f.heure) { f.mode = 'tache'; f.duree = 0; }
+    let ev = e;
     if (id) Object.assign(e, f);
-    else state.events.push({ id: uid(), fait: false, ...f });
+    else { ev = { id: uid(), fait: false, ...f }; state.events.push(ev); }
+    if (apres) apres(ev);
     save(); modal().close(); render(); toast(id ? 'RDV mis à jour' : 'Ajouté au planning');
   });
+}
+
+/* ---------- Personnes à voir ---------- */
+function openAVoir(id) {
+  const v = id ? aVoir(id) : { statut: 'contacter', priorite: 'normale', activite: APPORT.includes(filtre.activite) ? filtre.activite : 'energie' };
+  const liens = {
+    '': '— Aucun —',
+    ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
+    ...Object.fromEntries(state.dossiers.map(d => ['d:' + d.id, `${d.entreprise} (${SECTEURS[d.activite].label})`])),
+  };
+  showModal(`
+    <h2>${id ? 'Modifier' : 'Quelqu\'un à voir'}</h2>
+    <div class="fields">
+      ${field('nom', 'Personne *', inp('nom', v.nom, 'text', 'required'))}
+      ${field('entreprise', 'Entreprise / restaurant', inp('entreprise', v.entreprise))}
+      ${field('activite', 'Secteur', sel('activite', SECTEURS, v.activite))}
+      ${field('priorite', 'Priorité', sel('priorite', PRIORITES, v.priorite))}
+      ${field('objet', 'Pourquoi se voir', inp('objet', v.objet), true)}
+      ${field('du', 'À voir entre le', inp('du', v.du, 'date'))}
+      ${field('au', 'et le', inp('au', v.au, 'date'))}
+      ${field('statut', 'Où ça en est', sel('statut', STATUTS_AV, v.statut))}
+      ${field('relance', 'Me le rappeler le', inp('relance', v.relance, 'date'))}
+      ${field('tel', 'Téléphone', inp('tel', v.tel, 'tel'))}
+      ${field('email', 'E-mail', inp('email', v.email, 'email'))}
+      ${field('ville', 'Ville', inp('ville', v.ville))}
+      ${field('lien', 'Client lié (facultatif)', sel('lien', liens, v.lien || ''))}
+      ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(v.notes || '')}</textarea>`, true)}
+    </div>
+    ${actions(id ? `<button type="button" class="btn danger" onclick="supprimerAVoir('${id}')">Supprimer</button>` : '',
+      id ? `<button type="button" class="btn" onclick="planifierAVoir('${id}')">Planifier le RDV</button>` : '')}`,
+  f => {
+    if (f.au && f.du && f.au < f.du) f.au = f.du;
+    const target = id ? v : { id: uid(), createdAt: Date.now() };
+    Object.assign(target, f);
+    if (!id) state.aVoir.push(target);
+    save(); modal().close(); render(); toast(id ? 'Mis à jour' : `${f.nom} ajouté à la liste`);
+  });
+}
+async function supprimerAVoir(id) {
+  modal().close();
+  if (!await confirmer('Retirer cette personne de la liste ?', 'Retirer')) return;
+  state.aVoir = state.aVoir.filter(v => v.id !== id);
+  save(); render(); toast('Retiré');
+}
+function marquerAVoir(id, statut) {
+  const v = aVoir(id); if (!v) return;
+  v.statut = statut; save(); render();
+}
+/* Ouvre le formulaire de RDV pré-rempli ; à l'enregistrement la personne passe en « RDV planifié » */
+function planifierAVoir(id) {
+  const v = aVoir(id); if (!v) return;
+  const t = today();
+  const date = v.du && v.du > t ? v.du : t;
+  const qui = [v.nom, v.entreprise].filter(Boolean).join(' · ');
+  openEvent(null, date, v.lien || '', '', ev => { v.statut = 'planifie'; v.eventId = ev.id; },
+    { titre: `RDV ${qui}`, activite: v.activite || 'perso', notes: v.objet || '' });
+}
+function aVoirTri(a, b) {
+  const pr = { haute: 0, normale: 1, basse: 2 };
+  return (pr[a.priorite] ?? 1) - (pr[b.priorite] ?? 1) || (a.du || a.relance || '9999').localeCompare(b.du || b.relance || '9999') || (a.createdAt || 0) - (b.createdAt || 0);
+}
+function aVoirItem(v, compact) {
+  const t = today();
+  const fen = v.du && v.au ? `Entre le ${fmtDate(v.du)} et le ${fmtDate(v.au)}` : v.du ? `À partir du ${fmtDate(v.du)}` : v.au ? `Avant le ${fmtDate(v.au)}` : '';
+  const late = (v.au && v.au < t && AV_OUVERTS.includes(v.statut)) || (v.relance && v.relance < t && AV_OUVERTS.includes(v.statut));
+  const ouvert = AV_OUVERTS.includes(v.statut);
+  const ev = v.eventId && state.events.find(e => e.id === v.eventId);
+  const sub = v.statut === 'planifie' && ev ? `RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}` : fen || (v.relance ? `Rappel le ${fmtDate(v.relance)}` : 'Pas de période fixée');
+  return `<li class="${late ? 'retard' : ''} ${v.statut === 'vu' ? 'done' : ''} ${v.priorite === 'haute' && ouvert ? 'alerte' : ''}">
+    <div class="grow clickable" onclick="openAVoir('${v.id}')">
+      <div class="when ${late ? 'late' : ''}">${esc(sub)}${late ? ' · dépassé' : ''}</div>
+      <div class="title-txt">${v.priorite === 'haute' && ouvert ? '<span class="warn-ico" title="Priorité haute">⚑</span> ' : ''}${esc(v.nom)}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''}</div>
+      <div class="meta">${[STATUTS_AV[v.statut], v.objet, v.ville].filter(Boolean).map(esc).join(' · ')}</div>
+    </div>
+    ${ouvert ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">Planifier</button>` : ''}
+    ${!compact && ouvert && v.statut !== 'attente' ? `<button class="btn small" onclick="marquerAVoir('${v.id}','attente')" title="J'ai pris contact, j'attends la réponse">Contacté</button>` : ''}
+    <i class="dot" style="background:var(--${v.activite || 'perso'})" data-tip="${esc(SECTEURS[v.activite]?.label || '')}" aria-label="${esc(SECTEURS[v.activite]?.label || '')}"></i>
+  </li>`;
+}
+function aVoirView() {
+  tipInit();
+  const ouverts = state.aVoir.filter(v => AV_OUVERTS.includes(v.statut));
+  const rows = state.aVoir.filter(v => avFiltre === 'tous' || (avFiltre === 'ouverts' ? AV_OUVERTS.includes(v.statut) : v.statut === avFiltre)).sort(aVoirTri);
+  const chips = [['ouverts', `À organiser (${ouverts.length})`], ...Object.entries(STATUTS_AV).map(([k, l]) => [k, `${l} (${state.aVoir.filter(v => v.statut === k).length})`]), ['tous', 'Tous']]
+    .map(([k, l]) => `<button class="chip ${avFiltre === k ? 'on' : ''}" onclick="avFiltre='${k}';render()">${l}</button>`).join('');
+  return `
+  <div class="page-head">
+    <div><h1>À voir</h1><p>Les personnes avec qui tu dois organiser quelque chose · ${ouverts.length} à organiser</p></div>
+    <button class="btn primary" onclick="openAVoir()">+ Quelqu'un à voir</button>
+  </div>
+  <div class="toolbar">${chips}</div>
+  <div class="card">
+    ${rows.length ? `<ul class="list">${rows.map(v => aVoirItem(v)).join('')}</ul>`
+      : `<div class="empty">${state.aVoir.length ? 'Personne dans ce filtre.' : 'Note ici les gens que tu dois voir, même sans date : une période souhaitée, une priorité, puis « Planifier » quand le créneau est trouvé.'}</div>`}
+  </div>`;
 }
 function toggleEvent(id) {
   const e = state.events.find(x => x.id === id);
@@ -631,10 +739,11 @@ function projection() {
       gagneAnnee: annee.tot.gagne, parSecteurAnnee: Object.fromEntries(annee.rows.map(r => [r.k, { gagne: r.gagne, tempsMin: r.total }])),
       recurrentMensuelKamiFood: mrr(), abonnesActifs: state.abonnes.filter(a => a.statut === 'actif').length,
       dossiersEnCours: state.dossiers.filter(d => ACTIFS.includes(d.statut)).length,
+      personnesAVoir: state.aVoir.filter(v => AV_OUVERTS.includes(v.statut)).length,
       enRetard: relances().filter(r => r.date < t).length + state.events.filter(e => e.date < t && !e.fait).length,
     },
     formules: state.formules, rdvModele: state.rdvModele, memoire: state.memoire,
-    abonnes: state.abonnes, dossiers: state.dossiers, events: state.events,
+    abonnes: state.abonnes, dossiers: state.dossiers, events: state.events, aVoir: state.aVoir,
   };
 }
 
@@ -822,7 +931,7 @@ async function loadDemo() {
     { restaurant: 'Le Petit Zinc', contact: 'Sophie', ville: 'Strasbourg', formule: f(0).id, prix: f(0).prix, statut: 'actif', debut: m(-5), engagement: 12 },
     { restaurant: 'Brasserie du Port', contact: 'Karim', ville: 'Kehl', formule: f(1).id, prix: f(1).prix, statut: 'actif', debut: m(-2), engagement: 12 },
     { restaurant: 'Sushi Kaze', contact: 'M. Tanaka', ville: 'Colmar', formule: f(0).id, prix: f(0).prix, statut: 'essai', debut: d(1), engagement: 12 },
-  ].map(x => ({ id: uid(), createdAt: Date.now(), ...x }));
+  ].map(x => ({ id: uid(), createdAt: Date.now(), demo: true, ...x }));
   state.abonnes.push(...ab);
   planifierInclus(ab[2]);
   const ex = [
@@ -831,9 +940,9 @@ async function loadDemo() {
     { entreprise: 'SCI Les Tilleuls', activite: 'foncier', statut: 'signe', contact: 'M. Weber', ville: 'Haguenau', partenaire: 'Cabinet C', commEstimee: 2400, dateSignature: d(-10) },
     { entreprise: 'Hôtel du Parc', activite: 'energie', statut: 'paye', contact: 'Direction', ville: 'Colmar', partenaire: 'Fournisseur A', commEstimee: 900, commRecue: 900, dateSignature: d(-40), datePaiement: d(-3) },
     { entreprise: 'Entrepôt Logistik', activite: 'cee', statut: 'paye', contact: 'Resp. technique', ville: 'Illkirch', partenaire: 'Délégataire B', commEstimee: 3500, commRecue: 3500, dateSignature: d(-60), datePaiement: m(-2) },
-  ].map(x => ({ id: uid(), createdAt: Date.now(), ...x }));
+  ].map(x => ({ id: uid(), createdAt: Date.now(), demo: true, ...x }));
   state.dossiers.push(...ex);
-  const ev = (n, heure, duree, mode, titre, activite, lien, fait = false) => ({ id: uid(), date: d(n), heure, duree, mode, titre, activite, lien, fait, notes: '' });
+  const ev = (n, heure, duree, mode, titre, activite, lien, fait = false) => ({ id: uid(), demo: true, date: d(n), heure, duree, mode, titre, activite, lien, fait, notes: '' });
   state.events.push(
     ev(0, '10:00', 60, 'place', 'RDV factures énergie', 'energie', 'd:' + ex[0].id),
     ev(0, '14:30', 30, 'visio', 'Visio devis CEE', 'cee', 'd:' + ex[1].id),
@@ -843,7 +952,25 @@ async function loadDemo() {
     ev(1, '09:00', 60, 'tache', 'Compta holding', 'perso', ''),
     ev(3, '11:00', 90, 'place', 'Visite entrepôt : audit éclairage', 'cee', 'd:' + ex[1].id),
   );
+  state.aVoir.push(
+    { id: uid(), createdAt: Date.now(), demo: true, nom: 'Mme Roth', entreprise: 'Pharmacie de la Gare', activite: 'foncier', priorite: 'haute', objet: 'Taxe foncière : voir les avis 2024-2025', du: d(0), au: d(10), statut: 'contacter' },
+    { id: uid(), createdAt: Date.now(), demo: true, nom: 'Julien', entreprise: 'Pizzeria Nova', activite: 'kamifood', priorite: 'normale', objet: 'Démo KamiFood', statut: 'attente', relance: d(3) },
+  );
   save(); render(); toast('Exemple chargé');
+}
+/* Les données d'exemple sont marquées demo:true ; les anciens exemples sont reconnus à leur nom */
+const DEMO_NOMS = ['Le Petit Zinc', 'Brasserie du Port', 'Sushi Kaze', 'Boulangerie Martin', 'Garage Central', 'SCI Les Tilleuls', 'Hôtel du Parc', 'Entrepôt Logistik'];
+const estDemo = x => !!x.demo || DEMO_NOMS.includes(x.restaurant || x.entreprise || '');
+const aDemo = () => [...state.abonnes, ...state.dossiers, ...state.events, ...state.aVoir].some(estDemo);
+async function retirerExemple() {
+  if (!await confirmer("Retirer les données d'exemple ? Tes vraies données restent.", 'Retirer')) return;
+  const ids = new Set([...state.abonnes.filter(estDemo).map(a => 'a:' + a.id), ...state.dossiers.filter(estDemo).map(d => 'd:' + d.id)]);
+  const n = state.abonnes.length + state.dossiers.length + state.events.length + state.aVoir.length;
+  state.abonnes = state.abonnes.filter(a => !estDemo(a));
+  state.dossiers = state.dossiers.filter(d => !estDemo(d));
+  state.events = state.events.filter(e => !(e.demo || (e.lien && ids.has(e.lien)) || (e.titre === 'Compta holding' && e.activite === 'perso' && !e.lien && !e.notes)));
+  state.aVoir = state.aVoir.filter(v => !v.demo);
+  save(); render(); toast(`${n - (state.abonnes.length + state.dossiers.length + state.events.length + state.aVoir.length)} élément(s) d'exemple retiré(s)`);
 }
 
 render();
