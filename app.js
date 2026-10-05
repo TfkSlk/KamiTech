@@ -476,6 +476,14 @@ function parametres() {
       </div>
     </div>
     <div class="card">
+      <h2>Sur ton téléphone</h2>
+      <p>Le KGD s'installe comme une appli : icône sur l'écran d'accueil, plein écran, et il s'ouvre même sans réseau.</p>
+      ${installPrompt ? `<div class="btn-row"><button class="btn primary" onclick="installerAppli()">Installer sur cet appareil</button></div>`
+        : estInstalle() ? '<p class="meta">Déjà installé sur cet appareil.</p>'
+        : /iphone|ipad|ipod/i.test(navigator.userAgent) ? '<p class="meta">Sur iPhone : ouvre cette page dans Safari, touche le bouton Partager (le carré avec la flèche), puis « Sur l\'écran d\'accueil ».</p>'
+        : '<p class="meta">Sur Android : menu ⋮ de Chrome, puis « Installer l\'application » ou « Ajouter à l\'écran d\'accueil ». Sur ordinateur : l\'icône d\'installation à droite de la barre d\'adresse.</p>'}
+    </div>
+    <div class="card">
       <h2>Stripe (KamiFood)</h2>
       <p>Lecture seule des abonnements et des factures payées. La facturation de KamiFood et celle du futur KGD Pro restent séparées : ici, seul le produit KamiFood est lu.</p>
       <p class="meta">Sur Vercel, projet kami-groupe-dashboard : STRIPE_LECTURE_KEY = clé restreinte Stripe (lecture : Customers, Subscriptions, Invoices, Products) et, si le compte Stripe sert à plusieurs produits, STRIPE_PRODUIT = « kamifood » ou l'id du produit. Le jeton Kami protège l'accès.</p>
@@ -1144,6 +1152,22 @@ async function retirerExemple() {
   state.events = state.events.filter(e => !(e.demo || (e.lien && ids.has(e.lien)) || (e.titre === 'Compta holding' && e.activite === 'perso' && !e.lien && !e.notes)));
   state.aVoir = state.aVoir.filter(v => !v.demo);
   save(); render(); toast(`${n - (state.abonnes.length + state.dossiers.length + state.events.length + state.aVoir.length)} élément(s) d'exemple retiré(s)`);
+}
+
+/* ---------- Installation (PWA) ---------- */
+let installPrompt = null;
+const estInstalle = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; if (location.hash === '#parametres') render(); });
+window.addEventListener('appinstalled', () => { installPrompt = null; toast('KGD installé'); if (location.hash === '#parametres') render(); });
+async function installerAppli() {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  const { outcome } = await installPrompt.userChoice;
+  if (outcome !== 'accepted') toast('Installation annulée');
+  installPrompt = null; render();
+}
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => { /* hors ligne indisponible */ }); });
 }
 
 render();
