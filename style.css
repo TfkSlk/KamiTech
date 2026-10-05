@@ -440,3 +440,8 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
 .lg-bandeau { border-radius: 99px; background: color-mix(in srgb, var(--muted) 25%, var(--surface)); border: 1px solid var(--muted); }
 .lg-fil { height: 0 !important; border-top: 3px solid var(--muted); }
 .lg-prevoir { border-radius: 99px; border: 1px dashed var(--muted); }
+.stripe-card { margin-bottom: 16px; }
+.stripe-card .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stripe-card .kpi { padding: 0; border: 0; box-shadow: none; background: none; }
+@media (max-width: 900px) { .stripe-card .kpis { grid-template-columns: 1fr 1fr; } }
+.meta.full { grid-column: 1 / -1; }
