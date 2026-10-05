@@ -183,7 +183,7 @@ function dashboard() {
   <div class="grid kpis">
     <div class="card kpi"><div class="label">Gagné · ${PERIODES[p].toLowerCase()}</div><div class="value">${esc(eur(b.tot.gagne))}</div><div class="sub">+ ${esc(eur(b.tot.prevu))} encore attendu</div></div>
     <div class="card kpi"><div class="label">Gagné · année</div><div class="value">${esc(eur(annee.tot.gagne))}</div><div class="sub spark-row">${sparkline(spark)}<span>6 derniers mois</span></div></div>
-    <div class="card kpi"><div class="label">KamiFood · par mois</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${state.abonnes.filter(a => a.statut === 'actif').length} abonné(s) actif(s)</div></div>
+    <div class="card kpi"><div class="label">KamiFood · par mois</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length} abonné(s) actif(s)</div></div>
     <div class="card kpi"><div class="label">Planifié · semaine</div><div class="value">${esc(hrs(semaine.tot.total + semaine.perso.total))}</div><div class="sub">${semaine.tot.rdv} RDV · ${esc(hrs(semaine.tot.fait + semaine.perso.fait))} réalisées</div></div>
   </div>
   <div class="grid cols-2 charts-row">
