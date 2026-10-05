@@ -39,19 +39,32 @@ function mensuel(price, quantite = 1) {
   const parMois = r.interval === 'year' ? 1 / (12 * n) : r.interval === 'week' ? 52 / (12 * n) : r.interval === 'day' ? 365 / (12 * n) : 1 / n;
   return Math.round(price.unit_amount * quantite * parMois) / 100;
 }
-function produitDe(item) {
+/* Stripe n'autorise que 4 niveaux d'expansion : les produits sont lus à part, par leurs ids */
+function produitDe(item, produits) {
   const p = item.price?.product;
-  return typeof p === 'object' && p ? { id: p.id, nom: p.name || '' } : { id: p || '', nom: '' };
+  const id = typeof p === 'object' && p ? p.id : (p || '');
+  const nom = (typeof p === 'object' && p?.name) || produits.get(id) || '';
+  return { id, nom };
 }
-function garder(sub, filtre) {
+async function lireProduits(subs, key, fetchImpl) {
+  const ids = [...new Set(subs.flatMap(s => (s.items?.data || []).map(it => { const p = it.price?.product; return typeof p === 'object' ? p?.id : p; })).filter(Boolean))];
+  const map = new Map();
+  for (let i = 0; i < ids.length; i += 100) {
+    const page = await stripeGet('/products', { limit: '100', 'ids[]': ids.slice(i, i + 100) }, key, fetchImpl);
+    for (const p of page.data) map.set(p.id, p.name || '');
+  }
+  return map;
+}
+function garder(sub, filtre, produits) {
   if (!filtre) return true;
   const f = norm(filtre);
-  return (sub.items?.data || []).some(it => { const p = produitDe(it); return p.id === filtre || norm(p.nom).includes(f) || norm(it.price?.nickname).includes(f); });
+  return (sub.items?.data || []).some(it => { const p = produitDe(it, produits); return p.id === filtre || norm(p.nom).includes(f) || norm(it.price?.nickname).includes(f); });
 }
 
 export async function lireStripe({ key, filtre, fetchImpl = fetch, depuis }) {
-  const subs = await tout('/subscriptions', { status: 'all', 'expand[]': ['data.customer', 'data.items.data.price.product'] }, key, fetchImpl);
-  const gardes = subs.filter(s => garder(s, filtre));
+  const subs = await tout('/subscriptions', { status: 'all', 'expand[]': ['data.customer'] }, key, fetchImpl);
+  const produits = await lireProduits(subs, key, fetchImpl);
+  const gardes = subs.filter(s => garder(s, filtre, produits));
   const clients = new Set(gardes.map(s => typeof s.customer === 'object' ? s.customer.id : s.customer));
   const abonnes = gardes.map(s => {
     const c = typeof s.customer === 'object' && s.customer ? s.customer : { id: s.customer };
@@ -61,7 +74,7 @@ export async function lireStripe({ key, filtre, fetchImpl = fetch, depuis }) {
     return {
       stripeId: s.id, stripeClient: c.id,
       restaurant: c.name || c.description || c.email || s.id, email: c.email || '', tel: c.phone || '',
-      formuleNom: items.map(it => it.price?.nickname || produitDe(it).nom).filter(Boolean).join(' + '),
+      formuleNom: items.map(it => it.price?.nickname || produitDe(it, produits).nom).filter(Boolean).join(' + '),
       prix, statut, stripeStatut: s.status,
       debut: jour(s.start_date), fin: jour(s.ended_at || s.canceled_at),
       impaye: ['past_due', 'unpaid'].includes(s.status),
