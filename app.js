@@ -3,13 +3,14 @@
 /* ---------- Référentiels ---------- */
 const SECTEURS = {
   kamifood: { label: 'KamiFood',      long: 'KamiFood — abonnements restaurants' },
+  kgdpro:   { label: 'KGD Pro',       long: 'KGD Pro — abonnements entreprises (à venir)' },
   cee:      { label: 'CEE',           long: "Certificats d'économie d'énergie" },
   energie:  { label: 'Énergie',       long: 'Négociation des fournitures énergétiques' },
   foncier:  { label: 'Foncier & CFE', long: 'Taxe foncière et CFE' },
   perso:    { label: 'Perso / Groupe', long: 'Perso / Groupe' },
 };
 const APPORT = ['cee', 'energie', 'foncier'];
-const PRO = ['kamifood', ...APPORT];
+const PRO = ['kamifood', 'kgdpro', ...APPORT];
 const apportOpts = Object.fromEntries(APPORT.map(k => [k, SECTEURS[k]]));
 
 const MODES = { place: 'Sur place', visio: 'Visio', tel: 'Téléphone', tache: 'Tâche' };

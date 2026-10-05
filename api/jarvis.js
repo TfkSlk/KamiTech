@@ -15,7 +15,7 @@ const EFFORT = process.env.JARVIS_EFFORT || 'medium';
 const MAX_TOURS = 8;
 
 /* ---------- Référentiels (identiques au tableau de bord) ---------- */
-const SECTEURS = { kamifood: 'KamiFood', cee: 'CEE', energie: 'Négociation des fournitures énergétiques', foncier: 'Taxe foncière et CFE', perso: 'Perso / Groupe' };
+const SECTEURS = { kamifood: 'KamiFood', kgdpro: 'KGD Pro (futur produit : organisation par abonnement pour les entreprises, pilote Karim en 2027)', cee: 'CEE', energie: 'Négociation des fournitures énergétiques', foncier: 'Taxe foncière et CFE', perso: 'Perso / Groupe' };
 const MODES = { place: 'Sur place', visio: 'Visio', tel: 'Téléphone', tache: 'Tâche' };
 const STATUTS = { prospect: 'Prospect', rdv: 'RDV fixé', etude: 'Étude en cours', signe: 'Signé', paye: 'Payé', perdu: 'Perdu' };
 const STATUTS_AB = { essai: "Période d'essai", actif: 'Actif', resilie: 'Résilié' };

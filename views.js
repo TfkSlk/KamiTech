@@ -204,11 +204,11 @@ function dashboard() {
   </div>
   <div class="card avoir-card"><div class="card-head"><div><h2>Contacts</h2><p class="meta">${contactsDus ? `${contactsDus} à rappeler` : contactsSuivis.length ? `${contactsSuivis.length} en cours, rien à rappeler aujourd'hui` : 'Personne en suivi'}</p></div><div class="btn-row"><button class="btn small" onclick="openContact()">+ Prise de contact</button><a class="link" href="#contacts">Tous →</a></div></div>
     ${contactsSuivis.length ? `<ul class="list">${contactsSuivis.slice(0, 5).map(v => aVoirItem(v, true)).join('')}</ul>` : '<div class="empty">Tu croises quelqu\'un, vous parlez d\'un service : note-le en 10 secondes, avec un rappel.</div>'}</div>
-  <div class="grid cols-4 sect-row">${b.rows.map(r => `<a class="card act-card" style="--c:var(--${r.k})" href="#${r.k === 'kamifood' ? 'kamifood' : 'dossiers'}" onclick="filtre.activite='${r.k === 'kamifood' ? 'all' : r.k}'">
+  <div class="grid cols-4 sect-row">${b.rows.map(r => `<a class="card act-card" style="--c:var(--${r.k})" href="#${r.k === 'kamifood' ? 'kamifood' : r.k === 'kgdpro' ? 'gains' : 'dossiers'}" onclick="filtre.activite='${APPORT.includes(r.k) ? r.k : 'all'}'">
       <div class="title"><span>${esc(SECTEURS[r.k].label)}</span><span class="meta">${PERIODES[p].toLowerCase()}</span></div>
       <div class="big">${esc(eur(r.gagne))}</div>
       <dl><dt>Attendu</dt><dd>${esc(eur(r.prevu))}</dd><dt>Planifié</dt><dd>${esc(hrs(r.total))}</dd><dt>€ / heure</dt><dd>${esc(parHeure(r.gagne, r.total))}</dd>
-      ${r.k === 'kamifood' ? `<dt>Abonnés actifs</dt><dd>${state.abonnes.filter(a => a.statut === 'actif').length}</dd>` : `<dt>Dossiers en cours</dt><dd>${state.dossiers.filter(d => d.activite === r.k && ACTIFS.includes(d.statut)).length}</dd>`}</dl>
+      ${r.k === 'kamifood' ? `<dt>Abonnés actifs</dt><dd>${state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length}</dd>` : r.k === 'kgdpro' ? '<dt>Lancement</dt><dd>2027</dd>' : `<dt>Dossiers en cours</dt><dd>${state.dossiers.filter(d => d.activite === r.k && ACTIFS.includes(d.statut)).length}</dd>`}</dl>
     </a>`).join('')}</div>`;
 }
 
