@@ -11,7 +11,8 @@
 const API = 'https://api.stripe.com/v1';
 
 async function stripeGet(path, params, key, fetchImpl) {
-  const q = new URLSearchParams(params);
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) (Array.isArray(v) ? v : [v]).forEach(x => q.append(k, x));
   const r = await fetchImpl(`${API}${path}?${q}`, { headers: { authorization: `Bearer ${key}` } });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error?.message || `Stripe ${r.status}`);
