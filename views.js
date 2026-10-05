@@ -142,7 +142,7 @@ function dashboard() {
   const lundi = monday(new Date());
   const todayEv = state.events.filter(e => surJour(e, t));
   const todayItems = [...rappelsContacts().filter(r => r.date === t), ...todayEv, ...relances().filter(r => r.date === t)].sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-  const retard = [...rappelsContacts().filter(r => r.date < t), ...relances().filter(r => r.date < t), ...state.events.filter(e => e.date < t && !e.fait)].sort((a, c) => a.date.localeCompare(c.date));
+  const retard = [...rappelsContacts().filter(r => r.date < t), ...relances().filter(r => r.date < t), ...state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t))].sort((a, c) => a.date.localeCompare(c.date));
   const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
   const empty = !state.dossiers.length && !state.events.length && !state.abonnes.length && !state.aVoir.length;
   const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi').sort(aVoirTri);
@@ -169,6 +169,14 @@ function dashboard() {
       <button class="btn" onclick="openAbonne()">+ Abonné</button>
       <button class="btn primary" onclick="openDossier()">+ Dossier</button>
     </div>
+  </div>
+  <div class="card capture">
+    <form onsubmit="event.preventDefault();openContact(null,{nom:this.nom.value.trim(),sujet:this.sujet.value.trim()});this.reset()">
+      <div class="capture-lead"><strong>Qui as-tu croisé ?</strong><span class="meta">Contact, sujet, puis rappel ou créneau dans le planning.</span></div>
+      <input name="nom" placeholder="Nom (et entreprise)" required autocomplete="off">
+      <input name="sujet" placeholder="De quoi vous avez parlé" autocomplete="off">
+      <button class="btn primary">Noter</button>
+    </form>
   </div>
   ${empty ? `<div class="card notice"><div><h2>Ton tableau de bord est vide</h2><p class="empty">Ajoute un abonné, un dossier ou un RDV, ou charge un exemple pour voir comment tout se calcule.</p></div><button class="btn" onclick="loadDemo()">Charger un exemple</button></div>` : ''}
   ${!empty && aDemo() ? `<div class="card notice"><div><h2>Des données d'exemple sont affichées</h2><p class="empty">Elles se mélangent à tes vraies données. Retire-les d'un clic : tes RDV, dossiers et abonnés réels restent.</p></div><button class="btn primary" onclick="retirerExemple()">Retirer l'exemple</button></div>` : ''}
@@ -247,7 +255,7 @@ function planning() {
       <button class="btn primary" onclick="openEvent(null,'${planDate}')">+ RDV</button>
     </div>
   </div>
-  <div class="toolbar">${chips}</div>
+  <div class="toolbar">${chips}<span class="legende meta"><i class="lg-bandeau"></i>semaine ou moins <i class="lg-fil"></i>période longue <i class="lg-prevoir"></i>date à prévoir</span></div>
   ${v === 'jour' ? vueJour(all, d) : v === 'mois' ? vueMois(all, d) : vueSemaine(all, lundi)}`;
 }
 
@@ -289,12 +297,15 @@ function vueMois(all, d) {
   const nbSem = Math.ceil((Math.round((dernier - start) / 864e5) + 1) / 7);
   const cellules = [...Array(nbSem * 7)].map((_, i) => {
     const day = addDays(start, i), ds = iso(day);
-    const evs = all.filter(e => surJour(e, ds)).sort((a, c) => (estPeriode(a) ? 0 : 1) - (estPeriode(c) ? 0 : 1) || (a.heure || '99').localeCompare(c.heure || '99'));
+    const tous = all.filter(e => surJour(e, ds)).sort((a, c) => (estPeriode(a) ? 0 : 1) - (estPeriode(c) ? 0 : 1) || (a.heure || '99').localeCompare(c.heure || '99'));
+    const longues = tous.filter(periodeLongue), evs = tous.filter(e => !periodeLongue(e));
     const min = evs.filter(e => !e.relance && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
     const visibles = evs.slice(0, 3);
+    const traits = longues.map(e => `<div class="mtrait ${e.aPrevoir ? 'prevoir' : ''} ${e.fait ? 'done' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.aPrevoir ? 'À prévoir · ' : ''}${e.titre}\n${fmtDate(e.date)} → ${fmtDate(e.fin)}`)}">${ds === e.date || day.getDay() === 1 ? `<span>${esc(e.titre)}</span>` : ''}</div>`).join('');
     return `<div class="mcell ${day.getMonth() !== d.getMonth() ? 'hors' : ''} ${ds === t ? 'today' : ''}" onclick="allerAuJour('${ds}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')allerAuJour('${ds}')">
       <div class="mhead"><b>${day.getDate()}</b>${min ? `<span class="meta">${esc(hrs(min))}</span>` : ''}</div>
-      ${visibles.map(e => `<div class="mchip ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${estPeriode(e) ? 'periode' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.heure ? e.heure + ' · ' : ''}${e.titre}${e.relance ? '' : ' · ' + hrs(num(e.duree))}`)}"><i style="background:var(--${e.activite})"></i><span>${e.important ? '⚠ ' : ''}${e.heure ? `<b>${esc(e.heure)}</b> ` : ''}${esc(e.titre)}</span></div>`).join('')}
+      ${traits}
+      ${visibles.map(e => `<div class="mchip ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${estPeriode(e) ? 'periode' : ''} ${e.aPrevoir ? 'prevoir' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.heure ? e.heure + ' · ' : ''}${e.titre}${e.relance ? '' : ' · ' + hrs(num(e.duree))}`)}"><i style="background:var(--${e.activite})"></i><span>${e.important ? '⚠ ' : ''}${e.heure ? `<b>${esc(e.heure)}</b> ` : ''}${esc(e.titre)}</span></div>`).join('')}
       ${evs.length > 3 ? `<div class="mplus">+ ${evs.length - 3}</div>` : ''}
     </div>`;
   }).join('');
@@ -322,7 +333,7 @@ function grilleHeures(jours, all) {
   const bandeaux = periodes.map(e => {
     const debut = Math.max(0, jours.indexOf(jours.find(d => d >= e.date) || jours[0]));
     const fin = jours.reduce((m, d, i) => (d <= e.fin ? i : m), debut);
-    return `<div class="bandeau ${e.fait ? 'done' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite});grid-column:${debut + 2} / ${fin + 3}" onclick="${ouvrir(e)}" data-tip="${tip(`${e.titre}\n${fmtDate(e.date)} → ${fmtDate(e.fin)}${lienNom(e.lien) ? '\n' + lienNom(e.lien) : ''}`)}">${e.important ? '⚠ ' : ''}${esc(e.titre)}<span class="meta"> → ${esc(fmtDate(e.fin))}</span></div>`;
+    return `<div class="bandeau ${periodeLongue(e) ? 'fil' : ''} ${e.aPrevoir ? 'prevoir' : ''} ${e.fait ? 'done' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite});grid-column:${debut + 2} / ${fin + 3}" onclick="${ouvrir(e)}" data-tip="${tip(`${e.aPrevoir ? 'À prévoir · ' : ''}${e.titre}\n${fmtDate(e.date)} → ${fmtDate(e.fin)} (${joursPeriode(e)} j)${lienNom(e.lien) ? '\n' + lienNom(e.lien) : ''}`)}">${e.important ? '⚠ ' : ''}${e.aPrevoir ? '<em>à prévoir</em> ' : ''}${esc(e.titre)}<span class="meta"> ${e.date < jours[0] ? esc(fmtDate(e.date)) + ' ' : ''}→ ${esc(fmtDate(e.fin))}</span></div>`;
   }).join('');
   const cols = jours.map(ds => {
     const evs = all.filter(e => e.date === ds && e.heure && !e.relance).map(e => ({ e, s: minutesDe(e.heure), f: minutesDe(e.heure) + Math.max(15, num(e.duree) || 30) })).sort((a, c) => a.s - c.s);

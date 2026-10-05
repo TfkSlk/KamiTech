@@ -411,3 +411,32 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
 .rappels { margin-bottom: 8px; }
 .journal li { align-items: flex-start; }
 .journal .when { min-width: 64px; margin-top: 2px; }
+
+/* capture rapide en tête d'accueil */
+.capture { margin-bottom: 16px; padding: 14px 20px; border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.capture form { display: grid; grid-template-columns: auto 1fr 1.4fr auto; gap: 10px; align-items: center; }
+.capture-lead { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.capture input { min-width: 0; }
+@media (max-width: 900px) { .capture form { grid-template-columns: 1fr; } }
+
+/* créneau dans la prise de contact */
+.creneau .seg { margin-bottom: 8px; }
+.creneau-fields { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.creneau-fields input { flex: 1; min-width: 140px; }
+
+/* périodes : bandeau (court), fil (long), pointillé (à prévoir) */
+.bandeau.fil { background: none; border: 0; border-top: 3px solid var(--c); border-radius: 0; padding: 2px 9px 0; font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.bandeau.prevoir { border-style: dashed; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 10%, var(--surface)) 0 6px, var(--surface) 6px 12px); }
+.bandeau.fil.prevoir { border-top-style: dashed; background: none; }
+.bandeau em { font-style: normal; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--c); }
+.mtrait { height: 4px; border-radius: 2px; background: var(--c); margin: 1px 0; position: relative; cursor: pointer; }
+.mtrait.prevoir { background: repeating-linear-gradient(90deg, var(--c) 0 6px, transparent 6px 10px); }
+.mtrait.done { opacity: .35; }
+.mtrait span { position: absolute; left: 0; top: 4px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.mtrait:has(span) { margin-bottom: 14px; }
+.mchip.prevoir { border: 1px dashed color-mix(in srgb, var(--c) 55%, transparent); background: none; }
+.legende { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; }
+.legende i { display: inline-block; width: 22px; height: 10px; margin-left: 6px; }
+.lg-bandeau { border-radius: 99px; background: color-mix(in srgb, var(--muted) 25%, var(--surface)); border: 1px solid var(--muted); }
+.lg-fil { height: 0 !important; border-top: 3px solid var(--muted); }
+.lg-prevoir { border-radius: 99px; border: 1px dashed var(--muted); }

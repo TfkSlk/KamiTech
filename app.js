@@ -119,9 +119,12 @@ const formule = id => state.formules.find(f => f.id === id);
 const lienNom = l => {
   if (!l) return '';
   const [t, id] = l.split(':');
-  const x = t === 'd' ? dossier(id) : abonne(id);
-  return x ? (x.entreprise || x.restaurant) : '';
+  const x = t === 'd' ? dossier(id) : t === 'c' ? aVoir(id) : abonne(id);
+  return x ? (x.entreprise || x.restaurant || x.nom) : '';
 };
+/* Nature d'une période : courte (≤ 7 jours, bandeau plein) ou longue (trait fin) ; aPrevoir = date encore à caler dedans */
+const joursPeriode = e => estPeriode(e) ? Math.round((parse(e.fin) - parse(e.date)) / 864e5) + 1 : 1;
+const periodeLongue = e => estPeriode(e) && joursPeriode(e) > 7;
 
 function confirmer(msg, label = 'Confirmer') {
   return new Promise(resolve => {
@@ -228,11 +231,11 @@ function itemList(items, showDate) {
   if (!items.length) return '';
   const t = today();
   return `<ul class="list">${items.map(e => {
-    const late = e.date < t && !e.fait;
+    const late = !e.fait && !e.contact && (estPeriode(e) ? e.fin < t : e.date < t);
     const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.contact ? (e.date < t ? `Rappel du ${fmtDate(e.date)}` : 'Rappel') : e.relance ? 'Relance' : 'Dans la journée'));
     const click = e.contact ? `openAVoir('${e.contact}')` : e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
     const client = lienNom(e.lien);
-    const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? ['Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
+    const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? [e.aPrevoir ? 'Date à prévoir dans la période' : 'Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
     return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''}">
       ${e.contact ? `<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
       <div class="grow clickable" onclick="${click}">
@@ -587,15 +590,11 @@ async function supprimerDossier(id) {
   save(); render(); toast('Dossier supprimé');
 }
 
-const secteurDe = l => l ? (l[0] === 'a' ? 'kamifood' : dossier(l.slice(2))?.activite) : null;
+const secteurDe = l => l ? (l[0] === 'a' ? 'kamifood' : l[0] === 'c' ? aVoir(l.slice(2))?.activite : dossier(l.slice(2))?.activite) : null;
 function openEvent(id, date, lien, heure, apres, prefill) {
   const e = id ? state.events.find(x => x.id === id)
     : { date: date || today(), heure: heure || '', duree: 60, mode: 'visio', activite: secteurDe(lien) || (planFiltre !== 'all' ? planFiltre : 'perso'), lien: lien || '', titre: lien ? `RDV ${lienNom(lien)}` : '', ...(prefill || {}) };
-  const opts = {
-    '': '— Aucun —',
-    ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
-    ...Object.fromEntries(state.dossiers.map(d => ['d:' + d.id, `${d.entreprise} (${SECTEURS[d.activite].label})`])),
-  };
+  const opts = liensOpts();
   showModal(`
     <h2>${id ? 'Modifier le RDV' : 'Nouveau RDV / tâche'}</h2>
     <div class="fields">
@@ -609,11 +608,13 @@ function openEvent(id, date, lien, heure, apres, prefill) {
       ${field('activite', 'Secteur', sel('activite', SECTEURS, e.activite))}
       ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(e.notes || '')}</textarea>`, true)}
       <label class="check full"><input type="checkbox" name="important" ${e.important ? 'checked' : ''}> ⚠ Alerte : à ne pas manquer (affichée en rouge, ex. « signature requise le jour de l'annonce des prix »)</label>
+      <label class="check full"><input type="checkbox" name="aPrevoir" ${e.aPrevoir ? 'checked' : ''}> Date à prévoir dans cette période (créneau pas encore calé, affiché en pointillé)</label>
     </div>
     ${actions(id ? `<button type="button" class="btn danger" onclick="supprimerEvent('${id}')">Supprimer</button>` : '')}`,
   f => {
     f.duree = num(f.duree);
     f.important = !!f.important;
+    f.aPrevoir = !!f.aPrevoir && !!f.fin;
     if (f.fin && f.fin <= f.date) f.fin = '';
     if (f.fin && !f.heure) { f.mode = 'tache'; f.duree = 0; }
     let ev = e;
@@ -629,6 +630,7 @@ const liensOpts = () => ({
   '': '— Aucun —',
   ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
   ...Object.fromEntries(state.dossiers.map(d => ['d:' + d.id, `${d.entreprise} (${SECTEURS[d.activite].label})`])),
+  ...Object.fromEntries(state.aVoir.filter(v => v.statut !== 'clos').map(v => ['c:' + v.id, `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''} (contact)`])),
 });
 /* Rappels dus : affichés dans « Aujourd'hui » comme des alertes */
 function rappelsContacts() {
@@ -656,6 +658,15 @@ function openContact(id, prefill) {
       ${field('sujet', 'De quoi vous avez parlé', `<textarea id="f-sujet" name="sujet" rows="2" placeholder="Ex. : intéressé par la récupération de taxe foncière, m'envoie ses avis">${esc(base.sujet || '')}</textarea>`, true)}
       ${field('attente', 'En attente', sel('attente', ATTENTES, base.attente || ''))}
       ${field('rappel', 'Me le rappeler', `<div class="btn-row rappels">${chips}</div><input id="f-rappel" name="rappel" type="date" value="${esc(base.rappel || '')}">`, true)}
+      <div class="field full creneau">
+        <label>Dans le planning</label>
+        <div class="seg" role="group" aria-label="Créneau">${[['aucun', 'Rien pour l\'instant'], ['date', 'Date précise'], ['semaine', 'Semaine'], ['periode', 'Période']].map(([k, l]) => `<button type="button" class="${k === 'aucun' ? 'on' : ''}" data-k="${k}" onclick="choisirCreneau(this)">${l}</button>`).join('')}</div>
+        <input type="hidden" name="creneau" id="f-creneau" value="aucun">
+        <div class="creneau-fields" id="cr-date" hidden>${inp('crDate', today(), 'date')}${inp('crHeure', '', 'time')}</div>
+        <div class="creneau-fields" id="cr-semaine" hidden><span class="meta">Semaine du</span>${inp('crSemaine', iso(monday(addDays(new Date(), 7))), 'date')}</div>
+        <div class="creneau-fields" id="cr-periode" hidden><span class="meta">Du</span>${inp('crDu', today(), 'date')}<span class="meta">au</span>${inp('crAu', iso(addMonths(new Date(), 1)), 'date')}</div>
+        <div class="creneau-fields" id="cr-objet" hidden>${inp('objet', 'Présentation des services', 'text', 'placeholder="Objet du créneau"')}</div>
+      </div>
       ${v ? '' : field('tel', 'Téléphone', inp('tel', base.tel, 'tel'))}
       ${v ? '' : field('lien', 'Client lié (facultatif)', sel('lien', liensOpts(), base.lien || ''))}
     </div>
@@ -669,10 +680,34 @@ function openContact(id, prefill) {
     else if (!target.historique.length) target.historique.push({ date: f.date || today(), texte: 'Prise de contact' });
     if (target.statut === 'clos') target.statut = 'suivi';
     if (!v) state.aVoir.push(target);
-    save(); modal().close(); render();
-    toast(target.rappel ? `${target.nom} · rappel le ${fmtDate(target.rappel)}` : `${target.nom} enregistré`);
+    let msg = target.rappel ? `${target.nom} · rappel le ${fmtDate(target.rappel)}` : `${target.nom} enregistré`;
+    const ev = creneauContact(target, f);
+    if (ev) msg = estPeriode(ev) ? `${target.nom} · à prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}` : `${target.nom} · RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`;
+    save(); modal().close(); render(); toast(msg);
   });
   setTimeout(() => { const cur = $('#f-rappel').value; if (!cur && !v) choisirRappel($('.rappel-chip[data-j="3"]')); }, 0);
+}
+/* Le créneau choisi dans la prise de contact devient une entrée du planning liée au contact */
+function creneauContact(v, f) {
+  const k = f.creneau || 'aucun';
+  if (k === 'aucun') return null;
+  const objet = (f.objet || '').trim() || 'Présentation des services';
+  const titre = `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''} · ${objet}`;
+  const base = { id: uid(), fait: false, titre, activite: v.activite || 'perso', lien: 'c:' + v.id, notes: dernierContact(v)?.texte || '', important: false, mode: 'visio', duree: 30, heure: '' };
+  let ev;
+  if (k === 'date') { if (!f.crDate) return null; ev = { ...base, date: f.crDate, heure: f.crHeure || '', mode: f.crHeure ? 'visio' : 'tache' }; v.statut = 'planifie'; }
+  else if (k === 'semaine') { if (!f.crSemaine) return null; const l = monday(parse(f.crSemaine)); ev = { ...base, date: iso(l), fin: iso(addDays(l, 6)), mode: 'tache', duree: 0, aPrevoir: true }; }
+  else { if (!f.crDu || !f.crAu) return null; const du = f.crDu, au = f.crAu < f.crDu ? f.crDu : f.crAu; ev = { ...base, date: du, fin: au, mode: 'tache', duree: 0, aPrevoir: true }; }
+  if (ev.fin && ev.fin <= ev.date) { delete ev.fin; delete ev.aPrevoir; }
+  state.events.push(ev);
+  v.eventId = ev.id;
+  return ev;
+}
+function choisirCreneau(btn) {
+  btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
+  const k = btn.dataset.k; $('#f-creneau').value = k;
+  ['date', 'semaine', 'periode'].forEach(x => { $('#cr-' + x).hidden = x !== k; });
+  $('#cr-objet').hidden = k === 'aucun';
 }
 function choisirRappel(btn) {
   if (!btn) return;
@@ -743,7 +778,8 @@ function aVoirItem(v, compact) {
   const ev = v.eventId && state.events.find(e => e.id === v.eventId);
   const jours = v.rappel ? Math.round((parse(v.rappel) - parse(t)) / 864e5) : null;
   const late = ouvert && jours !== null && jours < 0;
-  const when = v.statut === 'planifie' && ev ? `RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`
+  const when = ev && estPeriode(ev) && !ev.fait ? `À prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}${jours !== null && ouvert ? ' · rappel ' + (jours < 0 ? 'dépassé' : jours === 0 ? 'aujourd\'hui' : 'dans ' + jours + ' j') : ''}`
+    : v.statut === 'planifie' && ev ? `RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`
     : v.statut === 'clos' ? 'Clos'
     : jours === null ? 'Pas de rappel'
     : jours < 0 ? `Rappel dépassé de ${-jours} j`
@@ -815,7 +851,7 @@ function projection() {
       recurrentMensuelKamiFood: mrr(), abonnesActifs: state.abonnes.filter(a => a.statut === 'actif').length,
       dossiersEnCours: state.dossiers.filter(d => ACTIFS.includes(d.statut)).length,
       contactsARappeler: rappelsContacts().length, contactsEnAttente: state.aVoir.filter(v => v.statut === 'suivi' && v.attente).length,
-      enRetard: relances().filter(r => r.date < t).length + state.events.filter(e => e.date < t && !e.fait).length + rappelsContacts().filter(r => r.date < t).length,
+      enRetard: relances().filter(r => r.date < t).length + state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t)).length + rappelsContacts().filter(r => r.date < t).length,
     },
     formules: state.formules, rdvModele: state.rdvModele, memoire: state.memoire,
     abonnes: state.abonnes, dossiers: state.dossiers, events: state.events, aVoir: state.aVoir,
