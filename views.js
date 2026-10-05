@@ -141,11 +141,12 @@ function dashboard() {
   const b = bilan(p), annee = bilan('annee'), semaine = bilan('semaine');
   const lundi = monday(new Date());
   const todayEv = state.events.filter(e => surJour(e, t));
-  const todayItems = [...todayEv, ...relances().filter(r => r.date === t)].sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-  const retard = [...relances().filter(r => r.date < t), ...state.events.filter(e => e.date < t && !e.fait)].sort((a, c) => a.date.localeCompare(c.date));
+  const todayItems = [...rappelsContacts().filter(r => r.date === t), ...todayEv, ...relances().filter(r => r.date === t)].sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
+  const retard = [...rappelsContacts().filter(r => r.date < t), ...relances().filter(r => r.date < t), ...state.events.filter(e => e.date < t && !e.fait)].sort((a, c) => a.date.localeCompare(c.date));
   const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
   const empty = !state.dossiers.length && !state.events.length && !state.abonnes.length && !state.aVoir.length;
-  const aVoirOuverts = state.aVoir.filter(v => AV_OUVERTS.includes(v.statut)).sort(aVoirTri);
+  const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi').sort(aVoirTri);
+  const contactsDus = contactsSuivis.filter(v => v.rappel && v.rappel <= t).length;
   const serie = serieMois(6), spark = serie.map(m => m.parts.reduce((s, x) => s + x.value, 0));
   const minJour = todayEv.filter(e => !e.fait && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
   const h = new Date().getHours();
@@ -163,6 +164,7 @@ function dashboard() {
   <div class="page-head">
     <div><h1>${salut}, Toufek</h1><p>${esc(cap(fmtLong(new Date())))} · ${esc(resume)}</p></div>
     <div class="btn-row">
+      <button class="btn" onclick="openContact()">+ Contact</button>
       <button class="btn" onclick="openEvent()">+ RDV</button>
       <button class="btn" onclick="openAbonne()">+ Abonné</button>
       <button class="btn primary" onclick="openDossier()">+ Dossier</button>
@@ -192,8 +194,8 @@ function dashboard() {
     <div class="card"><div class="card-head"><div><h2>7 prochains jours</h2><p class="meta">${next7.length} RDV · ${esc(hrs(next7.reduce((s, e) => s + num(e.duree), 0)))}</p></div></div>
       ${itemList(next7, true) || '<div class="empty">Aucun RDV planifié.</div>'}</div>
   </div>
-  <div class="card avoir-card"><div class="card-head"><div><h2>À voir</h2><p class="meta">${aVoirOuverts.length ? `${aVoirOuverts.length} personne(s) avec qui organiser quelque chose` : 'Personne en attente'}</p></div><div class="btn-row"><button class="btn small" onclick="openAVoir()">+ Quelqu'un</button><a class="link" href="#avoir">Tout voir →</a></div></div>
-    ${aVoirOuverts.length ? `<ul class="list">${aVoirOuverts.slice(0, 5).map(v => aVoirItem(v, true)).join('')}</ul>` : '<div class="empty">Note ici les gens que tu dois voir, même sans date.</div>'}</div>
+  <div class="card avoir-card"><div class="card-head"><div><h2>Contacts</h2><p class="meta">${contactsDus ? `${contactsDus} à rappeler` : contactsSuivis.length ? `${contactsSuivis.length} en cours, rien à rappeler aujourd'hui` : 'Personne en suivi'}</p></div><div class="btn-row"><button class="btn small" onclick="openContact()">+ Prise de contact</button><a class="link" href="#contacts">Tous →</a></div></div>
+    ${contactsSuivis.length ? `<ul class="list">${contactsSuivis.slice(0, 5).map(v => aVoirItem(v, true)).join('')}</ul>` : '<div class="empty">Tu croises quelqu\'un, vous parlez d\'un service : note-le en 10 secondes, avec un rappel.</div>'}</div>
   <div class="grid cols-4 sect-row">${b.rows.map(r => `<a class="card act-card" style="--c:var(--${r.k})" href="#${r.k === 'kamifood' ? 'kamifood' : 'dossiers'}" onclick="filtre.activite='${r.k === 'kamifood' ? 'all' : r.k}'">
       <div class="title"><span>${esc(SECTEURS[r.k].label)}</span><span class="meta">${PERIODES[p].toLowerCase()}</span></div>
       <div class="big">${esc(eur(r.gagne))}</div>

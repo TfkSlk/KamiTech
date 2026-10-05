@@ -19,9 +19,10 @@ const SECTEURS = { kamifood: 'KamiFood', cee: 'CEE', energie: 'Négociation des 
 const MODES = { place: 'Sur place', visio: 'Visio', tel: 'Téléphone', tache: 'Tâche' };
 const STATUTS = { prospect: 'Prospect', rdv: 'RDV fixé', etude: 'Étude en cours', signe: 'Signé', paye: 'Payé', perdu: 'Perdu' };
 const STATUTS_AB = { essai: "Période d'essai", actif: 'Actif', resilie: 'Résilié' };
-const STATUTS_AV = { contacter: 'À contacter', attente: 'En attente de réponse', planifier: 'À planifier', planifie: 'RDV planifié', vu: 'Vu' };
+const STATUTS_AV = { suivi: 'En cours', planifie: 'RDV planifié', clos: 'Clos' };
+const ATTENTES = ['', 'lui', 'moi'];
 const PRIORITES = ['haute', 'normale', 'basse'];
-const VUES = ['dashboard', 'planning', 'avoir', 'kamifood', 'dossiers', 'gains', 'parametres', 'jarvis'];
+const VUES = ['dashboard', 'planning', 'contacts', 'kamifood', 'dossiers', 'gains', 'parametres', 'jarvis'];
 
 /* ---------- Persona (stable → mise en cache) ---------- */
 const PERSONA = `Tu es Jarvis, l'assistant personnel de Toufek, fondateur de Kami Groupe (holding, région de Strasbourg). Tu es son bras droit : tu connais ses affaires, tu gères son planning et ses clients, et tu lui parles comme un collaborateur de confiance, pas comme un robot.
@@ -36,7 +37,7 @@ Le message système suivant contient la date du jour et une projection des donn�
 
 Champs : un RDV a un titre, une date (AAAA-MM-JJ), une heure (HH:MM ou vide), une durée en minutes, une date de fin optionnelle (fin : s'il y en a une, c'est une PÉRIODE qui couvre plusieurs jours, ex. « réponse des fournisseurs d'énergie du 28 sept. au 4 oct. », durée 0), un drapeau important (alerte rouge à ne pas manquer, ex. « signature requise le jour de l'annonce des prix négociés »), un mode (place = sur place, visio, tel = téléphone, tache = tâche sans RDV), un secteur (activite : kamifood, cee, energie = négociation des fournitures énergétiques, foncier = taxe foncière et CFE, perso), un lien optionnel vers un client ("a:<id>" pour un abonné KamiFood, "d:<id>" pour un dossier d'apport) et un état fait (true/false). Un dossier a entreprise, activite, statut, contact, tel, email, ville, partenaire, commEstimee, commRecue, dateRelance, dateSignature, datePaiement, notes. Un abonné a restaurant, formule (id), prix mensuel HT, statut (essai, actif, resilie), debut, engagement (mois), fin, contact, tel, email, ville, notes.
 
-La liste « À voir » (aVoir) : les personnes que Toufek doit voir mais sans RDV fixé encore. Chaque entrée a nom, entreprise, activite (secteur), priorite (haute, normale, basse), objet (pourquoi se voir), du / au (période souhaitée, AAAA-MM-JJ, facultatifs), relance (date de rappel), statut (contacter = pas encore contacté, attente = contacté et on attend sa réponse, planifier = d'accord pour se voir et il faut caler le créneau, planifie = RDV posé dans le planning, vu = terminé), tel, email, ville, lien (client lié), notes, eventId (le RDV posé).
+Les contacts (aVoir) : les gens que Toufek croise (il les connaît souvent) et à qui il a un service à présenter. Ce n'est pas un dossier : c'est un journal de prises de contact avec un rappel. Chaque contact a nom, entreprise, activite (le service à présenter : cee, energie, foncier, kamifood, perso), historique (liste de { date, texte } : chaque prise de contact et de quoi ils ont parlé, le dernier élément est le plus récent), attente ('' = rien, 'lui' = Toufek attend des informations de la personne, 'moi' = Toufek lui doit des informations), rappel (AAAA-MM-JJ : le jour où le tableau de bord doit alerter Toufek), statut (suivi = en cours, planifie = un RDV est posé, clos), priorite, tel, email, ville, lien (client lié), notes, eventId.
 
 # Comment tu agis
 - Tu utilises les outils pour toute modification (ajouter, modifier, supprimer, mémoriser). Ne dis jamais "c'est fait" sans avoir appelé l'outil. Après un outil, confirme en une phrase ce qui a été fait, avec la date et l'heure.
@@ -45,7 +46,8 @@ La liste « À voir » (aVoir) : les personnes que Toufek doit voir mais sans RD
 - Pour supprimer ou résilier, demande confirmation si ce n'est pas explicite. Pour ajouter ou modifier, agis directement.
 - Quand un nouvel abonné KamiFood est créé, propose de planifier ses RDV inclus (outil ajouter_abonne avec planifier_rdv_inclus) si Toufek n'a pas précisé.
 - Quand Toufek décrit une fenêtre de temps (« d'aujourd'hui à dimanche », « toute la semaine prochaine »), crée une période (date + fin, sans heure, durée 0). Quand il dit « attention », « à ne pas rater », « obligatoire », « signature requise », mets important=true. Une période et son alerte associée sont deux entrées distinctes (la période, puis l'alerte à la bonne date ; si la date de l'alerte est inconnue, mets-la au dernier jour de la période et dis-le).
-- Quand Toufek dit qu'il doit voir quelqu'un sans donner de date (« il faut que je vois Marc », « je dois organiser un truc avec la pharmacie »), ajoute la personne à la liste À voir (ajouter_a_voir) avec la période et la priorité s'il les donne. Quand une date se cale pour une personne de la liste, crée le RDV (ajouter_rdv) puis passe la personne en statut planifie avec son eventId (modifier_a_voir). Quand on te demande « qui je dois voir », appuie-toi sur cette liste : priorité haute et périodes qui se terminent bientôt d'abord.
+- Quand Toufek raconte une rencontre (« j'ai croisé Karim, on a parlé de la taxe foncière, il m'envoie ses avis, rappelle-moi dans trois jours »), utilise prise_de_contact : nom, de quoi ils ont parlé, le service concerné, qui attend quoi, et le rappel (3 jours par défaut si Toufek ne précise rien et qu'il y a quelque chose en attente ; sinon pas de rappel). Si la personne existe déjà dans les contacts, passe son id : ça ajoute une entrée au journal au lieu de créer un doublon. Quand le rappel arrive, le tableau de bord l'affiche en alerte « telle personne en attente d'informations ».
+- Quand une date se cale avec un contact, crée le RDV (ajouter_rdv) puis passe le contact en statut planifie avec son eventId (modifier_a_voir). Quand on te demande « qui je dois rappeler » ou « qui attend quoi », appuie-toi sur les contacts : rappels dépassés et en attente d'abord.
 - Quand Toufek te dit une information à retenir (préférence, fait sur un client, décision), utilise retenir.
 - Priorité de Toufek : bien gérer son temps. Quand c'est utile, dis-lui ce qui est en retard, ce qui est chargé, ce qu'il gagne par secteur. Sois franc : si une semaine est trop chargée ou si un dossier dort, dis-le.
 
@@ -80,10 +82,10 @@ const champsAbonne = {
   email: { type: 'string' }, ville: { type: 'string' }, notes: { type: 'string' },
 };
 const champsAVoir = {
-  nom: { type: 'string' }, entreprise: { type: 'string' }, activite: { type: 'string', enum: Object.keys(SECTEURS) },
-  priorite: { type: 'string', enum: PRIORITES }, objet: { type: 'string', description: 'pourquoi se voir' },
-  du: { type: 'string', description: 'AAAA-MM-JJ, début de la période souhaitée' }, au: { type: 'string', description: 'AAAA-MM-JJ, fin de la période souhaitée' },
-  relance: { type: 'string', description: 'AAAA-MM-JJ, date de rappel' }, statut: { type: 'string', enum: Object.keys(STATUTS_AV) },
+  nom: { type: 'string' }, entreprise: { type: 'string' }, activite: { type: 'string', enum: Object.keys(SECTEURS), description: 'service à présenter' },
+  priorite: { type: 'string', enum: PRIORITES },
+  attente: { type: 'string', enum: ATTENTES, description: "'' rien, 'lui' = Toufek attend des infos de la personne, 'moi' = Toufek lui doit des infos" },
+  rappel: { type: 'string', description: 'AAAA-MM-JJ, jour du rappel (chaîne vide pour annuler)' }, statut: { type: 'string', enum: Object.keys(STATUTS_AV) },
   tel: { type: 'string' }, email: { type: 'string' }, ville: { type: 'string' }, lien: { type: 'string', description: '"a:<id abonné>" ou "d:<id dossier>" ou vide' },
   notes: { type: 'string' }, eventId: { type: 'string', description: 'id du RDV posé dans le planning' },
 };
@@ -99,9 +101,10 @@ export const TOOLS = [
   { name: 'modifier_dossier', description: 'Modifie un dossier (statut, commission, relance, notes...). Ne passe que les champs qui changent.', input_schema: obj({ id: { type: 'string' }, ...champsDossier }, ['id']) },
   { name: 'ajouter_abonne', description: 'Crée un abonné KamiFood (restaurant). Avec planifier_rdv_inclus=true, planifie aussi les RDV inclus dans la souscription à partir de la date de début.', input_schema: obj({ ...champsAbonne, planifier_rdv_inclus: { type: 'boolean' } }, ['restaurant']) },
   { name: 'modifier_abonne', description: 'Modifie un abonné KamiFood (formule, prix, statut, résiliation...).', input_schema: obj({ id: { type: 'string' }, ...champsAbonne }, ['id']) },
-  { name: 'ajouter_a_voir', description: "Ajoute une personne à la liste « À voir » (quelqu'un que Toufek doit rencontrer, sans RDV fixé encore).", input_schema: obj(champsAVoir, ['nom']) },
-  { name: 'modifier_a_voir', description: "Modifie une personne de la liste À voir (statut, période, priorité, eventId une fois le RDV posé...). Ne passe que les champs qui changent.", input_schema: obj({ id: { type: 'string' }, ...champsAVoir }, ['id']) },
-  { name: 'supprimer_a_voir', description: 'Retire une personne de la liste À voir.', input_schema: obj({ id: { type: 'string' } }, ['id']) },
+  { name: 'prise_de_contact', description: "Note une prise de contact : Toufek a croisé ou appelé quelqu'un à qui présenter un service. Crée le contact (nom) ou ajoute une entrée au journal d'un contact existant (id). Pose le rappel et ce qui est en attente.", input_schema: obj({ id: { type: 'string', description: 'id du contact existant, sinon vide' }, nom: { type: 'string' }, entreprise: { type: 'string' }, activite: { type: 'string', enum: Object.keys(SECTEURS) }, sujet: { type: 'string', description: 'de quoi ils ont parlé' }, date: { type: 'string', description: 'AAAA-MM-JJ, date de la rencontre (défaut : aujourd\'hui)' }, attente: { type: 'string', enum: ATTENTES }, rappel_jours: { type: 'integer', description: 'rappel dans N jours' }, rappel: { type: 'string', description: 'AAAA-MM-JJ, ou vide' }, tel: { type: 'string' }, lien: { type: 'string' } }, ['sujet']) },
+  { name: 'ajouter_a_voir', description: "Crée un contact sans prise de contact (préfère prise_de_contact quand Toufek raconte une rencontre).", input_schema: obj(champsAVoir, ['nom']) },
+  { name: 'modifier_a_voir', description: "Modifie un contact (rappel, attente, statut, eventId une fois le RDV posé, coordonnées...). Ne passe que les champs qui changent.", input_schema: obj({ id: { type: 'string' }, ...champsAVoir }, ['id']) },
+  { name: 'supprimer_a_voir', description: 'Supprime un contact et son journal.', input_schema: obj({ id: { type: 'string' } }, ['id']) },
   { name: 'retenir', description: 'Mémorise durablement une information (préférence, fait sur un client, décision). Une phrase courte.', input_schema: obj({ note: { type: 'string' } }, ['note']) },
   { name: 'ouvrir', description: 'Ouvre une vue du tableau de bord chez Toufek.', input_schema: obj({ vue: { type: 'string', enum: VUES } }, ['vue']) },
 ];
@@ -213,23 +216,43 @@ function outils(state, actions) {
       if (f.statut === 'resilie' && !a.fin && !f.fin) f.fin = s.aujourdhui;
       return { ok: true, abonne: update('abonnes', a, f) };
     },
+    prise_de_contact({ id, nom, entreprise, activite, sujet, date, attente, rappel_jours, rappel, tel, lien }) {
+      const quand = date && dateOk(date) ? date : s.aujourdhui;
+      let jour = rappel !== undefined ? rappel : (Number.isInteger(rappel_jours) ? iso(addDays(parse(s.aujourdhui), rappel_jours)) : undefined);
+      if (jour && !dateOk(jour)) throw new Error('rappel attendu au format AAAA-MM-JJ');
+      if (lien && !nomLien(lien)) throw new Error(`lien inconnu : ${lien}`);
+      let v = id ? s.aVoir.find(x => x.id === id) : s.aVoir.find(x => nom && norm(x.nom) === norm(nom) && (!entreprise || norm(x.entreprise || '') === norm(entreprise)));
+      const entree = { date: quand, texte: String(sujet).trim().slice(0, 300) };
+      if (v) {
+        const f = { historique: [...(v.historique || []), entree], statut: v.statut === 'clos' ? 'suivi' : v.statut };
+        if (attente !== undefined) f.attente = attente;
+        if (jour !== undefined) f.rappel = jour;
+        if (activite) f.activite = activite;
+        if (tel) f.tel = tel;
+        return { ok: true, contact: update('aVoir', v, f), nouveau: false };
+      }
+      if (!nom) throw new Error('nom requis pour un nouveau contact');
+      if (jour === undefined) jour = attente ? iso(addDays(parse(s.aujourdhui), 3)) : '';
+      const item = { id: uid(), createdAt: Date.now(), nom, entreprise: entreprise || '', activite: activite || 'perso', priorite: 'normale', statut: 'suivi', attente: attente || '', rappel: jour, tel: tel || '', lien: lien || '', notes: '', historique: [entree] };
+      return { ok: true, contact: add('aVoir', item), nouveau: true };
+    },
     ajouter_a_voir(input) {
       const f = nettoyer(input, champsAVoir);
-      for (const k of ['du', 'au', 'relance']) if (f[k] && !dateOk(f[k])) throw new Error(`${k} attendue au format AAAA-MM-JJ`);
+      if (f.rappel && !dateOk(f.rappel)) throw new Error('rappel attendu au format AAAA-MM-JJ');
       if (f.lien && !nomLien(f.lien)) throw new Error(`lien inconnu : ${f.lien}`);
-      const item = { id: uid(), createdAt: Date.now(), statut: 'contacter', priorite: 'normale', activite: 'perso', ...f };
-      return { ok: true, personne: add('aVoir', item) };
+      const item = { id: uid(), createdAt: Date.now(), statut: 'suivi', priorite: 'normale', activite: 'perso', attente: '', rappel: '', historique: [], ...f };
+      return { ok: true, contact: add('aVoir', item) };
     },
     modifier_a_voir({ id, ...rest }) {
-      const v = s.aVoir.find(x => x.id === id); if (!v) throw new Error(`personne introuvable : ${id}`);
+      const v = s.aVoir.find(x => x.id === id); if (!v) throw new Error(`contact introuvable : ${id}`);
       const f = nettoyer(rest, champsAVoir);
-      for (const k of ['du', 'au', 'relance']) if (f[k] && !dateOk(f[k])) throw new Error(`${k} attendue au format AAAA-MM-JJ`);
+      if (f.rappel && !dateOk(f.rappel)) throw new Error('rappel attendu au format AAAA-MM-JJ');
       if (f.eventId && !event(f.eventId)) throw new Error(`RDV introuvable : ${f.eventId}`);
       if (f.eventId && !f.statut) f.statut = 'planifie';
-      return { ok: true, personne: update('aVoir', v, f) };
+      return { ok: true, contact: update('aVoir', v, f) };
     },
     supprimer_a_voir({ id }) {
-      const v = s.aVoir.find(x => x.id === id); if (!v) throw new Error(`personne introuvable : ${id}`);
+      const v = s.aVoir.find(x => x.id === id); if (!v) throw new Error(`contact introuvable : ${id}`);
       s.aVoir = s.aVoir.filter(x => x.id !== id);
       actions.push({ op: 'delete', collection: 'aVoir', id });
       return { ok: true, supprime: v.nom };
@@ -261,7 +284,7 @@ function contexte(s, mode) {
     `Notes mémorisées : ${s.memoire.length ? s.memoire.map(n => '- ' + n).join('\n') : '(aucune)'}`,
     `Abonnés KamiFood (${s.abonnes.length}) : ${JSON.stringify(s.abonnes)}`,
     `Dossiers d'apport (${s.dossiers.length}, les dossiers payés ou perdus depuis plus de 90 jours sont omis ; utilise chercher) : ${JSON.stringify(s.dossiersVisibles)}`,
-    `À voir (${s.aVoir.length} personnes sans RDV fixé) : ${JSON.stringify(s.aVoir)}`,
+    `Contacts (${s.aVoir.length} ; journal des prises de contact, rappels, attentes) : ${JSON.stringify(s.aVoir)}`,
     `Planning de J-7 à J+45 (${s.eventsVisibles.length} éléments ; au-delà, utilise agenda) : ${JSON.stringify(s.eventsVisibles)}`,
   ];
   return lignes.join('\n\n');

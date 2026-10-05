@@ -17,10 +17,12 @@ const MODES = { place: 'Sur place', visio: 'Visio', tel: 'Téléphone', tache: '
 const STATUTS = { prospect: 'Prospect', rdv: 'RDV fixé', etude: 'Étude en cours', signe: 'Signé', paye: 'Payé', perdu: 'Perdu' };
 const ACTIFS = ['prospect', 'rdv', 'etude', 'signe'];
 
-/* Personnes à voir : pas encore de RDV, mais on est censé se voir */
-const STATUTS_AV = { contacter: 'À contacter', attente: 'En attente de réponse', planifier: 'À planifier', planifie: 'RDV planifié', vu: 'Vu' };
-const AV_OUVERTS = ['contacter', 'attente', 'planifier'];
+/* Contacts : les gens croisés à qui présenter un service. Journal des prises de contact + rappel. */
+const STATUTS_AV = { suivi: 'En cours', planifie: 'RDV planifié', clos: 'Clos' };
+const AV_OUVERTS = ['suivi'];
+const ATTENTES = { '': 'Rien en attente', lui: "J'attends ses informations", moi: 'Je lui dois des informations' };
 const PRIORITES = { haute: 'Haute', normale: 'Normale', basse: 'Basse' };
+const RAPPELS = [['2', '2 jours'], ['3', '3 jours'], ['7', '1 semaine'], ['14', '2 semaines'], ['', 'Pas de rappel']];
 
 const STATUTS_AB = { essai: "Période d'essai", actif: 'Actif', resilie: 'Résilié' };
 
@@ -64,6 +66,16 @@ function migrate(s) {
   s.abonnes = s.abonnes || [];
   s.memoire = s.memoire || [];
   s.aVoir = s.aVoir || [];
+  s.aVoir.forEach(v => {
+    if (!Array.isArray(v.historique)) v.historique = [];
+    if (v.objet) { v.historique.unshift({ date: v.createdAt ? iso(new Date(v.createdAt)) : today(), texte: v.objet }); delete v.objet; }
+    if (v.relance) { v.rappel = v.rappel || v.relance; delete v.relance; }
+    if (v.statut === 'attente') v.attente = v.attente || 'lui';
+    if (['contacter', 'attente', 'planifier'].includes(v.statut)) v.statut = 'suivi';
+    if (v.statut === 'vu') v.statut = 'clos';
+    if (!v.statut) v.statut = 'suivi';
+    if (v.attente === undefined) v.attente = '';
+  });
   s.events.forEach(e => {
     if (e.lien === undefined) e.lien = e.dossierId ? 'd:' + e.dossierId : '';
     delete e.dossierId;
@@ -102,7 +114,7 @@ const estPeriode = e => !!(e.fin && e.fin > e.date);
 const surJour = (e, ds) => estPeriode(e) ? (e.date <= ds && ds <= e.fin) : e.date === ds;
 const abonne = id => state.abonnes.find(a => a.id === id);
 const aVoir = id => state.aVoir.find(v => v.id === id);
-const avBadge = s => `<span class="status ${s === 'planifie' || s === 'vu' ? 'paye' : s === 'attente' ? 'signe' : ''}">${STATUTS_AV[s] || s}</span>`;
+const dernierContact = v => (v.historique || [])[v.historique.length - 1];
 const formule = id => state.formules.find(f => f.id === id);
 const lienNom = l => {
   if (!l) return '';
@@ -192,8 +204,8 @@ function relances() {
 }
 
 /* ---------- Routage ---------- */
-const views = { dashboard, planning, avoir: aVoirView, kamifood, dossiers, gains: gainsView, jarvis: jarvisView, parametres };
-let avFiltre = 'ouverts';
+const views = { dashboard, planning, contacts: aVoirView, avoir: aVoirView, kamifood, dossiers, gains: gainsView, jarvis: jarvisView, parametres };
+let avFiltre = 'suivi';
 let filtre = { activite: 'all', statut: 'actifs', q: '' };
 let planFiltre = 'all';
 
@@ -217,12 +229,12 @@ function itemList(items, showDate) {
   const t = today();
   return `<ul class="list">${items.map(e => {
     const late = e.date < t && !e.fait;
-    const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.relance ? 'Relance' : 'Dans la journée'));
-    const click = e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
+    const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.contact ? (e.date < t ? `Rappel du ${fmtDate(e.date)}` : 'Rappel') : e.relance ? 'Relance' : 'Dans la journée'));
+    const click = e.contact ? `openAVoir('${e.contact}')` : e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
     const client = lienNom(e.lien);
-    const meta = e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? ['Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
+    const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? ['Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
     return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''}">
-      ${e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
+      ${e.contact ? `<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
       <div class="grow clickable" onclick="${click}">
         <div class="when ${late ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
         <div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
@@ -612,98 +624,161 @@ function openEvent(id, date, lien, heure, apres, prefill) {
   });
 }
 
-/* ---------- Personnes à voir ---------- */
-function openAVoir(id) {
-  const v = id ? aVoir(id) : { statut: 'contacter', priorite: 'normale', activite: APPORT.includes(filtre.activite) ? filtre.activite : 'energie' };
-  const liens = {
-    '': '— Aucun —',
-    ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
-    ...Object.fromEntries(state.dossiers.map(d => ['d:' + d.id, `${d.entreprise} (${SECTEURS[d.activite].label})`])),
-  };
+/* ---------- Contacts : prises de contact et rappels ---------- */
+const liensOpts = () => ({
+  '': '— Aucun —',
+  ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
+  ...Object.fromEntries(state.dossiers.map(d => ['d:' + d.id, `${d.entreprise} (${SECTEURS[d.activite].label})`])),
+});
+/* Rappels dus : affichés dans « Aujourd'hui » comme des alertes */
+function rappelsContacts() {
+  const t = today();
+  return state.aVoir.filter(v => v.statut === 'suivi' && v.rappel && v.rappel <= t).map(v => {
+    const d = dernierContact(v);
+    return { id: 'c-' + v.id, contact: v.id, lien: v.lien || '', date: v.rappel, heure: '', activite: v.activite || 'perso', important: !!v.attente,
+      titre: `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''}${v.attente ? ' · ' + ATTENTES[v.attente].toLowerCase() : ''}`,
+      sousTitre: d ? `Dernier contact le ${fmtDate(d.date)} : ${d.texte}` : 'À recontacter' };
+  });
+}
+/* Bouton rapide : une prise de contact (nouvelle personne, ou nouvelle entrée pour une personne connue) */
+function openContact(id, prefill) {
+  const v = id ? aVoir(id) : null;
+  const base = v || { activite: APPORT.includes(filtre.activite) ? filtre.activite : 'energie', attente: '', ...(prefill || {}) };
+  const chips = RAPPELS.map(([j, l]) => `<button type="button" class="chip rappel-chip" data-j="${j}" onclick="choisirRappel(this)">${l}</button>`).join('');
   showModal(`
-    <h2>${id ? 'Modifier' : 'Quelqu\'un à voir'}</h2>
+    <h2>${v ? `Prise de contact · ${esc(v.nom)}` : 'Prise de contact'}</h2>
+    <p class="meta">Quelqu'un que tu as croisé, à qui présenter un service. Note de quoi vous avez parlé et quand te le rappeler.</p>
+    <div class="fields">
+      ${v ? '' : field('nom', 'Personne *', inp('nom', base.nom, 'text', 'required autofocus'))}
+      ${v ? '' : field('entreprise', 'Entreprise', inp('entreprise', base.entreprise))}
+      ${field('activite', 'Service à présenter', sel('activite', SECTEURS, base.activite))}
+      ${field('date', 'Date du contact', inp('date', today(), 'date', 'required'))}
+      ${field('sujet', 'De quoi vous avez parlé', `<textarea id="f-sujet" name="sujet" rows="2" placeholder="Ex. : intéressé par la récupération de taxe foncière, m'envoie ses avis">${esc(base.sujet || '')}</textarea>`, true)}
+      ${field('attente', 'En attente', sel('attente', ATTENTES, base.attente || ''))}
+      ${field('rappel', 'Me le rappeler', `<div class="btn-row rappels">${chips}</div><input id="f-rappel" name="rappel" type="date" value="${esc(base.rappel || '')}">`, true)}
+      ${v ? '' : field('tel', 'Téléphone', inp('tel', base.tel, 'tel'))}
+      ${v ? '' : field('lien', 'Client lié (facultatif)', sel('lien', liensOpts(), base.lien || ''))}
+    </div>
+    ${actions('', v ? `<button type="button" class="btn" onclick="openAVoir('${v.id}')">Fiche complète</button>` : '')}`,
+  f => {
+    const target = v || { id: uid(), createdAt: Date.now(), statut: 'suivi', priorite: 'normale', historique: [], nom: f.nom, entreprise: f.entreprise, tel: f.tel, lien: f.lien };
+    target.activite = f.activite;
+    target.attente = f.attente || '';
+    target.rappel = f.rappel || '';
+    if (f.sujet && f.sujet.trim()) target.historique.push({ date: f.date || today(), texte: f.sujet.trim() });
+    else if (!target.historique.length) target.historique.push({ date: f.date || today(), texte: 'Prise de contact' });
+    if (target.statut === 'clos') target.statut = 'suivi';
+    if (!v) state.aVoir.push(target);
+    save(); modal().close(); render();
+    toast(target.rappel ? `${target.nom} · rappel le ${fmtDate(target.rappel)}` : `${target.nom} enregistré`);
+  });
+  setTimeout(() => { const cur = $('#f-rappel').value; if (!cur && !v) choisirRappel($('.rappel-chip[data-j="3"]')); }, 0);
+}
+function choisirRappel(btn) {
+  if (!btn) return;
+  document.querySelectorAll('.rappel-chip').forEach(b => b.classList.toggle('on', b === btn));
+  const j = btn.dataset.j;
+  $('#f-rappel').value = j ? iso(addDays(new Date(), Number(j))) : '';
+}
+/* Fiche complète : coordonnées, journal, statut */
+function openAVoir(id) {
+  const v = id ? aVoir(id) : null;
+  if (!v) return openContact();
+  const journal = [...v.historique].reverse().map(h => `<li><span class="when">${esc(fmtDate(h.date))}</span><div class="grow">${esc(h.texte)}</div></li>`).join('');
+  showModal(`
+    <h2>${esc(v.nom)}</h2>
     <div class="fields">
       ${field('nom', 'Personne *', inp('nom', v.nom, 'text', 'required'))}
-      ${field('entreprise', 'Entreprise / restaurant', inp('entreprise', v.entreprise))}
-      ${field('activite', 'Secteur', sel('activite', SECTEURS, v.activite))}
-      ${field('priorite', 'Priorité', sel('priorite', PRIORITES, v.priorite))}
-      ${field('objet', 'Pourquoi se voir', inp('objet', v.objet), true)}
-      ${field('du', 'À voir entre le', inp('du', v.du, 'date'))}
-      ${field('au', 'et le', inp('au', v.au, 'date'))}
-      ${field('statut', 'Où ça en est', sel('statut', STATUTS_AV, v.statut))}
-      ${field('relance', 'Me le rappeler le', inp('relance', v.relance, 'date'))}
+      ${field('entreprise', 'Entreprise', inp('entreprise', v.entreprise))}
+      ${field('activite', 'Service à présenter', sel('activite', SECTEURS, v.activite))}
+      ${field('priorite', 'Priorité', sel('priorite', PRIORITES, v.priorite || 'normale'))}
+      ${field('attente', 'En attente', sel('attente', ATTENTES, v.attente || ''))}
+      ${field('rappel', 'Prochain rappel', inp('rappel', v.rappel, 'date'))}
+      ${field('statut', 'Statut', sel('statut', STATUTS_AV, v.statut))}
       ${field('tel', 'Téléphone', inp('tel', v.tel, 'tel'))}
       ${field('email', 'E-mail', inp('email', v.email, 'email'))}
       ${field('ville', 'Ville', inp('ville', v.ville))}
-      ${field('lien', 'Client lié (facultatif)', sel('lien', liens, v.lien || ''))}
+      ${field('lien', 'Client lié (facultatif)', sel('lien', liensOpts(), v.lien || ''))}
       ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(v.notes || '')}</textarea>`, true)}
+      <div class="field full"><label>Journal des contacts</label><ul class="list journal">${journal || '<li class="meta">Aucune prise de contact notée.</li>'}</ul></div>
     </div>
-    ${actions(id ? `<button type="button" class="btn danger" onclick="supprimerAVoir('${id}')">Supprimer</button>` : '',
-      id ? `<button type="button" class="btn" onclick="planifierAVoir('${id}')">Planifier le RDV</button>` : '')}`,
+    ${actions(`<button type="button" class="btn danger" onclick="supprimerAVoir('${id}')">Supprimer</button>`,
+      `<button type="button" class="btn" onclick="openContact('${id}')">+ Prise de contact</button><button type="button" class="btn" onclick="planifierAVoir('${id}')">Planifier un RDV</button>`)}`,
   f => {
-    if (f.au && f.du && f.au < f.du) f.au = f.du;
-    const target = id ? v : { id: uid(), createdAt: Date.now() };
-    Object.assign(target, f);
-    if (!id) state.aVoir.push(target);
-    save(); modal().close(); render(); toast(id ? 'Mis à jour' : `${f.nom} ajouté à la liste`);
+    Object.assign(v, f);
+    save(); modal().close(); render(); toast('Fiche mise à jour');
   });
 }
 async function supprimerAVoir(id) {
   modal().close();
-  if (!await confirmer('Retirer cette personne de la liste ?', 'Retirer')) return;
+  if (!await confirmer('Supprimer ce contact et son journal ?', 'Supprimer')) return;
   state.aVoir = state.aVoir.filter(v => v.id !== id);
-  save(); render(); toast('Retiré');
+  save(); render(); toast('Supprimé');
 }
 function marquerAVoir(id, statut) {
   const v = aVoir(id); if (!v) return;
-  v.statut = statut; save(); render();
+  v.statut = statut; if (statut === 'clos') { v.rappel = ''; v.attente = ''; }
+  save(); render();
 }
-/* Ouvre le formulaire de RDV pré-rempli ; à l'enregistrement la personne passe en « RDV planifié » */
+/* Ouvre le formulaire de RDV pré-rempli ; à l'enregistrement le contact passe en « RDV planifié » */
 function planifierAVoir(id) {
   const v = aVoir(id); if (!v) return;
-  const t = today();
-  const date = v.du && v.du > t ? v.du : t;
+  const d = dernierContact(v);
   const qui = [v.nom, v.entreprise].filter(Boolean).join(' · ');
-  openEvent(null, date, v.lien || '', '', ev => { v.statut = 'planifie'; v.eventId = ev.id; },
-    { titre: `RDV ${qui}`, activite: v.activite || 'perso', notes: v.objet || '' });
+  modal().close();
+  openEvent(null, today(), v.lien || '', '', ev => { v.statut = 'planifie'; v.eventId = ev.id; v.rappel = ''; },
+    { titre: `RDV ${qui}`, activite: v.activite || 'perso', notes: d ? d.texte : '' });
 }
 function aVoirTri(a, b) {
+  const t = today();
+  const due = v => v.statut === 'suivi' && v.rappel && v.rappel <= t ? 0 : 1;
   const pr = { haute: 0, normale: 1, basse: 2 };
-  return (pr[a.priorite] ?? 1) - (pr[b.priorite] ?? 1) || (a.du || a.relance || '9999').localeCompare(b.du || b.relance || '9999') || (a.createdAt || 0) - (b.createdAt || 0);
+  return due(a) - due(b) || (a.rappel || '9999').localeCompare(b.rappel || '9999') || (pr[a.priorite] ?? 1) - (pr[b.priorite] ?? 1)
+    || ((dernierContact(b) || {}).date || '').localeCompare((dernierContact(a) || {}).date || '');
 }
 function aVoirItem(v, compact) {
   const t = today();
-  const fen = v.du && v.au ? `Entre le ${fmtDate(v.du)} et le ${fmtDate(v.au)}` : v.du ? `À partir du ${fmtDate(v.du)}` : v.au ? `Avant le ${fmtDate(v.au)}` : '';
-  const late = (v.au && v.au < t && AV_OUVERTS.includes(v.statut)) || (v.relance && v.relance < t && AV_OUVERTS.includes(v.statut));
-  const ouvert = AV_OUVERTS.includes(v.statut);
+  const ouvert = v.statut === 'suivi';
+  const d = dernierContact(v);
   const ev = v.eventId && state.events.find(e => e.id === v.eventId);
-  const sub = v.statut === 'planifie' && ev ? `RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}` : fen || (v.relance ? `Rappel le ${fmtDate(v.relance)}` : 'Pas de période fixée');
-  return `<li class="${late ? 'retard' : ''} ${v.statut === 'vu' ? 'done' : ''} ${v.priorite === 'haute' && ouvert ? 'alerte' : ''}">
+  const jours = v.rappel ? Math.round((parse(v.rappel) - parse(t)) / 864e5) : null;
+  const late = ouvert && jours !== null && jours < 0;
+  const when = v.statut === 'planifie' && ev ? `RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`
+    : v.statut === 'clos' ? 'Clos'
+    : jours === null ? 'Pas de rappel'
+    : jours < 0 ? `Rappel dépassé de ${-jours} j`
+    : jours === 0 ? 'Rappel aujourd\'hui'
+    : jours === 1 ? 'Rappel demain' : `Rappel dans ${jours} j`;
+  const attente = v.attente ? `<span class="status ${v.attente === 'lui' ? 'signe' : 'perdu'}">${ATTENTES[v.attente]}</span>` : '';
+  return `<li class="${late || (ouvert && jours === 0) ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${ouvert && v.attente ? 'alerte' : ''}">
     <div class="grow clickable" onclick="openAVoir('${v.id}')">
-      <div class="when ${late ? 'late' : ''}">${esc(sub)}${late ? ' · dépassé' : ''}</div>
-      <div class="title-txt">${v.priorite === 'haute' && ouvert ? '<span class="warn-ico" title="Priorité haute">⚑</span> ' : ''}${esc(v.nom)}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''}</div>
-      <div class="meta">${[STATUTS_AV[v.statut], v.objet, v.ville].filter(Boolean).map(esc).join(' · ')}</div>
+      <div class="when ${late ? 'late' : ''}">${esc(when)}</div>
+      <div class="title-txt">${ouvert && v.attente ? '<span class="warn-ico" title="En attente">⚠</span> ' : ''}${esc(v.nom)}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
+      <div class="meta">${d ? `${esc(fmtDate(d.date))} : ${esc(d.texte)}` : 'Aucune prise de contact notée'}</div>
     </div>
-    ${ouvert ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">Planifier</button>` : ''}
-    ${!compact && ouvert && v.statut !== 'attente' ? `<button class="btn small" onclick="marquerAVoir('${v.id}','attente')" title="J'ai pris contact, j'attends la réponse">Contacté</button>` : ''}
+    ${ouvert ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
+    ${ouvert && !compact ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">RDV</button>` : ''}
     <i class="dot" style="background:var(--${v.activite || 'perso'})" data-tip="${esc(SECTEURS[v.activite]?.label || '')}" aria-label="${esc(SECTEURS[v.activite]?.label || '')}"></i>
   </li>`;
 }
 function aVoirView() {
   tipInit();
-  const ouverts = state.aVoir.filter(v => AV_OUVERTS.includes(v.statut));
-  const rows = state.aVoir.filter(v => avFiltre === 'tous' || (avFiltre === 'ouverts' ? AV_OUVERTS.includes(v.statut) : v.statut === avFiltre)).sort(aVoirTri);
-  const chips = [['ouverts', `À organiser (${ouverts.length})`], ...Object.entries(STATUTS_AV).map(([k, l]) => [k, `${l} (${state.aVoir.filter(v => v.statut === k).length})`]), ['tous', 'Tous']]
+  const t = today();
+  const suivis = state.aVoir.filter(v => v.statut === 'suivi');
+  const dus = suivis.filter(v => v.rappel && v.rappel <= t);
+  const attente = suivis.filter(v => v.attente);
+  const rows = state.aVoir.filter(v => avFiltre === 'tous' || (avFiltre === 'attente' ? v.statut === 'suivi' && v.attente : v.statut === avFiltre)).sort(aVoirTri);
+  const chips = [['suivi', `En cours (${suivis.length})`], ['attente', `En attente d'infos (${attente.length})`], ['planifie', `RDV planifié (${state.aVoir.filter(v => v.statut === 'planifie').length})`], ['clos', `Clos (${state.aVoir.filter(v => v.statut === 'clos').length})`], ['tous', 'Tous']]
     .map(([k, l]) => `<button class="chip ${avFiltre === k ? 'on' : ''}" onclick="avFiltre='${k}';render()">${l}</button>`).join('');
   return `
   <div class="page-head">
-    <div><h1>À voir</h1><p>Les personnes avec qui tu dois organiser quelque chose · ${ouverts.length} à organiser</p></div>
-    <button class="btn primary" onclick="openAVoir()">+ Quelqu'un à voir</button>
+    <div><h1>Contacts</h1><p>Les gens croisés à qui présenter un service · ${dus.length ? `${dus.length} à rappeler aujourd'hui` : 'rien à rappeler aujourd\'hui'}${attente.length ? ` · ${attente.length} en attente d'informations` : ''}</p></div>
+    <button class="btn primary" onclick="openContact()">+ Prise de contact</button>
   </div>
   <div class="toolbar">${chips}</div>
   <div class="card">
     ${rows.length ? `<ul class="list">${rows.map(v => aVoirItem(v)).join('')}</ul>`
-      : `<div class="empty">${state.aVoir.length ? 'Personne dans ce filtre.' : 'Note ici les gens que tu dois voir, même sans date : une période souhaitée, une priorité, puis « Planifier » quand le créneau est trouvé.'}</div>`}
+      : `<div class="empty">${state.aVoir.length ? 'Personne dans ce filtre.' : 'Tu croises quelqu\'un, vous parlez d\'un service : note-le ici en 10 secondes avec un rappel dans 2 ou 3 jours. Le jour venu, il apparaît en alerte sur l\'accueil.'}</div>`}
   </div>`;
 }
 function toggleEvent(id) {
@@ -739,8 +814,8 @@ function projection() {
       gagneAnnee: annee.tot.gagne, parSecteurAnnee: Object.fromEntries(annee.rows.map(r => [r.k, { gagne: r.gagne, tempsMin: r.total }])),
       recurrentMensuelKamiFood: mrr(), abonnesActifs: state.abonnes.filter(a => a.statut === 'actif').length,
       dossiersEnCours: state.dossiers.filter(d => ACTIFS.includes(d.statut)).length,
-      personnesAVoir: state.aVoir.filter(v => AV_OUVERTS.includes(v.statut)).length,
-      enRetard: relances().filter(r => r.date < t).length + state.events.filter(e => e.date < t && !e.fait).length,
+      contactsARappeler: rappelsContacts().length, contactsEnAttente: state.aVoir.filter(v => v.statut === 'suivi' && v.attente).length,
+      enRetard: relances().filter(r => r.date < t).length + state.events.filter(e => e.date < t && !e.fait).length + rappelsContacts().filter(r => r.date < t).length,
     },
     formules: state.formules, rdvModele: state.rdvModele, memoire: state.memoire,
     abonnes: state.abonnes, dossiers: state.dossiers, events: state.events, aVoir: state.aVoir,
@@ -953,8 +1028,8 @@ async function loadDemo() {
     ev(3, '11:00', 90, 'place', 'Visite entrepôt : audit éclairage', 'cee', 'd:' + ex[1].id),
   );
   state.aVoir.push(
-    { id: uid(), createdAt: Date.now(), demo: true, nom: 'Mme Roth', entreprise: 'Pharmacie de la Gare', activite: 'foncier', priorite: 'haute', objet: 'Taxe foncière : voir les avis 2024-2025', du: d(0), au: d(10), statut: 'contacter' },
-    { id: uid(), createdAt: Date.now(), demo: true, nom: 'Julien', entreprise: 'Pizzeria Nova', activite: 'kamifood', priorite: 'normale', objet: 'Démo KamiFood', statut: 'attente', relance: d(3) },
+    { id: uid(), createdAt: Date.now(), demo: true, nom: 'Mme Roth', entreprise: 'Pharmacie de la Gare', activite: 'foncier', priorite: 'normale', statut: 'suivi', attente: 'lui', rappel: d(0), historique: [{ date: d(-3), texte: 'Croisée au marché : intéressée par la taxe foncière, doit m\'envoyer ses avis 2024-2025' }] },
+    { id: uid(), createdAt: Date.now(), demo: true, nom: 'Julien', entreprise: 'Pizzeria Nova', activite: 'kamifood', priorite: 'normale', statut: 'suivi', attente: 'moi', rappel: d(2), historique: [{ date: d(-1), texte: 'Veut une démo KamiFood, je lui envoie le lien' }] },
   );
   save(); render(); toast('Exemple chargé');
 }

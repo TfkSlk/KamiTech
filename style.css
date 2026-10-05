@@ -408,3 +408,6 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
 .avoir-card { margin-top: 16px; }
 .list li .btn.small { flex-shrink: 0; }
 .list li .title-txt .meta { font-weight: 400; }
+.rappels { margin-bottom: 8px; }
+.journal li { align-items: flex-start; }
+.journal .when { min-width: 64px; margin-top: 2px; }
