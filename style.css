@@ -461,3 +461,5 @@ html, dialog, .tg-body, .table-wrap { scrollbar-width: thin; scrollbar-color: co
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 35%, transparent); border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
+.fields > * { min-width: 0; }
+.field input, .field select, .field textarea { width: 100%; min-width: 0; box-sizing: border-box; }
