@@ -713,88 +713,160 @@ function rappelsContacts() {
   });
 }
 /* Bouton rapide : une prise de contact (nouvelle personne, ou nouvelle entrée pour une personne connue) */
+/* Rencontre : saisie en étapes, chaque écran tient sans défiler (téléphone compris) */
+let renc = null;
 function openContact(id, prefill) {
   const v = id ? aVoir(id) : null;
-  const base = v || { activite: APPORT.includes(filtre.activite) ? filtre.activite : 'energie', attente: '', ...(prefill || {}) };
-  const chips = RAPPELS.map(([j, l]) => `<button type="button" class="chip rappel-chip" data-j="${j}" onclick="choisirRappel(this)">${l}</button>`).join('');
-  const note = [base.nom, base.entreprise].filter(Boolean).join(' de ') + (base.sujet ? (base.nom ? ' : ' : '') + base.sujet : '');
-  showModal(`
-    <h2>${v ? `Prise de contact · ${esc(v.nom)}` : 'Prise de contact'}</h2>
-    <div class="fields">
-      <div class="field full note-field">
-        <label for="f-note">Raconte en une phrase${jarvis.token ? ', Kami remplit le reste' : ''}</label>
-        <textarea id="f-note" name="note" rows="2" placeholder="Ex. : croisé Karim de Karim SARL, on a parlé du KGD Pro, je lui envoie le dossier, rappelle-moi dans 3 jours, à voir début 2027">${esc(note)}</textarea>
-        <div class="btn-row note-actions"><button type="button" class="btn small" id="btn-analyser" onclick="analyserNote()">${jarvis.token ? 'Analyser avec Kami' : 'Analyser (jeton Kami requis)'}</button><span class="meta" id="note-etat"></span></div>
-      </div>
-      ${v ? '' : field('nom', 'Personne *', inp('nom', base.nom, 'text', 'required'))}
-      ${v ? '' : field('entreprise', 'Entreprise', inp('entreprise', base.entreprise))}
-      ${field('activite', 'Service à présenter', sel('activite', SECTEURS, base.activite))}
-      ${field('attente', 'En attente', sel('attente', ATTENTES, base.attente || ''))}
-      ${field('sujet', 'De quoi vous avez parlé', `<input id="f-sujet" name="sujet" type="text" value="${esc(base.sujet || '')}" placeholder="Une phrase">`, true)}
-      ${field('rappel', 'Me le rappeler', `<div class="rappel-row"><div class="btn-row rappels">${chips}</div><input id="f-rappel" name="rappel" type="date" value="${esc(base.rappel || '')}"></div>`, true)}
-      <div class="field full creneau">
-        <label>Dans le planning</label>
-        <div class="seg" role="group" aria-label="Créneau">${[['aucun', 'Rien'], ['date', 'Jour'], ['semaine', 'Semaine'], ['periode', 'Période']].map(([k, l]) => `<button type="button" class="${k === 'aucun' ? 'on' : ''}" data-k="${k}" onclick="choisirCreneau(this)">${l}</button>`).join('')}</div>
-        <input type="hidden" name="creneau" id="f-creneau" value="aucun">
-        <div class="creneau-fields" id="cr-date" hidden><span class="meta">Le</span>${inp('crDate', today(), 'date')}<span class="meta">à</span>${inp('crHeure', '', 'time')}</div>
-        <div class="creneau-fields" id="cr-semaine" hidden><span class="meta">Semaine du</span>${inp('crSemaine', iso(monday(addDays(new Date(), 7))), 'date')}</div>
-        <div class="creneau-fields" id="cr-periode" hidden><span class="meta">Du</span>${inp('crDu', today(), 'date')}<span class="meta">au</span>${inp('crAu', iso(addMonths(new Date(), 1)), 'date')}</div>
-        <div class="creneau-fields" id="cr-objet" hidden><span class="meta">Objet</span>${inp('objet', 'Présentation des services', 'text')}</div>
-      </div>
-      <details class="field full plus"><summary>Plus : date du contact, téléphone, client lié</summary>
-        <div class="fields">
-          ${field('date', 'Date du contact', inp('date', today(), 'date', 'required'))}
-          ${v ? '' : field('tel', 'Téléphone', inp('tel', base.tel, 'tel'))}
-          ${v ? '' : field('lien', 'Client lié', sel('lien', liensOpts(), base.lien || ''))}
-        </div>
-      </details>
-    </div>
-    ${actions('', v ? `<button type="button" class="btn" onclick="openAVoir('${v.id}')">Fiche complète</button>` : '')}`,
-  f => {
-    const target = v || { id: uid(), createdAt: Date.now(), statut: 'suivi', priorite: 'normale', historique: [], nom: f.nom, entreprise: f.entreprise, tel: f.tel, lien: f.lien };
-    target.activite = f.activite;
-    target.attente = f.attente || '';
-    target.rappel = f.rappel || '';
-    const sujet = (f.sujet || '').trim() || (f.note || '').trim();
-    if (sujet) target.historique.push({ date: f.date || today(), texte: sujet });
-    else if (!target.historique.length) target.historique.push({ date: f.date || today(), texte: 'Prise de contact' });
-    if (target.statut === 'clos') target.statut = 'suivi';
-    if (!v) state.aVoir.push(target);
-    let msg = target.rappel ? `${target.nom} · rappel le ${fmtDate(target.rappel)}` : `${target.nom} enregistré`;
-    const ev = creneauContact(target, f);
-    if (ev) msg = estPeriode(ev) ? `${target.nom} · à prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}` : `${target.nom} · RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`;
-    save(); modal().close(); render(); toast(msg);
-  });
-  setTimeout(() => { const cur = $('#f-rappel').value; if (!cur && !v) choisirRappel($('.rappel-chip[data-j="3"]')); $('#f-note').focus(); }, 0);
+  const p = prefill || {};
+  renc = {
+    v, etape: 0, note: [p.nom, p.sujet].filter(Boolean).join(' : '),
+    nom: v ? v.nom : (p.nom || ''), entreprise: v ? (v.entreprise || '') : (p.entreprise || ''),
+    activite: v ? (v.activite || 'perso') : (APPORT.includes(filtre.activite) ? filtre.activite : 'energie'),
+    sujet: p.sujet || '', attente: v ? (v.attente || '') : '', rappel: '', rappelJ: '3',
+    creneau: 'aucun', crDate: today(), crHeure: '', crSemaine: iso(monday(addDays(new Date(), 7))), crDu: today(), crAu: iso(addMonths(new Date(), 1)),
+    objet: 'Présentation des services', tel: '', lien: v ? (v.lien || '') : '', date: today(), resume: '',
+  };
+  rencRender();
+  $('#rencontre').hidden = false; document.body.classList.add('no-scroll');
+  setTimeout(() => $('#r-note')?.focus(), 50);
 }
-/* Kami lit la note et remplit les champs ; Toufek vérifie puis enregistre */
-async function analyserNote() {
-  const texte = ($('#f-note').value || '').trim();
-  if (!texte) { toast('Écris d\'abord une phrase'); return; }
+function fermerRencontre() { $('#rencontre').hidden = true; document.body.classList.remove('no-scroll'); arreterDictee(); renc = null; }
+const RENC_ETAPES = () => renc.v ? [0, 2, 3, 4] : [0, 1, 2, 3, 4];
+function rencAller(delta) {
+  const liste = RENC_ETAPES(), i = liste.indexOf(renc.etape);
+  rencLire();
+  if (delta > 0 && renc.etape === 1 && !renc.nom.trim()) { toast('Le nom de la personne, au moins'); $('#r-nom')?.focus(); return; }
+  if (delta > 0 && renc.etape === 0 && !renc.v && !renc.nom.trim()) { renc.nom = premierNom(renc.note); }
+  const j = Math.min(liste.length - 1, Math.max(0, i + delta));
+  renc.etape = liste[j]; rencRender();
+}
+/* Sans Kami : on devine le nom depuis la note (« croisé Karim de Karim SARL… ») */
+function premierNom(note) {
+  const m = note.match(/(?:crois[ée]|vu|appel[ée]|rencontr[ée]|avec|chez)\s+([A-ZÀ-Ý][\wÀ-ÿ'-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'-]+)?)/);
+  return m ? m[1] : note.split(/[,:.]/)[0].trim().slice(0, 40);
+}
+/* Lit les champs de l'étape affichée dans renc */
+function rencLire() {
+  const g = id => $('#r-' + id)?.value;
+  const r = renc;
+  if (r.etape === 0) r.note = g('note') ?? r.note;
+  if (r.etape === 1) { r.nom = g('nom') ?? r.nom; r.entreprise = g('entreprise') ?? r.entreprise; }
+  if (r.etape === 2) r.rappel = g('rappel') ?? r.rappel;
+  if (r.etape === 3) { r.crDate = g('crDate') ?? r.crDate; r.crHeure = g('crHeure') ?? r.crHeure; r.crSemaine = g('crSemaine') ?? r.crSemaine; r.crDu = g('crDu') ?? r.crDu; r.crAu = g('crAu') ?? r.crAu; r.objet = g('objet') ?? r.objet; }
+  if (r.etape === 4) { r.sujet = g('sujet') ?? r.sujet; r.tel = g('tel') ?? r.tel; }
+}
+function rencSet(k, val) { rencLire(); renc[k] = val; if (k === 'rappelJ') renc.rappel = val ? iso(addDays(new Date(), Number(val))) : ''; rencRender(); }
+function rencRender() {
+  const r = renc, liste = RENC_ETAPES(), pos = liste.indexOf(r.etape);
+  const opt = (k, val, label, sub) => `<button type="button" class="opt ${r[k] === val ? 'on' : ''}" onclick="rencSet('${k}','${val}')"><b>${label}</b>${sub ? `<span>${sub}</span>` : ''}</button>`;
+  const titres = ['Raconte', 'Qui ?', 'Et ensuite ?', 'Dans le planning ?', 'On enregistre ?'];
+  let corps = '';
+  if (r.etape === 0) corps = `
+    <textarea id="r-note" placeholder="Ex. : croisé Karim de Karim SARL, on a parlé du KGD Pro, je lui envoie le dossier, rappelle-moi dans 3 jours, à voir début 2027">${esc(r.note)}</textarea>
+    <div class="r-tools">
+      ${SR ? `<button type="button" class="btn" id="r-mic" onclick="dicteeRencontre()">🎤 Dicter</button>` : ''}
+      <button type="button" class="btn primary" onclick="analyserRencontre()" ${jarvis.token ? '' : 'disabled title="Jeton Kami requis (Réglages)"'}>Kami remplit tout</button>
+    </div>
+    <p class="meta">${jarvis.token ? 'Une phrase suffit : Kami remplit les écrans suivants, tu vérifies, tu enregistres.' : 'Sans jeton Kami, tu remplis les écrans suivants à la main.'}</p>`;
+  if (r.etape === 1) corps = `
+    <label class="r-label" for="r-nom">Personne</label><input id="r-nom" value="${esc(r.nom)}" placeholder="Prénom, nom" autocomplete="off">
+    <label class="r-label" for="r-entreprise">Entreprise</label><input id="r-entreprise" value="${esc(r.entreprise)}" placeholder="Facultatif" autocomplete="off">
+    <label class="r-label">Service à présenter</label>
+    <div class="chips">${Object.entries(SECTEURS).map(([k, s]) => `<button type="button" class="chip ${r.activite === k ? 'on' : ''}" onclick="rencSet('activite','${k}')"><i style="background:var(--${k})"></i>${esc(s.label)}</button>`).join('')}</div>`;
+  if (r.etape === 2) corps = `
+    <label class="r-label">Qui attend quoi ?</label>
+    <div class="opts">${opt('attente', '', 'Rien en attente')}${opt('attente', 'lui', "J'attends ses informations", 'Il doit me revenir')}${opt('attente', 'moi', 'Je lui dois des informations', 'Je dois lui envoyer quelque chose')}</div>
+    <label class="r-label">Me le rappeler</label>
+    <div class="chips">${RAPPELS.map(([j, l]) => `<button type="button" class="chip ${r.rappelJ === j ? 'on' : ''}" onclick="rencSet('rappelJ','${j}')">${l}</button>`).join('')}</div>
+    <input id="r-rappel" type="date" value="${esc(r.rappel)}" onchange="renc.rappelJ='x'">`;
+  if (r.etape === 3) corps = `
+    <div class="opts quatre">${opt('creneau', 'aucun', 'Rien', 'Juste le rappel')}${opt('creneau', 'date', 'Un jour', 'Date précise')}${opt('creneau', 'semaine', 'Une semaine', 'À caler dedans')}${opt('creneau', 'periode', 'Une période', 'Quelques semaines ou mois')}</div>
+    ${r.creneau === 'date' ? `<div class="r-ligne"><span class="meta">Le</span><input id="r-crDate" type="date" value="${esc(r.crDate)}"><span class="meta">à</span><input id="r-crHeure" type="time" value="${esc(r.crHeure)}"></div>` : ''}
+    ${r.creneau === 'semaine' ? `<div class="r-ligne"><span class="meta">Semaine du</span><input id="r-crSemaine" type="date" value="${esc(r.crSemaine)}"></div>` : ''}
+    ${r.creneau === 'periode' ? `<div class="r-ligne"><span class="meta">Du</span><input id="r-crDu" type="date" value="${esc(r.crDu)}"><span class="meta">au</span><input id="r-crAu" type="date" value="${esc(r.crAu)}"></div>` : ''}
+    ${r.creneau !== 'aucun' ? `<label class="r-label" for="r-objet">Objet</label><input id="r-objet" value="${esc(r.objet)}">` : ''}`;
+  if (r.etape === 4) {
+    const quand = r.creneau === 'date' ? `RDV le ${fmtDate(r.crDate)}${r.crHeure ? ' à ' + r.crHeure : ''}` : r.creneau === 'semaine' ? `À prévoir la semaine du ${fmtDate(iso(monday(parse(r.crSemaine))))}` : r.creneau === 'periode' ? `À prévoir du ${fmtDate(r.crDu)} au ${fmtDate(r.crAu)}` : 'Rien dans le planning';
+    corps = `
+    <div class="recap">
+      <div class="recap-nom">${esc(r.nom || '?')}${r.entreprise ? ` <span class="meta">· ${esc(r.entreprise)}</span>` : ''} ${tag(r.activite)}</div>
+      <label class="r-label" for="r-sujet">De quoi vous avez parlé</label><input id="r-sujet" value="${esc(r.sujet || r.note)}">
+      <ul class="recap-list">
+        <li>${esc(ATTENTES[r.attente] || 'Rien en attente')}</li>
+        <li>${r.rappel ? `Rappel le ${esc(fmtDate(r.rappel))}` : 'Pas de rappel'}</li>
+        <li>${esc(quand)}${r.creneau !== 'aucun' ? ` · ${esc(r.objet)}` : ''}</li>
+      </ul>
+      ${r.resume ? `<p class="meta">${esc(r.resume)}</p>` : ''}
+      ${r.v ? '' : `<label class="r-label" for="r-tel">Téléphone (facultatif)</label><input id="r-tel" type="tel" value="${esc(r.tel)}">`}
+    </div>`;
+  }
+  $('#rencontre').innerHTML = `
+    <div class="r-card">
+      <div class="r-head">
+        <div><div class="meta">${r.v ? 'Prise de contact · ' + esc(r.v.nom) : 'Prise de contact'}</div><h2>${titres[r.etape]}</h2></div>
+        <div class="r-dots">${liste.map((e, i) => `<i class="${i <= pos ? 'on' : ''}"></i>`).join('')}</div>
+        <button type="button" class="btn icon" onclick="fermerRencontre()" aria-label="Fermer">✕</button>
+      </div>
+      <div class="r-body">${corps}</div>
+      <div class="r-foot">
+        <button type="button" class="btn" onclick="${pos === 0 ? 'fermerRencontre()' : 'rencAller(-1)'}">${pos === 0 ? 'Annuler' : 'Retour'}</button>
+        ${r.etape === 4 ? `<button type="button" class="btn primary" onclick="enregistrerRencontre()">Enregistrer</button>` : `<button type="button" class="btn primary" onclick="rencAller(1)">Continuer</button>`}
+      </div>
+    </div>`;
+}
+function enregistrerRencontre() {
+  rencLire();
+  const r = renc, v = r.v;
+  if (!v && !r.nom.trim()) { toast('Il manque le nom'); r.etape = 1; rencRender(); return; }
+  const target = v || { id: uid(), createdAt: Date.now(), statut: 'suivi', priorite: 'normale', historique: [], nom: r.nom.trim(), entreprise: r.entreprise.trim(), tel: r.tel.trim(), lien: r.lien };
+  target.activite = r.activite; target.attente = r.attente; target.rappel = r.rappel || '';
+  const sujet = (r.sujet || r.note || '').trim();
+  target.historique.push({ date: r.date || today(), texte: sujet || 'Prise de contact' });
+  if (target.statut === 'clos') target.statut = 'suivi';
+  if (!v) state.aVoir.push(target);
+  let msg = target.rappel ? `${target.nom} · rappel le ${fmtDate(target.rappel)}` : `${target.nom} enregistré`;
+  const ev = creneauContact(target, { creneau: r.creneau, crDate: r.crDate, crHeure: r.crHeure, crSemaine: r.crSemaine, crDu: r.crDu, crAu: r.crAu, objet: r.objet });
+  if (ev) msg = estPeriode(ev) ? `${target.nom} · à prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}` : `${target.nom} · RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`;
+  save(); fermerRencontre(); render(); toast(msg);
+}
+/* Dictée de la note (reconnaissance vocale du navigateur, en français) */
+let recNote = null;
+function dicteeRencontre() {
+  if (!SR) return;
+  if (recNote) { arreterDictee(); return; }
+  recNote = new SR(); recNote.lang = 'fr-FR'; recNote.continuous = true; recNote.interimResults = false;
+  recNote.onresult = e => { const t = Array.from(e.results).slice(e.resultIndex).map(x => x[0].transcript).join(' ').trim(); const ta = $('#r-note'); if (ta && t) { ta.value = (ta.value ? ta.value.trim() + ' ' : '') + t; renc.note = ta.value; } };
+  recNote.onend = () => { recNote = null; const b = $('#r-mic'); if (b) b.textContent = '🎤 Dicter'; };
+  recNote.onerror = () => { arreterDictee(); toast('Micro indisponible'); };
+  try { recNote.start(); const b = $('#r-mic'); if (b) b.textContent = '⏹ Stop'; } catch (e) { recNote = null; }
+}
+function arreterDictee() { if (recNote) { try { recNote.stop(); } catch (e) { /* ignore */ } recNote = null; } }
+/* Kami lit la note et remplit toutes les étapes ; on saute au récapitulatif */
+async function analyserRencontre() {
+  rencLire();
+  const texte = (renc.note || '').trim();
+  if (!texte) { toast('Écris ou dicte d\'abord une phrase'); return; }
   if (!jarvis.token) { toast('Colle ton jeton Kami dans Réglages'); return; }
-  const b = $('#btn-analyser'), etat = $('#note-etat');
-  b.disabled = true; etat.textContent = 'Kami lit…';
+  const b = $('#rencontre .btn.primary'); if (b) { b.disabled = true; b.textContent = 'Kami lit…'; }
   try {
     const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: today() }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.erreur || `Erreur ${r.status}`);
-    const set = (id, val) => { const el = $('#f-' + id); if (el && val !== undefined && val !== null && val !== '') el.value = val; };
-    set('nom', j.nom); set('entreprise', j.entreprise); set('tel', j.tel);
-    if (j.activite) $('#f-activite').value = j.activite;
-    $('#f-attente').value = j.attente || '';
-    set('sujet', j.sujet);
-    document.querySelectorAll('.rappel-chip').forEach(x => x.classList.remove('on'));
-    $('#f-rappel').value = j.rappel || '';
+    const x = renc;
+    if (!x.v) { if (j.nom) x.nom = j.nom; if (j.entreprise) x.entreprise = j.entreprise; if (j.tel) x.tel = j.tel; }
+    if (j.activite) x.activite = j.activite;
+    x.attente = j.attente || ''; x.sujet = j.sujet || texte; x.rappel = j.rappel || ''; x.rappelJ = j.rappel ? 'x' : '';
     const c = j.creneau || { type: 'aucun' };
-    choisirCreneau(document.querySelector(`.creneau .seg button[data-k="${c.type || 'aucun'}"]`) || document.querySelector('.creneau .seg button[data-k="aucun"]'));
-    if (c.type === 'date') { set('crDate', c.date); $('#f-crHeure').value = c.heure || ''; }
-    if (c.type === 'semaine') set('crSemaine', c.du);
-    if (c.type === 'periode') { set('crDu', c.du); set('crAu', c.au); }
-    if (c.type !== 'aucun' && j.objet) $('#f-objet').value = j.objet;
-    etat.textContent = j.resume || 'Vérifie et enregistre.';
+    x.creneau = c.type || 'aucun';
+    if (c.type === 'date') { x.crDate = c.date || x.crDate; x.crHeure = c.heure || ''; }
+    if (c.type === 'semaine') x.crSemaine = c.du || x.crSemaine;
+    if (c.type === 'periode') { x.crDu = c.du || x.crDu; x.crAu = c.au || x.crAu; }
+    if (c.type !== 'aucun' && j.objet) x.objet = j.objet;
+    x.resume = j.resume || '';
+    x.etape = 4; rencRender();
   } catch (e) {
-    etat.textContent = ''; toast(e.message || 'Analyse impossible');
-  } finally { b.disabled = false; }
+    toast(e.message || 'Analyse impossible'); rencRender();
+  }
 }
 /* Le créneau choisi dans la prise de contact devient une entrée du planning liée au contact */
 function creneauContact(v, f) {
