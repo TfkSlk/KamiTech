@@ -20,10 +20,10 @@ const ACTIFS = ['prospect', 'rdv', 'etude', 'signe'];
 
 /* Contacts : les gens croisés à qui présenter un service. Journal des prises de contact + rappel. */
 const STATUTS_AV = { suivi: 'En cours', planifie: 'RDV planifié', clos: 'Clos' };
-const AV_OUVERTS = ['suivi'];
 const ATTENTES = { '': 'Rien en attente', lui: "J'attends ses informations", moi: 'Je lui dois des informations' };
 const PRIORITES = { haute: 'Haute', normale: 'Normale', basse: 'Basse' };
-const RAPPELS = [['2', '2 jours'], ['3', '3 jours'], ['7', '1 semaine'], ['14', '2 semaines'], ['', 'Pas de rappel']];
+/* Chaque contact a toujours une suite : un rappel (en jours ouvrés), un créneau, ou la clôture explicite */
+const RAPPELS = [['2', '2 jours'], ['3', '3 jours'], ['7', '1 semaine'], ['14', '2 semaines'], ['clos', 'Clore le contact']];
 
 const STATUTS_AB = { essai: "Période d'essai", actif: 'Actif', resilie: 'Résilié' };
 
@@ -55,12 +55,18 @@ const blank = () => ({
 let state = load();
 
 function load() {
-  let s = blank();
+  let s = blank(), lu = null;
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) s = { ...s, ...JSON.parse(raw) };
+    if (raw) { lu = JSON.parse(raw); s = { ...s, ...lu }; }
   } catch (e) { /* stockage indisponible */ }
-  return migrate(s);
+  s = migrate(s);
+  /* Une migration nommée vient de tourner : on l'écrit tout de suite pour qu'elle ne rejoue pas (save() n'est pas encore utilisable ici) */
+  if (lu) {
+    const avant = (lu.prefs && lu.prefs.migrations) || {};
+    if (Object.keys(s.prefs.migrations).some(k => !avant[k])) { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) { /* stockage plein ou bloqué : rejouera au prochain chargement, sans dommage */ } }
+  }
+  return s;
 }
 function migrate(s) {
   const jourLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }; // today() n'est pas encore défini ici
@@ -87,6 +93,22 @@ function migrate(s) {
     if (!e.duree) e.duree = 60;
     if (!e.mode) e.mode = 'place';
   });
+  /* Migrations nommées : chacune ne tourne qu'une fois (drapeau dans prefs.migrations), dans n'importe quel ordre.
+     Ici, les utilitaires (today, iso, estPeriode…) ne sont pas encore définis : code en ligne et jourLocal() seulement. */
+  s.prefs.migrations = s.prefs.migrations || {};
+  /* Victimes du rappel non enregistré ou du RDV oublié : ils reviennent aujourd'hui. Rien n'est supprimé, les journaux restent. */
+  if (!s.prefs.migrations.rappelsRecuperes) {
+    const j = jourLocal();
+    s.aVoir.forEach(v => {
+      if (v.statut === 'suivi' && !v.rappel) v.rappel = j;
+      else if (v.statut === 'planifie') {
+        const e = v.eventId ? s.events.find(x => x.id === v.eventId) : null;
+        const finRdv = e ? (e.fin && e.fin > e.date ? e.fin : e.date) : '';
+        if (!e || e.fait || !finRdv || finRdv < j) { v.statut = 'suivi'; v.rappel = j; }
+      }
+    });
+    s.prefs.migrations.rappelsRecuperes = true;
+  }
   return s;
 }
 function save() {
@@ -102,6 +124,9 @@ const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())
 const today = () => iso(new Date());
 const parse = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+/* Un rappel ou un RDV automatique ne tombe jamais un week-end : samedi et dimanche glissent au lundi */
+const jourOuvre = d => { const x = new Date(d); const j = x.getDay(); if (j === 6) x.setDate(x.getDate() + 2); else if (j === 0) x.setDate(x.getDate() + 1); return x; };
+const rappelDans = n => iso(jourOuvre(addDays(new Date(), n)));
 const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; };
 const monday = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
 const eur = n => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n || 0);
@@ -119,7 +144,7 @@ const estPeriode = e => !!(e.fin && e.fin > e.date);
 const surJour = (e, ds) => estPeriode(e) ? (e.date <= ds && ds <= e.fin) : e.date === ds;
 const abonne = id => state.abonnes.find(a => a.id === id);
 const aVoir = id => state.aVoir.find(v => v.id === id);
-const dernierContact = v => (v.historique || [])[v.historique.length - 1];
+const dernierContact = v => { const h = v.historique || []; return h[h.length - 1]; };
 const formule = id => state.formules.find(f => f.id === id);
 const lienNom = l => {
   if (!l) return '';
@@ -147,6 +172,18 @@ function toast(msg) {
   t.classList.add('show');
   clearTimeout(toast.t);
   toast.t = setTimeout(() => t.classList.remove('show'), 2400);
+}
+/* Toast avec un bouton d'action (ex. « Noter la suite ») : reste affiché plus longtemps, seul le bouton est cliquable */
+function toastAction(msg, label, fn, ms = 8000) {
+  const t = $('#toast');
+  t.textContent = msg;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'toast-action'; b.textContent = label;
+  b.onclick = () => { clearTimeout(toast.t); t.classList.remove('show'); fn(); };
+  t.appendChild(b);
+  t.classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => t.classList.remove('show'), ms);
 }
 
 /* ---------- Calculs : périodes, gains, temps ---------- */
@@ -239,7 +276,7 @@ function itemList(items, showDate) {
   const t = today();
   return `<ul class="list">${items.map(e => {
     const late = !e.fait && !e.contact && (estPeriode(e) ? e.fin < t : e.date < t);
-    const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.contact ? (e.date < t ? `Rappel du ${fmtDate(e.date)}` : 'Rappel') : e.relance ? 'Relance' : 'Dans la journée'));
+    const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.contact ? (e.rdvPasse ? (e.rdvDate ? `RDV du ${fmtDate(e.rdvDate)}` : 'RDV retiré') : e.date < t ? `Rappel du ${fmtDate(e.date)}` : 'Rappel') : e.relance ? 'Relance' : 'Dans la journée'));
     const click = e.contact ? `openAVoir('${e.contact}')` : e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
     const client = lienNom(e.lien);
     const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? [e.aPrevoir ? 'Date à prévoir dans la période' : 'Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
@@ -601,9 +638,7 @@ function openAbonne(id) {
 function planifierInclus(a) {
   const start = parse(a.debut || today());
   state.rdvModele.forEach(r => {
-    let d = addDays(start, num(r.jours));
-    if (d.getDay() === 6) d = addDays(d, 2);
-    if (d.getDay() === 0) d = addDays(d, 1);
+    const d = jourOuvre(addDays(start, num(r.jours)));
     state.events.push({ id: uid(), date: iso(d), heure: '10:00', duree: num(r.duree) || 60, mode: r.mode, titre: r.titre, activite: 'kamifood', lien: 'a:' + a.id, fait: false, notes: '' });
   });
 }
@@ -664,7 +699,7 @@ const secteurDe = l => l ? (l[0] === 'a' ? 'kamifood' : l[0] === 'c' ? aVoir(l.s
 function openEvent(id, date, lien, heure, apres, prefill) {
   const e = id ? state.events.find(x => x.id === id)
     : { date: date || today(), heure: heure || '', duree: 60, mode: 'visio', activite: secteurDe(lien) || (planFiltre !== 'all' ? planFiltre : 'perso'), lien: lien || '', titre: lien ? `RDV ${lienNom(lien)}` : '', ...(prefill || {}) };
-  const opts = liensOpts();
+  const opts = liensOpts(e.lien);
   showModal(`
     <h2>${id ? 'Modifier le RDV' : 'Nouveau RDV / tâche'}</h2>
     <div class="fields">
@@ -696,33 +731,63 @@ function openEvent(id, date, lien, heure, apres, prefill) {
 }
 
 /* ---------- Contacts : prises de contact et rappels ---------- */
-const liensOpts = () => ({
-  '': '— Aucun —',
-  ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
-  ...Object.fromEntries(state.dossiers.map(d => ['d:' + d.id, `${d.entreprise} (${SECTEURS[d.activite].label})`])),
-  ...Object.fromEntries(state.aVoir.filter(v => v.statut !== 'clos').map(v => ['c:' + v.id, `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''} (contact)`])),
-});
-/* Rappels dus : affichés dans « Aujourd'hui » comme des alertes */
+/* Options « Client lié » : le lien actuel reste toujours proposé (même vers un contact clos ou disparu),
+   pour qu'un enregistrement sans modification ne le perde jamais ; exclure retire la fiche elle-même. */
+const liensOpts = (courant = '', exclure = '') => {
+  const nomContact = v => `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''}`;
+  const o = {
+    '': '— Aucun —',
+    ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
+    ...Object.fromEntries(state.dossiers.map(d => ['d:' + d.id, `${d.entreprise} (${SECTEURS[d.activite]?.label || d.activite})`])),
+    ...Object.fromEntries(state.aVoir.filter(v => v.statut !== 'clos').map(v => ['c:' + v.id, `${nomContact(v)} (contact)`])),
+  };
+  if (courant && !(courant in o)) {
+    const v = courant.startsWith('c:') ? aVoir(courant.slice(2)) : null;
+    o[courant] = v ? `${nomContact(v)} (clos)` : `${lienNom(courant) || 'Lien actuel'} (introuvable)`;
+  }
+  if (exclure) delete o[exclure];
+  return o;
+};
+/* Fin d'un RDV (dernier jour pour une période) */
+const finRdv = e => e.fin && e.fin > e.date ? e.fin : e.date;
+/* Un contact « RDV planifié » dont le RDV a disparu, est fait ou est passé doit revenir : quelle suite ? */
+function rdvPasse(v) {
+  if (v.statut !== 'planifie') return false;
+  const ev = v.eventId && state.events.find(e => e.id === v.eventId);
+  return !ev || !!ev.fait || finRdv(ev) < today();
+}
+/* Rappels dus et RDV passés sans suite : affichés dans « Aujourd'hui » (ou en retard) ; alerte rouge si je dois quelque chose */
 function rappelsContacts() {
   const t = today();
-  return state.aVoir.filter(v => v.statut === 'suivi' && v.rappel && v.rappel <= t).map(v => {
+  const ligne = (v, date, sousTitre, extra) => ({ id: 'c-' + v.id, contact: v.id, lien: v.lien || '', date, heure: '', activite: v.activite || 'perso', important: v.attente === 'moi',
+    titre: `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''}${ATTENTES[v.attente] && v.attente ? ' · ' + ATTENTES[v.attente].toLowerCase() : ''}`, sousTitre, ...extra });
+  const dus = state.aVoir.filter(v => v.statut === 'suivi' && v.rappel && v.rappel <= t).map(v => {
     const d = dernierContact(v);
-    return { id: 'c-' + v.id, contact: v.id, lien: v.lien || '', date: v.rappel, heure: '', activite: v.activite || 'perso', important: !!v.attente,
-      titre: `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''}${v.attente ? ' · ' + ATTENTES[v.attente].toLowerCase() : ''}`,
-      sousTitre: d ? `Dernier contact le ${fmtDate(d.date)} : ${d.texte}` : 'À recontacter' };
+    return ligne(v, v.rappel, d ? `Dernier contact le ${fmtDate(d.date)} : ${d.texte}` : 'À recontacter');
   });
+  const passes = state.aVoir.filter(rdvPasse).map(v => {
+    const ev = v.eventId && state.events.find(e => e.id === v.eventId);
+    const lendemain = ev?.date ? iso(addDays(parse(finRdv(ev)), 1)) : t;
+    return ligne(v, lendemain < t ? lendemain : t, 'RDV passé · quelle suite ?', { rdvPasse: true, rdvDate: ev?.date || '' });
+  });
+  return [...dus, ...passes];
 }
+/* Dates lisibles : « mardi 13 oct. » et « jeu. 15 oct. » */
+const jourLong = s => s ? parse(s).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' }) : '';
+const jourCourt = s => s ? parse(s).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
 /* Bouton rapide : une prise de contact (nouvelle personne, ou nouvelle entrée pour une personne connue) */
 /* Rencontre : saisie en étapes, chaque écran tient sans défiler (téléphone compris) */
 let renc = null;
 function openContact(id, prefill) {
   const v = id ? aVoir(id) : null;
   const p = prefill || {};
+  /* Un rappel futur déjà posé est gardé ; sinon rappel dans 3 jours ouvrés, choisi d'office et enregistré tel quel */
+  const garder = !!(v && v.rappel && v.rappel > today());
   renc = {
     v, etape: 0, note: [p.nom, p.sujet].filter(Boolean).join(' : '),
     nom: v ? v.nom : (p.nom || ''), entreprise: v ? (v.entreprise || '') : (p.entreprise || ''),
     activite: v ? (v.activite || 'perso') : (APPORT.includes(filtre.activite) ? filtre.activite : 'energie'),
-    sujet: p.sujet || '', attente: v ? (v.attente || '') : '', rappel: '', rappelJ: '3',
+    sujet: p.sujet || '', attente: v ? (v.attente || '') : '', rappel: garder ? v.rappel : rappelDans(3), rappelJ: garder ? 'garder' : '3',
     creneau: 'aucun', crDate: today(), crHeure: '', crSemaine: iso(monday(addDays(new Date(), 7))), crDu: today(), crAu: iso(addMonths(new Date(), 1)),
     objet: 'Présentation des services', tel: '', lien: v ? (v.lien || '') : '', date: today(), resume: '',
   };
@@ -751,11 +816,35 @@ function rencLire() {
   const r = renc;
   if (r.etape === 0) r.note = g('note') ?? r.note;
   if (r.etape === 1) { r.nom = g('nom') ?? r.nom; r.entreprise = g('entreprise') ?? r.entreprise; }
-  if (r.etape === 2) r.rappel = g('rappel') ?? r.rappel;
+  if (r.etape === 2) { const d = g('rappel'); if (d !== undefined && d !== r.rappel) { r.rappel = d; r.rappelJ = 'x'; } }
   if (r.etape === 3) { r.crDate = g('crDate') ?? r.crDate; r.crHeure = g('crHeure') ?? r.crHeure; r.crSemaine = g('crSemaine') ?? r.crSemaine; r.crDu = g('crDu') ?? r.crDu; r.crAu = g('crAu') ?? r.crAu; r.objet = g('objet') ?? r.objet; }
   if (r.etape === 4) { r.sujet = g('sujet') ?? r.sujet; r.tel = g('tel') ?? r.tel; }
 }
-function rencSet(k, val) { rencLire(); renc[k] = val; if (k === 'rappelJ') renc.rappel = val ? iso(addDays(new Date(), Number(val))) : ''; rencRender(); }
+function rencSet(k, val) {
+  rencLire(); renc[k] = val;
+  if (k === 'rappelJ') renc.rappel = val === 'clos' ? '' : val === 'garder' ? (renc.v?.rappel || '') : rappelDans(Number(val));
+  rencRender();
+}
+/* Date de rappel choisie à la main : aucune puce ne reste allumée, la date en clair suit (sans redessiner l'écran) */
+function rencDate(val) {
+  renc.rappel = val; renc.rappelJ = 'x';
+  document.querySelectorAll('#r-rappels .chip').forEach(b => b.classList.remove('on'));
+  const p = $('#r-rappel-txt'); if (p) { p.textContent = rappelTexte(renc); p.classList.toggle('manque', !renc.rappel); }
+}
+const rappelTexte = r => r.rappelJ === 'clos' ? '→ contact clos, plus de rappel' : r.rappel ? `→ ${jourLong(r.rappel)}` : '→ aucune date : choisis une durée, une date, ou clos le contact';
+/* Le créneau de l'étape 3 est-il complet ? */
+const creneauOk = r => r.creneau === 'date' ? !!r.crDate : r.creneau === 'semaine' ? !!r.crSemaine : r.creneau === 'periode' ? !!(r.crDu && r.crAu) : false;
+/* La suite de la prise de contact pour le récapitulatif : une ligne par élément ; ok = false si rien n'est prévu */
+function rencSuite(r) {
+  const cr = creneauOk(r);
+  const quand = r.creneau === 'date' ? `RDV le ${jourCourt(r.crDate)}${r.crHeure ? ' à ' + r.crHeure : ''}` : r.creneau === 'semaine' ? `à prévoir la semaine du ${fmtDate(iso(monday(parse(r.crSemaine))))}` : r.creneau === 'periode' ? `à prévoir du ${fmtDate(r.crDu)} au ${fmtDate(r.crAu)}` : '';
+  const parts = [];
+  if (r.rappelJ !== 'clos' && r.rappel) parts.push(`Rappel ${jourLong(r.rappel)}`);
+  if (cr) parts.push(`${quand} · ${(r.objet || '').trim() || 'Présentation des services'}`);
+  if (parts.length) return { ok: true, lignes: parts.map(x => x.replace(/^à/, 'À')) };
+  if (r.rappelJ === 'clos') return { ok: true, lignes: ['Contact clos : il sort des rappels'] };
+  return { ok: false, lignes: ['Aucune suite : choisis un rappel, un créneau ou clos le contact'] };
+}
 function rencRender() {
   const r = renc, liste = RENC_ETAPES(), pos = liste.indexOf(r.etape);
   const opt = (k, val, label, sub) => `<button type="button" class="opt ${r[k] === val ? 'on' : ''}" onclick="rencSet('${k}','${val}')"><b>${label}</b>${sub ? `<span>${sub}</span>` : ''}</button>`;
@@ -777,8 +866,9 @@ function rencRender() {
     <label class="r-label">Qui attend quoi ?</label>
     <div class="opts">${opt('attente', '', 'Rien en attente')}${opt('attente', 'lui', "J'attends ses informations", 'Il doit me revenir')}${opt('attente', 'moi', 'Je lui dois des informations', 'Je dois lui envoyer quelque chose')}</div>
     <label class="r-label">Me le rappeler</label>
-    <div class="chips">${RAPPELS.map(([j, l]) => `<button type="button" class="chip ${r.rappelJ === j ? 'on' : ''}" onclick="rencSet('rappelJ','${j}')">${l}</button>`).join('')}</div>
-    <input id="r-rappel" type="date" value="${esc(r.rappel)}" onchange="renc.rappelJ='x'">`;
+    <div class="chips" id="r-rappels">${r.v && r.v.rappel && r.v.rappel > today() ? `<button type="button" class="chip ${r.rappelJ === 'garder' ? 'on' : ''}" onclick="rencSet('rappelJ','garder')">Garder · ${esc(jourCourt(r.v.rappel))}</button>` : ''}${RAPPELS.map(([j, l]) => `<button type="button" class="chip ${j === 'clos' ? 'clore' : ''} ${r.rappelJ === j ? 'on' : ''}" onclick="rencSet('rappelJ','${j}')">${l}</button>`).join('')}</div>
+    <p class="meta r-rappel-txt ${r.rappel || r.rappelJ === 'clos' ? '' : 'manque'}" id="r-rappel-txt">${esc(rappelTexte(r))}</p>
+    <input id="r-rappel" type="date" value="${esc(r.rappel)}" onchange="rencDate(this.value)" aria-label="Date du rappel">`;
   if (r.etape === 3) corps = `
     <div class="opts quatre">${opt('creneau', 'aucun', 'Rien', 'Juste le rappel')}${opt('creneau', 'date', 'Un jour', 'Date précise')}${opt('creneau', 'semaine', 'Une semaine', 'À caler dedans')}${opt('creneau', 'periode', 'Une période', 'Quelques semaines ou mois')}</div>
     ${r.creneau === 'date' ? `<div class="r-ligne"><span class="meta">Le</span><input id="r-crDate" type="date" value="${esc(r.crDate)}"><span class="meta">à</span><input id="r-crHeure" type="time" value="${esc(r.crHeure)}"></div>` : ''}
@@ -786,16 +876,13 @@ function rencRender() {
     ${r.creneau === 'periode' ? `<div class="r-ligne"><span class="meta">Du</span><input id="r-crDu" type="date" value="${esc(r.crDu)}"><span class="meta">au</span><input id="r-crAu" type="date" value="${esc(r.crAu)}"></div>` : ''}
     ${r.creneau !== 'aucun' ? `<label class="r-label" for="r-objet">Objet</label><input id="r-objet" value="${esc(r.objet)}">` : ''}`;
   if (r.etape === 4) {
-    const quand = r.creneau === 'date' ? `RDV le ${fmtDate(r.crDate)}${r.crHeure ? ' à ' + r.crHeure : ''}` : r.creneau === 'semaine' ? `À prévoir la semaine du ${fmtDate(iso(monday(parse(r.crSemaine))))}` : r.creneau === 'periode' ? `À prévoir du ${fmtDate(r.crDu)} au ${fmtDate(r.crAu)}` : 'Rien dans le planning';
+    const suite = rencSuite(r);
     corps = `
     <div class="recap">
       <div class="recap-nom">${esc(r.nom || '?')}${r.entreprise ? ` <span class="meta">· ${esc(r.entreprise)}</span>` : ''} ${tag(r.activite)}</div>
       <label class="r-label" for="r-sujet">De quoi vous avez parlé</label><input id="r-sujet" value="${esc(r.sujet || r.note)}">
-      <ul class="recap-list">
-        <li>${esc(ATTENTES[r.attente] || 'Rien en attente')}</li>
-        <li>${r.rappel ? `Rappel le ${esc(fmtDate(r.rappel))}` : 'Pas de rappel'}</li>
-        <li>${esc(quand)}${r.creneau !== 'aucun' ? ` · ${esc(r.objet)}` : ''}</li>
-      </ul>
+      <ul class="recap-list"><li>${esc(r.rappelJ === 'clos' && !creneauOk(r) ? 'Rien en attente' : ATTENTES[r.attente] || 'Rien en attente')}</li></ul>
+      <div class="recap-suite ${suite.ok ? '' : 'manque'}" id="r-suite"><span class="r-label">La suite</span>${suite.lignes.map(l => `<b>${esc(l)}</b>`).join('')}</div>
       ${r.resume ? `<p class="meta">${esc(r.resume)}</p>` : ''}
       ${r.v ? '' : `<label class="r-label" for="r-tel">Téléphone (facultatif)</label><input id="r-tel" type="tel" value="${esc(r.tel)}">`}
     </div>`;
@@ -814,19 +901,28 @@ function rencRender() {
       </div>
     </div>`;
 }
+/* Enregistre la prise de contact. Jamais sans suite : un rappel, un créneau, ou la clôture explicite.
+   Toutes les vérifications passent avant la moindre modification des données. */
 function enregistrerRencontre() {
   rencLire();
   const r = renc, v = r.v;
   if (!v && !r.nom.trim()) { toast('Il manque le nom'); r.etape = 1; rencRender(); return; }
+  const cr = creneauOk(r);
+  const clore = r.rappelJ === 'clos' && !cr; // un créneau choisi l'emporte : le contact reste ouvert
+  if (!clore && !r.rappel && !cr) { toast('Choisis une suite : un rappel, un créneau ou clore'); r.etape = 2; rencRender(); return; }
   const target = v || { id: uid(), createdAt: Date.now(), statut: 'suivi', priorite: 'normale', historique: [], nom: r.nom.trim(), entreprise: r.entreprise.trim(), tel: r.tel.trim(), lien: r.lien };
-  target.activite = r.activite; target.attente = r.attente; target.rappel = r.rappel || '';
+  target.activite = r.activite;
+  if (clore) { target.statut = 'clos'; target.rappel = ''; target.attente = ''; }
+  else { target.attente = r.attente; target.rappel = r.rappelJ === 'clos' ? '' : (r.rappel || ''); if (target.statut === 'clos') target.statut = 'suivi'; }
   const sujet = (r.sujet || r.note || '').trim();
+  if (!Array.isArray(target.historique)) target.historique = [];
   target.historique.push({ date: r.date || today(), texte: sujet || 'Prise de contact' });
-  if (target.statut === 'clos') target.statut = 'suivi';
   if (!v) state.aVoir.push(target);
-  let msg = target.rappel ? `${target.nom} · rappel le ${fmtDate(target.rappel)}` : `${target.nom} enregistré`;
-  const ev = creneauContact(target, { creneau: r.creneau, crDate: r.crDate, crHeure: r.crHeure, crSemaine: r.crSemaine, crDu: r.crDu, crAu: r.crAu, objet: r.objet });
+  let msg = clore ? `${target.nom} · contact clos` : target.rappel ? `${target.nom} · rappel ${jourLong(target.rappel)}` : `${target.nom} enregistré`;
+  const ev = cr ? creneauContact(target, { creneau: r.creneau, crDate: r.crDate, crHeure: r.crHeure, crSemaine: r.crSemaine, crDu: r.crDu, crAu: r.crAu, objet: r.objet }) : null;
   if (ev) msg = estPeriode(ev) ? `${target.nom} · à prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}` : `${target.nom} · RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`;
+  /* « RDV planifié » seulement s'il y a vraiment un nouveau RDV daté ; sinon le contact repart en suivi avec sa suite */
+  if (target.statut === 'planifie' && !(ev && !estPeriode(ev))) target.statut = 'suivi';
   save(); fermerRencontre(); render(); toast(msg);
 }
 /* Dictée de la note (reconnaissance vocale du navigateur, en français) */
@@ -855,7 +951,8 @@ async function analyserRencontre() {
     const x = renc;
     if (!x.v) { if (j.nom) x.nom = j.nom; if (j.entreprise) x.entreprise = j.entreprise; if (j.tel) x.tel = j.tel; }
     if (j.activite) x.activite = j.activite;
-    x.attente = j.attente || ''; x.sujet = j.sujet || texte; x.rappel = j.rappel || ''; x.rappelJ = j.rappel ? 'x' : '';
+    x.attente = j.attente || ''; x.sujet = j.sujet || texte;
+    if (j.rappel) { x.rappel = j.rappel; x.rappelJ = 'x'; } // sinon le rappel par défaut (3 jours ouvrés, ou celui déjà posé) reste
     const c = j.creneau || { type: 'aucun' };
     x.creneau = c.type || 'aucun';
     if (c.type === 'date') { x.crDate = c.date || x.crDate; x.crHeure = c.heure || ''; }
@@ -884,18 +981,6 @@ function creneauContact(v, f) {
   v.eventId = ev.id;
   return ev;
 }
-function choisirCreneau(btn) {
-  btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
-  const k = btn.dataset.k; $('#f-creneau').value = k;
-  ['date', 'semaine', 'periode'].forEach(x => { $('#cr-' + x).hidden = x !== k; });
-  $('#cr-objet').hidden = k === 'aucun';
-}
-function choisirRappel(btn) {
-  if (!btn) return;
-  document.querySelectorAll('.rappel-chip').forEach(b => b.classList.toggle('on', b === btn));
-  const j = btn.dataset.j;
-  $('#f-rappel').value = j ? iso(addDays(new Date(), Number(j))) : '';
-}
 /* Fiche complète : coordonnées, journal, statut */
 function openAVoir(id) {
   const v = id ? aVoir(id) : null;
@@ -914,13 +999,15 @@ function openAVoir(id) {
       ${field('tel', 'Téléphone', inp('tel', v.tel, 'tel'))}
       ${field('email', 'E-mail', inp('email', v.email, 'email'))}
       ${field('ville', 'Ville', inp('ville', v.ville))}
-      ${field('lien', 'Client lié (facultatif)', sel('lien', liensOpts(), v.lien || ''))}
+      ${field('lien', 'Client lié (facultatif)', sel('lien', liensOpts(v.lien, 'c:' + v.id), v.lien || ''))}
       ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(v.notes || '')}</textarea>`, true)}
       <div class="field full"><label>Journal des contacts</label><ul class="list journal">${journal || '<li class="meta">Aucune prise de contact notée.</li>'}</ul></div>
     </div>
     ${actions(`<button type="button" class="btn danger" onclick="supprimerAVoir('${id}')">Supprimer</button>`,
       `<button type="button" class="btn" onclick="openContact('${id}')">+ Prise de contact</button><button type="button" class="btn" onclick="planifierAVoir('${id}')">Planifier un RDV</button>`)}`,
   f => {
+    /* Clore à la main : plus de rappel ni d'attente, le contact sort des alertes */
+    if (f.statut === 'clos' && v.statut !== 'clos') { f.rappel = ''; f.attente = ''; }
     Object.assign(v, f);
     save(); modal().close(); render(); toast('Fiche mise à jour');
   });
@@ -929,12 +1016,10 @@ async function supprimerAVoir(id) {
   modal().close();
   if (!await confirmer('Supprimer ce contact et son journal ?', 'Supprimer')) return;
   state.aVoir = state.aVoir.filter(v => v.id !== id);
+  /* Plus de lien orphelin vers ce contact (RDV du planning, autres fiches) */
+  state.events.forEach(e => { if (e.lien === 'c:' + id) e.lien = ''; });
+  state.aVoir.forEach(x => { if (x.lien === 'c:' + id) x.lien = ''; });
   save(); render(); toast('Supprimé');
-}
-function marquerAVoir(id, statut) {
-  const v = aVoir(id); if (!v) return;
-  v.statut = statut; if (statut === 'clos') { v.rappel = ''; v.attente = ''; }
-  save(); render();
 }
 /* Ouvre le formulaire de RDV pré-rempli ; à l'enregistrement le contact passe en « RDV planifié » */
 function planifierAVoir(id) {
@@ -942,12 +1027,12 @@ function planifierAVoir(id) {
   const d = dernierContact(v);
   const qui = [v.nom, v.entreprise].filter(Boolean).join(' · ');
   modal().close();
-  openEvent(null, today(), v.lien || '', '', ev => { v.statut = 'planifie'; v.eventId = ev.id; v.rappel = ''; },
+  openEvent(null, today(), v.lien || '', '', ev => { v.statut = 'planifie'; v.eventId = ev.id; },
     { titre: `RDV ${qui}`, activite: v.activite || 'perso', notes: d ? d.texte : '' });
 }
 function aVoirTri(a, b) {
   const t = today();
-  const due = v => v.statut === 'suivi' && v.rappel && v.rappel <= t ? 0 : 1;
+  const due = v => (v.statut === 'suivi' && v.rappel && v.rappel <= t) || rdvPasse(v) ? 0 : 1;
   const pr = { haute: 0, normale: 1, basse: 2 };
   return due(a) - due(b) || (a.rappel || '9999').localeCompare(b.rappel || '9999') || (pr[a.priorite] ?? 1) - (pr[b.priorite] ?? 1)
     || ((dernierContact(b) || {}).date || '').localeCompare((dernierContact(a) || {}).date || '');
@@ -955,11 +1040,13 @@ function aVoirTri(a, b) {
 function aVoirItem(v, compact) {
   const t = today();
   const ouvert = v.statut === 'suivi';
+  const passe = rdvPasse(v);
   const d = dernierContact(v);
   const ev = v.eventId && state.events.find(e => e.id === v.eventId);
   const jours = v.rappel ? Math.round((parse(v.rappel) - parse(t)) / 864e5) : null;
   const late = ouvert && jours !== null && jours < 0;
-  const when = ev && estPeriode(ev) && !ev.fait ? `À prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}${jours !== null && ouvert ? ' · rappel ' + (jours < 0 ? 'dépassé' : jours === 0 ? 'aujourd\'hui' : 'dans ' + jours + ' j') : ''}`
+  const when = passe ? `${ev && !ev.fait ? 'RDV du ' + fmtDate(ev.date) + ' passé' : ev ? 'RDV fait' : 'RDV retiré'} · quelle suite ?`
+    : ev && estPeriode(ev) && !ev.fait ? `À prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}${jours !== null && ouvert ? ' · rappel ' + (jours < 0 ? 'dépassé' : jours === 0 ? 'aujourd\'hui' : 'dans ' + jours + ' j') : ''}`
     : v.statut === 'planifie' && ev ? `RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`
     : v.statut === 'clos' ? 'Clos'
     : jours === null ? 'Pas de rappel'
@@ -967,13 +1054,13 @@ function aVoirItem(v, compact) {
     : jours === 0 ? 'Rappel aujourd\'hui'
     : jours === 1 ? 'Rappel demain' : `Rappel dans ${jours} j`;
   const attente = v.attente ? `<span class="status ${v.attente === 'lui' ? 'signe' : 'perdu'}">${ATTENTES[v.attente]}</span>` : '';
-  return `<li class="${late || (ouvert && jours === 0) ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${ouvert && v.attente ? 'alerte' : ''}">
+  return `<li class="${late || passe || (ouvert && jours === 0) ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${ouvert && v.attente ? 'alerte' : ''}">
     <div class="grow clickable" onclick="openAVoir('${v.id}')">
-      <div class="when ${late ? 'late' : ''}">${esc(when)}</div>
+      <div class="when ${late || passe ? 'late' : ''}">${esc(when)}</div>
       <div class="title-txt">${ouvert && v.attente ? '<span class="warn-ico" title="En attente">⚠</span> ' : ''}${esc(v.nom)}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
       <div class="meta">${d ? `${esc(fmtDate(d.date))} : ${esc(d.texte)}` : 'Aucune prise de contact notée'}</div>
     </div>
-    ${ouvert ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
+    ${ouvert || passe ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
     ${ouvert && !compact ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">RDV</button>` : ''}
     <i class="dot" style="background:var(--${v.activite || 'perso'})" data-tip="${esc(SECTEURS[v.activite]?.label || '')}" aria-label="${esc(SECTEURS[v.activite]?.label || '')}"></i>
   </li>`;
@@ -982,7 +1069,7 @@ function aVoirView() {
   tipInit();
   const t = today();
   const suivis = state.aVoir.filter(v => v.statut === 'suivi');
-  const dus = suivis.filter(v => v.rappel && v.rappel <= t);
+  const dus = rappelsContacts();
   const attente = suivis.filter(v => v.attente);
   const rows = state.aVoir.filter(v => avFiltre === 'tous' || (avFiltre === 'attente' ? v.statut === 'suivi' && v.attente : v.statut === avFiltre)).sort(aVoirTri);
   const chips = [['suivi', `En cours (${suivis.length})`], ['attente', `En attente d'infos (${attente.length})`], ['planifie', `RDV planifié (${state.aVoir.filter(v => v.statut === 'planifie').length})`], ['clos', `Clos (${state.aVoir.filter(v => v.statut === 'clos').length})`], ['tous', 'Tous']]
@@ -998,14 +1085,27 @@ function aVoirView() {
       : `<div class="empty">${state.aVoir.length ? 'Personne dans ce filtre.' : 'Tu croises quelqu\'un, vous parlez d\'un service : note-le ici en 10 secondes avec un rappel dans 2 ou 3 jours. Le jour venu, il apparaît en alerte sur l\'accueil.'}</div>`}
   </div>`;
 }
+/* Le RDV d'un contact est fait ou supprimé : le contact repart en suivi, avec un rappel au plus tard aujourd'hui */
+function libererContact(e) {
+  if (!e || !String(e.lien || '').startsWith('c:')) return null;
+  const v = aVoir(e.lien.slice(2));
+  if (!v || v.eventId !== e.id || v.statut === 'clos') return null;
+  v.statut = 'suivi'; v.eventId = '';
+  v.rappel = v.rappel && v.rappel > today() ? v.rappel : today();
+  return v;
+}
 function toggleEvent(id) {
   const e = state.events.find(x => x.id === id);
+  if (!e) return;
   e.fait = !e.fait;
+  const v = e.fait ? libererContact(e) : null;
   save(); render();
+  if (v) toastAction('RDV fait avec ' + v.nom, 'Noter la suite', () => openContact(v.id));
 }
 function supprimerEvent(id) {
+  const v = libererContact(state.events.find(e => e.id === id));
   state.events = state.events.filter(e => e.id !== id);
-  save(); modal().close(); render(); toast('Supprimé');
+  save(); modal().close(); render(); toast(v ? `Supprimé · ${v.nom} revient dans tes rappels` : 'Supprimé');
 }
 
 /* ---------- Jarvis : le cerveau (API) + la voix (navigateur) ---------- */

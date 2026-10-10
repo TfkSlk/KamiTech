@@ -310,6 +310,10 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
 
 #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0; background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-weight: 500; transition: .2s; pointer-events: none; z-index: 60; box-shadow: var(--shadow-lg); }
 #toast.show { opacity: 1; transform: translateX(-50%); }
+#toast { width: max-content; max-width: calc(100vw - 32px); box-sizing: border-box; display: flex; align-items: center; gap: 12px; line-height: 1.35; }
+/* Toast avec action : seul le bouton reçoit les clics, et seulement quand le toast est visible */
+#toast .toast-action { flex: none; pointer-events: none; border: 0; background: var(--accent); color: var(--accent-contrast); border-radius: 99px; padding: 7px 14px; font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+#toast.show .toast-action { pointer-events: auto; }
 
 /* ---------- Jarvis / Kami ---------- */
 #jarvis-etat.ok { color: var(--ok); }
@@ -385,7 +389,7 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
   .hide-sm { display: none !important; }
   .plan-tools .primary { display: none; }
   #fab { display: grid; place-items: center; position: fixed; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 54px; height: 54px; border-radius: 50%; font-size: 28px; line-height: 1; padding: 0; z-index: 6; }
-  #toast { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+  #toast { bottom: calc(142px + env(safe-area-inset-bottom, 0px)); } /* au-dessus du bouton + flottant */
   input[type="checkbox"] { width: 22px; height: 22px; }
   .chip { padding: 8px 14px; font-size: 14px; }
   .btn.icon { min-width: 44px; }
@@ -494,6 +498,13 @@ body.no-scroll { overflow: hidden; }
 .recap { display: flex; flex-direction: column; gap: 8px; }
 .recap-nom { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .recap-list { margin: 0; padding-left: 18px; color: var(--text); line-height: 1.6; }
+.recap-suite { display: flex; flex-direction: column; gap: 3px; padding: 10px 14px 11px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--text); }
+.recap-suite .r-label { margin: 0 0 1px; }
+.recap-suite b { font-size: 15px; font-weight: 700; line-height: 1.35; }
+.recap-suite.manque { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); border-left-color: var(--accent); }
+.chip.clore:not(.on) { border-style: dashed; color: var(--text-2); }
+.r-rappel-txt { margin: 0; font-size: 14px; font-weight: 500; color: var(--text-2); }
+.r-rappel-txt.manque, .recap-suite.manque b { color: var(--accent); }
 .r-foot { display: flex; justify-content: space-between; gap: 8px; padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); }
 .r-foot .btn { min-width: 120px; justify-content: center; }
 @media (max-width: 760px) {

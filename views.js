@@ -145,8 +145,9 @@ function dashboard() {
   const retard = [...rappelsContacts().filter(r => r.date < t), ...relances().filter(r => r.date < t), ...state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t))].sort((a, c) => a.date.localeCompare(c.date));
   const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
   const empty = !state.dossiers.length && !state.events.length && !state.abonnes.length && !state.aVoir.length;
-  const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi').sort(aVoirTri);
-  const contactsDus = contactsSuivis.filter(v => v.rappel && v.rappel <= t).length;
+  /* En cours, plus les « RDV planifié » dont le RDV est passé : ils attendent une suite */
+  const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi' || rdvPasse(v)).sort(aVoirTri);
+  const contactsDus = rappelsContacts().length;
   const serie = serieMois(6), spark = serie.map(m => m.parts.reduce((s, x) => s + x.value, 0));
   const minJour = todayEv.filter(e => !e.fait && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
   const h = new Date().getHours();

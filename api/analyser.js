@@ -19,7 +19,7 @@ const SCHEMA = {
     activite: { type: 'string', enum: SECTEURS, description: 'service à présenter : kamifood (logiciel restaurants), kgdpro (organisation par abonnement pour entreprises), cee (certificats d\'économie d\'énergie), energie (négociation fournitures énergétiques), foncier (taxe foncière et CFE), perso sinon' },
     sujet: { type: 'string', description: 'de quoi ils ont parlé, reformulé en une phrase courte, à la première personne de Toufek' },
     attente: { type: 'string', enum: ['', 'lui', 'moi'], description: "'lui' si Toufek attend quelque chose de la personne, 'moi' si Toufek doit lui envoyer ou faire quelque chose, '' sinon" },
-    rappel: { type: 'string', description: 'date de rappel AAAA-MM-JJ ; 3 jours après aujourd\'hui par défaut si quelque chose est en attente, sinon vide' },
+    rappel: { type: 'string', description: 'date de rappel AAAA-MM-JJ si Toufek en donne une, sinon vide (le tableau de bord pose alors un rappel 3 jours ouvrés plus tard)' },
     creneau: {
       type: 'object', additionalProperties: false, required: ['type', 'date', 'heure', 'du', 'au'],
       properties: {
@@ -36,7 +36,7 @@ const SCHEMA = {
   },
 };
 
-const SYSTEM = `Tu es Kami, l'assistant de Toufek (Kami Groupe, Strasbourg). Toufek dicte ou tape une note après avoir croisé quelqu'un à qui il a un service à présenter. Tu remplis la fiche de prise de contact à partir de cette note, sans rien inventer : un champ inconnu reste vide. Dates relatives (« dans 3 jours », « la semaine prochaine », « début 2027 », « d'ici fin octobre ») calculées à partir de la date du jour fournie ; semaine du lundi au dimanche ; « début 2027 » = période du 4 janvier au 28 février 2027 ; « fin octobre » = période du 20 au 31 octobre. Si Toufek dit qu'il doit envoyer, rappeler, transmettre : attente = moi. S'il attend des documents, une réponse, un retour : attente = lui. Rappel : la date demandée, sinon 3 jours après aujourd'hui quand quelque chose est en attente, sinon vide.`;
+const SYSTEM = `Tu es Kami, l'assistant de Toufek (Kami Groupe, Strasbourg). Toufek dicte ou tape une note après avoir croisé quelqu'un à qui il a un service à présenter. Tu remplis la fiche de prise de contact à partir de cette note, sans rien inventer : un champ inconnu reste vide. Dates relatives (« dans 3 jours », « la semaine prochaine », « début 2027 », « d'ici fin octobre ») calculées à partir de la date du jour fournie ; semaine du lundi au dimanche ; « début 2027 » = période du 4 janvier au 28 février 2027 ; « fin octobre » = période du 20 au 31 octobre. Si Toufek dit qu'il doit envoyer, rappeler, transmettre : attente = moi. S'il attend des documents, une réponse, un retour : attente = lui. Rappel : la date demandée par Toufek (« rappelle-moi dans 3 jours », « jeudi »), sinon vide : le tableau de bord met alors 3 jours ouvrés par défaut.`;
 
 export async function analyserNote({ texte, aujourdhui }, client) {
   const r = await client.beta.messages.create({
