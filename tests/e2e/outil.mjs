@@ -42,7 +42,8 @@ export async function ouvrir({ largeur = 390, hauteur = 844, horloge = '2026-10-
     await p.goto(base + 'index.html#vide', { waitUntil: 'domcontentloaded', timeout: 15000 });
     await p.evaluate(s => { localStorage.clear(); for (const [k, v] of Object.entries(s)) localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); }, stockage);
   }
-  await p.goto(base + 'index.html#' + vue, { waitUntil: 'domcontentloaded', timeout: 15000 });
+  // Avec un stockage préparé, l'adresse doit différer de la première (pas seulement le #) : sinon pas de vrai rechargement et load() ne relit rien.
+  await p.goto(base + 'index.html' + (stockage ? '?stockage' : '') + '#' + vue, { waitUntil: 'domcontentloaded', timeout: 15000 });
   await p.waitForTimeout(300);
   if (exemple) {
     await p.evaluate(() => { loadDemo(); });
