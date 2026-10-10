@@ -43,7 +43,7 @@ function tipInit() {
   const place = e => {
     const el = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
     if (!el) { t.classList.remove('show'); return; }
-    t.innerHTML = el.dataset.tip; t.classList.add('show');
+    t.textContent = el.dataset.tip; t.classList.add('show'); // texte brut : jamais interprété comme du HTML
     const x = Math.max(8, Math.min(e.clientX + 14, window.innerWidth - t.offsetWidth - 12));
     const y = e.clientY - t.offsetHeight - 14;
     t.style.transform = `translate(${x}px, ${y < 8 ? e.clientY + 18 : y}px)`;
@@ -51,7 +51,8 @@ function tipInit() {
   document.addEventListener('mousemove', place);
   document.addEventListener('click', e => { if (!(e.target.closest && e.target.closest('[data-tip]'))) t.classList.remove('show'); });
 }
-const tip = s => esc(s).replace(/\n/g, '<br>');
+/* Texte d'infobulle pour un attribut data-tip : échappé ; les retours à la ligne restent dans l'attribut (#tip est en pre-line) */
+const tip = s => esc(s);
 
 /* ---------- Graphiques (SVG, couleurs par jetons de thème) ---------- */
 function donut(parts, fmt = eur, sub = '') {
@@ -144,7 +145,7 @@ function dashboard() {
   const todayItems = [...rappelsContacts().filter(r => r.date === t), ...todayEv, ...relances().filter(r => r.date === t)].sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
   const retard = [...rappelsContacts().filter(r => r.date < t), ...relances().filter(r => r.date < t), ...state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t))].sort((a, c) => a.date.localeCompare(c.date));
   const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
-  const empty = !state.dossiers.length && !state.events.length && !state.abonnes.length && !state.aVoir.length;
+  const empty = !donneesIllisibles && !state.dossiers.length && !state.events.length && !state.abonnes.length && !state.aVoir.length;
   /* En cours, plus les « RDV planifié » dont le RDV est passé : ils attendent une suite */
   const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi' || rdvPasse(v)).sort(aVoirTri);
   const contactsDus = rappelsContacts().length;
