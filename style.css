@@ -612,6 +612,8 @@ body.no-scroll { overflow: hidden; }
 #rencontre.clavier .r-bandeau { padding: 3px 4px 3px 10px; font-size: 13px; }
 #rencontre.clavier .r-bandeau > span { -webkit-line-clamp: 1; }
 #rencontre.clavier .r-bandeau button { min-height: 30px; }
+/* « Qui ? » et récapitulatif, clavier ouvert : le bandeau « existe déjà » s'efface le temps de la saisie (rien ne défile), il revient clavier fermé */
+#rencontre.clavier .r-body:not(.noter) > .r-bandeau { display: none; }
 #rencontre.clavier .r-puces { gap: 4px; }
 #rencontre.clavier .r-puces .chip { padding: 6px 9px; font-size: 13.5px; }
 #rencontre.clavier .r-foot { padding-top: 8px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }

@@ -130,6 +130,45 @@
     { note: 'Roth veut la simulation', connus: CONNUS, attendu: { existant: { type: 'c', id: 'c1' }, activite: 'foncier' } },
     { note: 'croisé Julien, il a signé', connus: CONNUS, ignores: ['existant'], attendu: { existant: null, nom: 'Julien' } },
 
+    /* Recette N1 : des mesures ne sont pas des dates (« 80m² », « 4m », « 12m », « 20s ») ; les abréviations seules restent lues */
+    { note: 'croisé Paul de Logistik SARL, entrepôt de 80m², isolation, je lui envoie le devis', attendu: { nom: 'Paul', entreprise: 'Logistik SARL', activite: 'cee', attente: 'moi', rappel: '2026-10-13', creneau: AUCUN, sujet: 'croisé Paul de Logistik SARL, entrepôt de 80m², isolation, je lui envoie le devis' } },
+    { note: 'plafond à 4m, éclairage LED', attendu: { rappel: '', creneau: AUCUN, activite: 'cee', sujet: 'plafond à 4m, éclairage LED' } },
+    { note: 'il a 12m de vitrine', attendu: { rappel: '', creneau: AUCUN, sujet: 'il a 12m de vitrine' } },
+    { note: 'Mme Roth, local de 80m², rappelle-moi jeudi', attendu: { nom: 'Mme Roth', rappel: '2026-10-15', sujet: 'Mme Roth, local de 80m²' } },
+    { note: 'il a 2 sites de 12m chacun, rappelle-moi lundi', attendu: { rappel: '2026-10-12', sujet: 'il a 2 sites de 12m chacun' } },
+    { note: 'vu Paul, il veut 20s de vidéo', attendu: { rappel: '', creneau: AUCUN, sujet: 'vu Paul, il veut 20s de vidéo' } },
+    { note: 'Paul, CEE, 3j', attendu: { rappel: '2026-10-13', sujet: 'Paul, CEE' } },
+    { note: 'Paul CEE 2s', attendu: { rappel: '2026-10-26', sujet: 'Paul CEE' } },
+    { note: 'Paul - 3j', attendu: { rappel: '2026-10-13', sujet: 'Paul' } },
+    { note: 'Paul, 13m', attendu: { rappel: '', sujet: 'Paul, 13m' } },
+
+    /* Recette N1 : le moment de la rencontre (« vu Karim aujourd'hui », « ce matin ») n'est ni un rappel ni un RDV */
+    { note: "vu Karim aujourd'hui, il m'envoie ses factures", attendu: { nom: 'Karim', attente: 'lui', rappel: '2026-10-13', creneau: AUCUN, sujet: "vu Karim aujourd'hui, il m'envoie ses factures" } },
+    { note: 'vu Paul ce matin, il veut une démo KamiFood la semaine prochaine', attendu: { nom: 'Paul', rappel: '', creneau: semaine('2026-10-12'), objet: 'Démo KamiFood' } },
+    { note: "J'ai vu Marc ce matin au salon, il est chez EDF depuis 10 ans, son contrat finit fin mars", attendu: { nom: 'Marc', activite: 'energie', rappel: '', creneau: periode('2027-03-20', '2027-03-31') } },
+    { note: 'vu Karim ce matin rappelle-moi jeudi', attendu: { rappel: '2026-10-15', creneau: AUCUN } },
+    { note: 'Karim ce matin, il m\'envoie ses factures', attendu: { nom: 'Karim', rappel: '2026-10-13', creneau: AUCUN } },
+    { note: 'aujourd\'hui 18h chez lui', attendu: { creneau: date('2026-10-10', '18:00'), rappel: '' } },
+
+    /* Recette N1 : un « rappelle-moi » explicite l'emporte sur une date de contexte placée avant lui */
+    { note: "il m'envoie sa facture du 12/09, rappelle-moi jeudi", attendu: { attente: 'lui', rappel: '2026-10-15', creneau: AUCUN, sujet: "il m'envoie sa facture du 12/09" } },
+    { note: 'son contrat EDF finit le 31 décembre, rappelle-moi lundi', attendu: { rappel: '2026-10-12', creneau: AUCUN, sujet: 'son contrat EDF finit le 31 décembre' } },
+    { note: 'Paul, ouvert depuis le 1er mars, rappelle-moi dans 3 jours', attendu: { nom: 'Paul', rappel: '2026-10-13', sujet: 'Paul, ouvert depuis le 1er mars' } },
+    { note: 'facture du 12 septembre reçue, relance mardi', attendu: { rappel: '2026-10-13', sujet: 'facture du 12 septembre reçue' } },
+    { note: "il m'envoie sa facture du 12/09", attendu: { attente: 'lui', rappel: '2026-10-13', creneau: AUCUN } },
+
+    /* Recette N1 : une note qui commence par un commerce, c'est l'entreprise */
+    { note: 'Hôtel du Parc : la direction veut un audit CEE', attendu: { nom: '', entreprise: 'Hôtel du Parc', activite: 'cee' } },
+    { note: 'Café de la Poste, démo KamiFood jeudi 15h', attendu: { nom: '', entreprise: 'Café de la Poste', creneau: date('2026-10-15', '15:00'), objet: 'Démo KamiFood' } },
+    { note: "Pharmacie de la Gare, elle m'envoie ses avis de taxe foncière", attendu: { nom: '', entreprise: 'Pharmacie de la Gare', activite: 'foncier', attente: 'lui' } },
+    { note: 'Grosse boîte de transport, isolation des entrepôts', attendu: { nom: '', entreprise: '', activite: 'cee' } },
+    { note: 'Hôtel du Parc : Paul veut un audit', attendu: { nom: 'Paul', entreprise: 'Hôtel du Parc' } },
+    { note: 'Hôtel du Parc : la direction veut un audit CEE', connus: CONNUS, attendu: { existant: { type: 'd', id: 'd2' } } },
+
+    /* Recette N1 : « jusqu'au » part avec sa date, le sujet reste lisible */
+    { note: "il est en vacances jusqu'au 2 novembre, rappelle-moi après", attendu: { rappel: '2026-11-02', sujet: 'il est en vacances, rappelle-moi après' } },
+    { note: "contrat jusqu'au 31/12, il hésite", attendu: { rappel: '2026-12-31', sujet: 'contrat, il hésite' } },
+
     /* Morceaux ignorés : le champ reste vide, le texte reste dans le sujet */
     { note: 'rappelle-moi jeudi', ignores: ['rappel'], attendu: { rappel: '', sujet: 'rappelle-moi jeudi', jetons: [{ cle: 'rappel', texte: 'rappelle-moi jeudi' }] } },
     { note: 'Paul au 06 12 34 56 78', ignores: ['tel'], attendu: { tel: '', sujet: 'Paul au 06 12 34 56 78' } },

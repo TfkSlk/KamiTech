@@ -144,7 +144,8 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   verifier(`${ecran} Rencontre sans jeton : « Qui ? » pré-rempli (Karim · Karim SARL · KGD Pro)`, e1.t === 'Qui ?' && e1.nom === 'Karim' && e1.entreprise === 'Karim SARL' && e1.chip === 'KGD Pro', JSON.stringify(e1));
   verifier(`${ecran} Rencontre sans jeton : « Et ensuite ? » = je lui dois, rappel « → mardi 13 oct. », puce 3 jours allumée`, e2.att === 'Je lui dois des informations' && e2.rappel === '→ mardi 13 oct.' && e2.date === '2026-10-13' && e2.puce === '3 jours', JSON.stringify(e2));
   verifier(`${ecran} Rencontre sans jeton : « Dans le planning ? » = une période du 2027-01-04 au 2027-02-28`, e3.cr === 'Une période' && e3.du === '2027-01-04' && e3.au === '2027-02-28', JSON.stringify(e3));
-  verifier(`${ecran} Rencontre sans jeton : récapitulatif avec le sujet sans les dates et la suite`, e4.sujet === 'croisé Karim de Karim SARL, on a parlé du KGD Pro, je lui envoie le dossier' && /Rappel mardi 13 oct\./.test(e4.suite) && /04\/01\/2027|4 janv/.test(e4.suite), JSON.stringify(e4));
+  /* Recette N1 : sans Kami, le journal garde la note entière (le sujet du lecteur local, dates retirées et coupé à 140 caractères, n'y va plus) */
+  verifier(`${ecran} Rencontre sans jeton : récapitulatif avec la note entière et la suite`, e4.sujet === KARIM && /Rappel mardi 13 oct\./.test(e4.suite) && /04\/01\/2027|4 janv/.test(e4.suite), JSON.stringify(e4));
   verifier(`${ecran} Rencontre : les 5 écrans tiennent sans défiler, pas de défilement horizontal`, vues.length === 5 && vues.every(v => v.ok) && horizontal, JSON.stringify(vues));
   verifier(`${ecran} Rencontre enregistrée : contact complet et période « à prévoir » liée`,
     cree.v.nom === 'Karim' && cree.v.entreprise === 'Karim SARL' && cree.v.activite === 'kgdpro' && cree.v.attente === 'moi' && cree.v.rappel === '2026-10-13' && cree.v.statut === 'suivi'
@@ -182,6 +183,146 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   await p.evaluate(() => fermerRencontre());
   verifier(`${ecran} Contact connu : attente « lui » et rappel du 20 lus ; son nom et son service (foncier) ne bougent pas`,
     connu.t === 'Et ensuite ?' && connu.attente === 'lui' && connu.rappel === '2026-10-20' && connu.nom === 'Mme Roth' && connu.activite === 'foncier' && connu.txt === '→ mardi 20 oct.', JSON.stringify(connu));
+
+  /* ---------- Recette N1 : corrections ---------- */
+  const enregistrerNote = async note => { await p.evaluate(() => openContact()); await pause(p); await p.fill('#r-note', note); await pause(p, 200); await p.click('#r-enregistrer'); await pause(p, 120); };
+  const dernier = () => p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, entreprise: v.entreprise, rappel: v.rappel, statut: v.statut, journal: v.historique.at(-1)?.texte, toast: $('#toast').textContent }; });
+
+  /* R1 et R8. Des mesures ne sont pas des dates : « 80m² » ne repousse pas le rappel de 7 ans, « 4m », « 12m », « 20s » ne sont pas des rappels */
+  {
+    const m = {
+      a: await lire('croisé Paul de Logistik SARL, entrepôt de 80m², isolation, je lui envoie le devis'), b: await lire('plafond à 4m, éclairage LED'),
+      c: await lire('Mme Roth, local de 80m², rappelle-moi jeudi'), d: await lire('il a 2 sites de 12m chacun, rappelle-moi lundi'), e: await lire('vu Paul, il veut 20s de vidéo'), f: await lire('Paul, CEE, 3j'),
+    };
+    verifier(`${ecran} R1/R8. lecteur : « 80m² », « 4m », « 12m », « 20s » ne sont pas des dates ; le « rappelle-moi » qui suit est lu ; « Paul, CEE, 3j » reste lu`,
+      m.a.rappel === '2026-10-13' && /entrepôt de 80m²/.test(m.a.sujet) && m.b.rappel === '' && m.b.sujet === 'plafond à 4m, éclairage LED' && m.c.rappel === '2026-10-15' && m.c.sujet === 'Mme Roth, local de 80m²'
+      && m.d.rappel === '2026-10-12' && m.e.rappel === '' && m.e.creneau.type === 'aucun' && m.f.rappel === '2026-10-13',
+      JSON.stringify(Object.fromEntries(Object.entries(m).map(([k, x]) => [k, [x.rappel, x.sujet]]))));
+    await p.evaluate(() => openContact()); await pause(p);
+    await p.fill('#r-note', 'croisé Paul de Logistik SARL, entrepôt de 80m², isolation, je lui envoie le devis');
+    await continuer(p); await continuer(p);
+    const e2 = await p.evaluate(() => ({ t: $('#rencontre h2').textContent, txt: $('#r-rappel-txt').textContent.trim(), date: $('#r-rappel').value }));
+    await continuer(p); await continuer(p); await continuer(p); // Enregistrer
+    const v = await dernier();
+    verifier(`${ecran} R1. appli : « Et ensuite ? » → mardi 13 oct. ; contact enregistré avec ce rappel, « entrepôt de 80m² » au journal`,
+      e2.t === 'Et ensuite ?' && e2.txt === '→ mardi 13 oct.' && e2.date === '2026-10-13' && v.nom === 'Paul' && v.rappel === '2026-10-13' && /entrepôt de 80m², isolation/.test(v.journal), JSON.stringify({ e2, v }));
+    await enregistrerNote('Mme Weiss, local de 80m², rappelle-moi jeudi');
+    const r8 = await dernier();
+    verifier(`${ecran} R8. appli : « local de 80m², rappelle-moi jeudi » → rappel jeu. 15 oct. (pas le 10 juin 2033)`, r8.nom === 'Mme Weiss' && r8.rappel === '2026-10-15' && r8.toast === 'Mme Weiss · rappel jeu. 15 oct.', JSON.stringify(r8));
+  }
+
+  /* R2. Le moment de la rencontre (« vu Karim aujourd'hui », « ce matin ») n'est ni un rappel ni un RDV, et ne prend pas la place de la vraie date */
+  {
+    const a = await lire("vu Karim aujourd'hui, il m'envoie ses factures"), b = await lire('vu Paul ce matin, il veut une démo KamiFood la semaine prochaine'), c = await lire('urgent : il attend une réponse avant ce soir !');
+    verifier(`${ecran} R2. lecteur : « vu Karim aujourd'hui » → rappel par défaut 13 oct. ; « vu Paul ce matin… démo la semaine prochaine » → semaine du 12, Démo KamiFood ; « avant ce soir » reste une échéance`,
+      a.rappel === '2026-10-13' && a.creneau.type === 'aucun' && b.rappel === '' && b.creneau.type === 'semaine' && b.creneau.du === '2026-10-12' && b.objet === 'Démo KamiFood' && c.rappel === '2026-10-10',
+      JSON.stringify({ a: [a.rappel, a.creneau], b: [b.rappel, b.creneau, b.objet], c: c.rappel }));
+    await p.evaluate(() => openContact()); await pause(p);
+    await p.fill('#r-note', "J'ai vu Marc ce matin au salon, il est chez EDF depuis 10 ans, son contrat finit fin mars");
+    for (let i = 0; i < 4; i++) await continuer(p);
+    const suite = await p.$eval('#r-suite', e => e.textContent.replace(/\s+/g, ' ').trim());
+    await continuer(p); // Enregistrer
+    const r = await p.evaluate(() => { const v = state.aVoir.at(-1); const ev = state.events.find(e => e.id === v.eventId); return { nom: v.nom, statut: v.statut, rappel: v.rappel, ev: ev && { date: ev.date, fin: ev.fin, heure: ev.heure, aPrevoir: ev.aPrevoir } }; });
+    verifier(`${ecran} R2. appli : « vu Marc ce matin… fin mars » → pas de RDV aujourd'hui à 9 h, période du 20 au 31 mars 2027 à prévoir, contact en suivi`,
+      !/RDV/.test(suite) && r.nom === 'Marc' && r.statut === 'suivi' && r.rappel === '2026-10-13' && r.ev && r.ev.date === '2027-03-20' && r.ev.fin === '2027-03-31' && r.ev.aPrevoir && !r.ev.heure, JSON.stringify({ suite, r }));
+  }
+
+  /* R3 et R9. Un contact déjà connu, reconnu par le lecteur, est proposé sur « Qui ? » et au récapitulatif : un toucher, et la note va dans sa fiche */
+  {
+    const roth = await p.evaluate(() => { const v = state.aVoir.find(x => x.nom === 'Mme Roth'); return { id: v.id, n: state.aVoir.length, journal: v.historique.length }; });
+    await p.evaluate(() => openContact()); await pause(p);
+    await p.fill('#r-note', "Mme Roth m'envoie ses avis, rappelle-moi lundi");
+    await continuer(p); // Ajuster… → Qui ?
+    const qui = await p.evaluate(() => ({ t: $('#rencontre h2').textContent, bandeau: $('#r-doublon span')?.textContent.trim(), bouton: $('#r-doublon button')?.textContent.trim(), activite: renc.activite, defaut: renc.defauts.activite, existant: renc.lecture.existant && renc.lecture.existant.id }));
+    const tient = await sansDefilement(p, '#rencontre .r-body');
+    await capture(p, `r3-qui-${largeur}`);
+    verifier(`${ecran} R3. « Qui ? » : « Mme Roth (Pharmacie de la Gare) existe déjà · Ajouter à sa fiche », sans défiler`,
+      qui.t === 'Qui ?' && qui.existant === roth.id && qui.bandeau === 'Mme Roth (Pharmacie de la Gare) existe déjà' && qui.bouton === 'Ajouter à sa fiche' && tient, JSON.stringify(qui));
+    verifier(`${ecran} R9. nouveau contact non rattaché : le secteur de la fiche reconnue (foncier) n'est pas repris`, qui.activite === qui.defaut && qui.activite !== 'foncier', JSON.stringify(qui));
+    await p.click('#r-doublon button'); await pause(p, 80);
+    const apres = await p.evaluate(() => ({ t: $('#rencontre h2').textContent, v: renc.v && renc.v.id, meta: $('#rencontre .r-head .meta').textContent, rappel: renc.rappel, attente: renc.attente, activite: renc.activite }));
+    await continuer(p); await continuer(p); // → planning → récapitulatif
+    const recapSans = !(await p.$('#r-doublon'));
+    await continuer(p); // Enregistrer
+    const fin = await p.evaluate(id => { const v = aVoir(id); return { n: state.aVoir.length, roths: state.aVoir.filter(x => x.nom === 'Mme Roth').length, journal: v.historique.length, dernier: v.historique.at(-1).texte, rappel: v.rappel }; }, roth.id);
+    verifier(`${ecran} R3. « Ajouter à sa fiche » depuis « Qui ? » : « Et ensuite ? » de Mme Roth (son secteur), puis aucun doublon et son journal +1`,
+      apres.t === 'Et ensuite ?' && apres.v === roth.id && /Mme Roth/.test(apres.meta) && apres.rappel === '2026-10-12' && apres.attente === 'lui' && apres.activite === 'foncier' && recapSans
+      && fin.n === roth.n && fin.roths === 1 && fin.journal === roth.journal + 1 && fin.dernier === "Mme Roth m'envoie ses avis, rappelle-moi lundi" && fin.rappel === '2026-10-12', JSON.stringify({ apres, fin }));
+    /* Au récapitulatif aussi (chemin de Kami, qui saute « Qui ? ») */
+    await p.evaluate(() => openContact()); await pause(p);
+    await p.fill('#r-note', "Mme Roth m'envoie ses avis");
+    for (let i = 0; i < 4; i++) await continuer(p);
+    const recap = await p.evaluate(() => ({ t: $('#rencontre h2').textContent, bandeau: $('#r-doublon span')?.textContent.trim() }));
+    const recapTient = await sansDefilement(p, '#rencontre .r-body');
+    await p.click('#r-doublon button'); await pause(p, 80);
+    const recap2 = await p.evaluate(() => ({ t: $('#rencontre h2').textContent, v: renc.v && renc.v.nom }));
+    await continuer(p); // Enregistrer
+    const fin2 = await p.evaluate(id => ({ roths: state.aVoir.filter(x => x.nom === 'Mme Roth').length, journal: aVoir(id).historique.length }), roth.id);
+    verifier(`${ecran} R3. récapitulatif : le bandeau est là aussi ; « Ajouter à sa fiche » y reste, puis Enregistrer ajoute au journal de Mme Roth`,
+      recap.t === 'On enregistre ?' && recap.bandeau === 'Mme Roth (Pharmacie de la Gare) existe déjà' && recapTient && recap2.t === 'On enregistre ?' && recap2.v === 'Mme Roth' && fin2.roths === 1 && fin2.journal === roth.journal + 2,
+      JSON.stringify({ recap, recap2, fin2 }));
+  }
+
+  /* R4. Une note qui commence par un commerce : « Hôtel du Parc » est l'entreprise (et son dossier est signalé), « Qui ? » demande la personne */
+  {
+    const a = await lire('Café de la Poste, démo KamiFood jeudi 15h'), b = await lire("Pharmacie de la Gare, elle m'envoie ses avis de taxe foncière"), c = await lire('Grosse boîte de transport, isolation des entrepôts');
+    verifier(`${ecran} R4. lecteur : Café de la Poste et Pharmacie de la Gare sont des entreprises ; « Grosse » n'est pas un prénom`,
+      a.nom === '' && a.entreprise === 'Café de la Poste' && b.nom === '' && b.entreprise === 'Pharmacie de la Gare' && c.nom === '', JSON.stringify([a.nom, a.entreprise, b.nom, b.entreprise, c.nom]));
+    await p.evaluate(() => openContact()); await pause(p);
+    await p.fill('#r-note', 'Hôtel du Parc : la direction veut un audit CEE');
+    await continuer(p);
+    const h = await p.evaluate(() => ({ t: $('#rencontre h2').textContent, nom: $('#r-nom').value, entreprise: $('#r-entreprise').value, chip: document.querySelector('#rencontre .chips .chip.on')?.textContent.trim(), indice: $('#r-connu')?.textContent.trim() }));
+    await p.evaluate(() => fermerRencontre());
+    verifier(`${ecran} R4. appli : « Qui ? » = personne à saisir, entreprise « Hôtel du Parc » (« a déjà un dossier »), CEE`,
+      h.t === 'Qui ?' && h.nom === '' && h.entreprise === 'Hôtel du Parc' && h.chip === 'CEE' && h.indice === 'Hôtel du Parc a déjà un dossier', JSON.stringify(h));
+  }
+
+  /* R5. « jusqu'au » part avec sa date : le sujet reste lisible */
+  {
+    const a = await lire("contrat jusqu'au 31/12, il hésite"), b = await lire("il est en vacances jusqu'au 2 novembre, rappelle-moi après");
+    verifier(`${ecran} R5. « jusqu'au 31/12 » et « jusqu'au 2 novembre » partent entiers du sujet`, a.sujet === 'contrat, il hésite' && b.sujet === 'il est en vacances, rappelle-moi après' && b.rappel === '2026-11-02', JSON.stringify([a.sujet, b.sujet, b.rappel]));
+  }
+
+  /* R6. Sans jeton, une note longue (plus de 140 caractères) va entière au journal, par Noter comme par le récapitulatif */
+  {
+    const longue = "croisé Karim de Karim SARL au salon de Lyon, il a trois restaurants et une brasserie, on a parlé du KGD Pro et des primes CEE pour ses cuisines, il hésite encore à cause du prix, il veut aussi qu'on regarde sa taxe foncière l'an prochain, je lui envoie le dossier complet";
+    await enregistrerNote(longue);
+    const a = await dernier();
+    await p.evaluate(() => openContact()); await pause(p);
+    await p.fill('#r-note', longue + ', rappelle-moi jeudi');
+    for (let i = 0; i < 4; i++) await continuer(p);
+    const champ = await p.$eval('#r-sujet', e => e.value);
+    await continuer(p); // Enregistrer
+    const b = await dernier();
+    verifier(`${ecran} R6. note de ${longue.length} caractères gardée entière au journal (Noter et récapitulatif), dates comprises`,
+      longue.length > 140 && a.journal === longue && champ === longue + ', rappelle-moi jeudi' && b.journal === longue + ', rappelle-moi jeudi' && b.rappel === '2026-10-15', JSON.stringify({ a: a.journal.length, champ: champ.length, b: b.journal.length, rappel: b.rappel }));
+  }
+
+  /* R7. Un « rappelle-moi jeudi » explicite l'emporte sur une date de contexte placée avant lui */
+  {
+    const l = [await lire("il m'envoie sa facture du 12/09, rappelle-moi jeudi"), await lire('son contrat EDF finit le 31 décembre, rappelle-moi lundi'), await lire('Paul, ouvert depuis le 1er mars, rappelle-moi dans 3 jours'), await lire('facture du 12 septembre reçue, relance mardi')];
+    verifier(`${ecran} R7. lecteur : le rappel annoncé gagne (15, 12, 13, 13 oct.) et la date de contexte reste dans le sujet`,
+      l.map(x => x.rappel).join() === '2026-10-15,2026-10-12,2026-10-13,2026-10-13' && l[0].sujet === "il m'envoie sa facture du 12/09" && l[1].sujet === 'son contrat EDF finit le 31 décembre', JSON.stringify(l.map(x => [x.rappel, x.sujet])));
+    await enregistrerNote("Paul, il m'envoie sa facture du 12/09, rappelle-moi jeudi");
+    const v = await dernier();
+    verifier(`${ecran} R7. appli : contact Paul avec rappel jeu. 15 oct. (pas le 12 sept. 2027), note entière au journal`,
+      v.nom === 'Paul' && v.rappel === '2026-10-15' && v.toast === 'Paul · rappel jeu. 15 oct.' && v.journal === "Paul, il m'envoie sa facture du 12/09, rappelle-moi jeudi", JSON.stringify(v));
+  }
+
+  /* R10. Date de rappel choisie à la main, puis note modifiée : la puce et la date restent d'accord */
+  {
+    await p.evaluate(() => openContact()); await pause(p);
+    await p.fill('#r-note', 'Paul, rappelle-moi le 20');
+    await continuer(p); await continuer(p); // Qui ? → Et ensuite ?
+    await p.fill('#r-rappel', '2026-10-22'); await p.dispatchEvent('#r-rappel', 'change'); await pause(p, 40);
+    await retour(p); await retour(p);
+    await p.fill('#r-note', 'Paul'); await pause(p, 200);
+    await continuer(p); await continuer(p);
+    const e = await p.evaluate(() => ({ t: $('#rencontre h2').textContent, rappel: renc.rappel, rappelJ: renc.rappelJ, puce: document.querySelector('#r-rappels .chip.on')?.textContent.trim() || '', txt: $('#r-rappel-txt').textContent.trim(), date: $('#r-rappel').value }));
+    await p.evaluate(() => fermerRencontre());
+    verifier(`${ecran} R10. date du 22 choisie à la main puis note sans date : « → jeudi 22 oct. », aucune puce allumée`,
+      e.t === 'Et ensuite ?' && e.rappel === '2026-10-22' && e.date === '2026-10-22' && e.rappelJ === 'x' && e.puce === '' && e.txt === '→ jeudi 22 oct.', JSON.stringify(e));
+  }
 
   /* Avec un jeton : Kami complète sans rien effacer ; s'il échoue, la lecture locale reste */
   await p.evaluate(() => { jarvis.token = 'jeton-test'; });

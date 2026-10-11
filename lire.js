@@ -142,6 +142,12 @@
   /* Mots qui terminent une enseigne même avec une majuscule (début d'une autre phrase) */
   const HORS_ENSEIGNE = new Set('je j il elle on nous vous ils elles rdv rappel rappelle demain aujourd lundi mardi mercredi jeudi vendredi samedi dimanche'.split(' '));
   const LIENS_ENS = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'et', '&', 'sur', 'en']);
+  /* Types de commerce et adjectifs qui ouvrent souvent une note (« Hôtel du Parc : … », « Grosse boîte de transport ») : jamais un prénom */
+  const COMMERCES = new Set(('hotel cafe bar pharmacie boulangerie boucherie charcuterie patisserie fromagerie poissonnerie epicerie superette supermarche '
+    + 'tabac garage cabinet salon institut agence magasin boutique atelier entrepot usine clinique ecole college lycee creche mairie boite societe entreprise '
+    + 'restaurant resto brasserie pizzeria bistrot bistro creperie traiteur auberge camping gite residence ehpad laverie pressing imprimerie menuiserie '
+    + 'cave librairie fleuriste opticien optique concession station centre domaine chateau ferme cinema theatre hopital banque etude bureau bureaux local').split(' '));
+  const ADJ_TETE = new Set('belle beau bel bonne bon grosse gros grand grande petite petit nouvelle nouveau nouvel vieux vieille jeune super sympa enorme'.split(' '));
   const PONCT_PHRASE = new Set(['.', ',', ';', ':', '!', '?', '(', ')', '-', '–', '—', '/']);
 
   function motsDe(texte) {
@@ -163,10 +169,10 @@
       debut = w.debut; j++;
       if (t[j] && t[j].s === '.') j++;
       if (!(t[j] && t[j].mot && t[j].maj && !STOP.has(t[j].tete))) return null;
-    } else if (!motNom(w)) return null;
+    } else if (!motNom(w) || COMMERCES.has(w.tete) || ADJ_TETE.has(w.tete)) return null;
     if (debut < 0) debut = t[j].debut;
     let fin = t[j].fin; j++;
-    if (motNom(t[j]) && t[j].debut - fin <= 2) { fin = t[j].fin; j++; }
+    if (motNom(t[j]) && t[j].debut - fin <= 2 && !COMMERCES.has(t[j].tete)) { fin = t[j].fin; j++; }
     return { debut, fin, j };
   }
   /* Enseigne à la position i : article facultatif, mots à majuscule reliés par de / la / & ; forme juridique repérée */
@@ -189,7 +195,17 @@
       }
       break;
     }
-    return debut < 0 ? null : { debut, fin, forme, j };
+    return debut < 0 ? null : { debut, fin, forme, j, mots };
+  }
+  /* Une note qui commence par un commerce et son nom (« Hôtel du Parc : … », « Café de la Poste, … ») : c'est l'entreprise, pas une personne */
+  function commerceEnTete(t, i0) {
+    const w = t[i0];
+    if (!w || !w.mot || !COMMERCES.has(w.tete)) return null;
+    let k = i0 + 1;
+    while (t[k] && t[k].mot && LIENS_ENS.has(t[k].n)) k++;
+    if (!t[k] || !t[k].mot || !(t[k].maj || t[k].article) || HORS_ENSEIGNE.has(t[k].tete)) return null;
+    const e = enseigne(t, k);
+    return e && { debut: w.debut, fin: e.fin, forme: e.forme, j: e.j };
   }
   /* Le mot de liaison entre la personne et son entreprise : de, d', du, de chez, chez */
   function liaison(t, j) {
@@ -205,8 +221,13 @@
      sinon un prénom après croisé / vu / avec / chez, en tête de note, ou après une civilité */
   function nomEtEntreprise(texte, t) {
     t = t || motsDe(texte);
+    let i0 = 0;
+    while (t[i0] && !t[i0].mot) i0++;
+    /* « Hôtel du Parc : … » : le commerce est l'entreprise ; la personne, s'il y en a une, se cherche après lui */
+    const tete = commerceEnTete(t, i0);
+    const i1 = tete ? tete.j : 0;
     let avecEnseigne = null;
-    for (let i = 0; i < t.length && !avecEnseigne; i++) {
+    for (let i = i1; i < t.length && !avecEnseigne; i++) {
       const p = personne(t, i);
       if (!p) continue;
       const k = liaison(t, p.j);
@@ -215,19 +236,20 @@
       if (e && (e.forme || debutDePhrase(t, i))) avecEnseigne = { nom: p, entreprise: e };
     }
     if (avecEnseigne) return avecEnseigne;
-    for (let i = 1; i < t.length; i++) {
+    for (let i = Math.max(1, i1); i < t.length; i++) {
       if (!VERBES_AVANT.has(t[i - 1].n)) continue;
       const p = personne(t, i);
-      if (p) return { nom: p, entreprise: null };
+      if (p) return { nom: p, entreprise: tete };
     }
-    let i0 = 0;
-    while (t[i0] && !t[i0].mot) i0++;
-    const p0 = personne(t, i0);
-    if (p0) return { nom: p0, entreprise: null };
-    for (let i = 0; i < t.length; i++) {
-      if (t[i].mot && t[i].maj && TITRES.has(t[i].n)) { const p = personne(t, i); if (p) return { nom: p, entreprise: null }; }
+    /* Le premier mot de la note, ou le premier après le commerce et sa ponctuation (« Hôtel du Parc : Paul veut… ») */
+    let i2 = i1;
+    while (t[i2] && !t[i2].mot) i2++;
+    const p0 = !tete || i2 > i1 ? personne(t, i2) : null;
+    if (p0) return { nom: p0, entreprise: tete };
+    for (let i = i1; i < t.length; i++) {
+      if (t[i].mot && t[i].maj && TITRES.has(t[i].n)) { const p = personne(t, i); if (p) return { nom: p, entreprise: tete }; }
     }
-    return { nom: null, entreprise: null };
+    return { nom: null, entreprise: tete };
   }
   /* Sans Kami : le nom deviné depuis la note, sinon le début de la note (ancien comportement de l'écran Rencontre) */
   function premierNom(note) {
@@ -260,11 +282,11 @@
     /* jeudi, ce jeudi, jeudi prochain (pas « jeudi dernier ») */
     ['jourSemaine', new RegExp(`(?:\\b(?:ce|cette)\\s+)?\\b${JOURS}(?:\\s+(prochain|pro|suivant|d'apres))?\\b(?!\\s+(?:dernier|passe)\\b)`, 'g')],
     /* dans 3 jours, d'ici deux semaines, sous 15 jours, dans un mois */
-    ['dans', new RegExp(`\\b(?:dans|d'ici\\s+a|d'ici|sous)\\s+${NB}\\s*(jours?|j|semaines?|sem|s|mois|m)\\b`, 'g')],
-    /* rappel 1 semaine, rappelle-moi 3 jours (comme les puces de rappel) */
-    ['rappelDans', new RegExp(`\\b(?:rappelle[- ]?moi|rappel|relance|relancer)\\s+(?:a\\s+|sous\\s+)?${NB}\\s*(jours?|j|semaines?|sem|s|mois|m)\\b`, 'g')],
-    /* 3j, 2s, 1m, 2sem, J+3 */
-    ['abrege', /\b(\d{1,2})(j|s|m|sem)\b/g],
+    ['dans', new RegExp(`\\b(?:dans|d'ici\\s+a|d'ici|sous)\\s+${NB}\\s*(jours?|j|semaines?|sem|s|mois|m)\\b(?![²³])`, 'g')],
+    /* rappel 1 semaine, rappelle-moi 3 jours, à rappeler 2s (comme les puces de rappel) */
+    ['rappelDans', new RegExp(`\\b(?:rappelle[- ]?moi|a\\s+rappeler|rappeler|rappel|a\\s+relancer|relancer|relance|recontacter)\\s+(?:a\\s+|sous\\s+)?${NB}\\s*(jours?|j|semaines?|sem|s|mois|m)\\b(?![²³])`, 'g')],
+    /* 3j, 2s, 1m, 2sem seuls dans leur bout de phrase (voir abregeSeul : « 80m² », « plafond à 4m » ne sont pas des dates), J+3 */
+    ['abrege', /\b(\d{1,2})(j|s|m|sem)(?![a-z0-9²³'])/g],
     ['jPlus', /\bj ?\+ ?(\d{1,2})\b/g],
     /* semaine prochaine, semaine pro, la prochaine semaine, cette semaine, la semaine du 19 (octobre) */
     ['semaine', /\b(?:(?:la|une)\s+)?(?:semaine\s+(prochaine|pro|suivante|d'apres)|(prochaine)\s+semaine|(cette)\s+semaine)\b/g],
@@ -290,9 +312,13 @@
     ['aprem', /(?:\b(?:l'|en\s+|dans\s+l'|d')|\b)(?:apres[- ]?midi|aprems?)\b/g],
   ];
   /* Ce qui précède une date et part avec elle hors du sujet : « rappelle-moi », « à voir », « pour », « le »… */
-  const AVANT_DATE = /(?:\b(?:rappelle[- ]?(?:moi|le|la|les|lui)|rappel|relance|relancer|a rappeler|a relancer|a recontacter|a revoir|a voir|a caler|a prevoir|rdv|rendez[- ]vous|on se voit|on se revoit|on se rappelle|on en reparle)\s*,?\s*)?(?:\b(?:d'ici(?:\s+la)?|avant(?:\s+la|\s+le)?|a\s+partir\s+(?:de|du)|pour(?:\s+la|\s+le)?|vers(?:\s+la|\s+le)?|des|plutot|en|au|a\s+la|a|le|la|ce|cette)\s+)?$/;
+  const AVANT_DATE = /(?:\b(?:rappelle[- ]?(?:moi|le|la|les|lui)|rappel|relance|relancer|a rappeler|a relancer|a recontacter|a revoir|a voir|a caler|a prevoir|rdv|rendez[- ]vous|on se voit|on se revoit|on se rappelle|on en reparle)\s*,?\s*)?(?:\b(?:jusqu'(?:au|aux|a\s+la|a\s+le|a|en)|d'ici(?:\s+la)?|avant(?:\s+la|\s+le)?|a\s+partir\s+(?:de|du)|pour(?:\s+la|\s+le)?|vers(?:\s+la|\s+le)?|des|plutot|en|au|a\s+la|a|le|la|ce|cette)\s+)?$/;
   const MOT_RAPPEL = /\b(?:rappel\w*|relanc\w*|recontact\w*)/g;
   const MOT_RDV = /\b(?:rdv|rendez[- ]vous|visio|demo|reunion|dejeuner|dej|presentation|signature|installation|formation|cafe|rencontrer|se voir|on se (?:voit|revoit|retrouve)|je passe|passer (?:le|la|les) voir|passe (?:le|la|les) voir|sur place)\b/g;
+  /* Un verbe de rencontre au passé : « vu Karim ce matin » date la rencontre, ce n'est ni un rappel ni un RDV */
+  const VERBE_RENCONTRE = /\b(?:vu|vue|vus|croise|croisee|croises|rencontre|rencontree|rencontres|eu|appele|appelee|appeles|revu|revue|passe|passee|parle|discute|dejeune|echange)\b/;
+  /* Ce qui fait d'« aujourd'hui » ou « ce soir » une échéance : « avant ce soir », « d'ici ce soir », « pour aujourd'hui » */
+  const ECHEANCE = /\b(?:avant|d'ici|pour|des|a partir d[eu]|jusqu'a|au plus tard)(?:\s+(?:la|le|ce|cet|cette))?\s*$/;
   const OBJETS = { demo: 'Démo', signature: 'Signature', installation: 'Installation', formation: 'Formation', reunion: 'Réunion', dejeuner: 'Déjeuner', dej: 'Déjeuner', cafe: 'Café' };
   const SEPARATEURS = /[.;!?\n,]|\b(?:et|puis|mais|sinon)\b/g;
 
@@ -327,18 +353,41 @@
   /* Période d'une année : début = 4 janvier au 28 février (règle d'api/analyser.js), mi = mai-juin, fin = 15 novembre au 31 décembre */
   const periodeAn = (quoi, y) => quoi === 'debut' ? [jour(y, 0, 4), jour(y, 1, 28)] : quoi === 'mi' ? [jour(y, 4, 1), jour(y, 5, 30)] : quoi === 'fin' ? [jour(y, 10, 15), jour(y, 11, 31)] : [jour(y, 0, 1), jour(y, 11, 31)];
 
+  /* Jour et mois sans année déjà passés cette année, depuis moins de 4 mois (« sa facture du 12/09 ») : sans mot-clé, une date de contexte */
+  function passeRecent(R, j, m) {
+    const y = R.getFullYear();
+    if (m < 0 || m > 11 || j < 1 || j > finDuMois(y, m)) return false;
+    const d = jour(y, m, j);
+    return d < R && R - d < 122 * 864e5;
+  }
+  /* « 3j », « 2s », « 1m » sans mot-clé : seuls dans leur bout de phrase (« Paul, CEE, 3j »), ou tout à la fin de la note (sauf « m »)
+     après un mot qui n'annonce pas une mesure. « entrepôt de 80m² », « plafond à 4m », « 12m de vitrine », « 20s de vidéo » ne sont pas des dates. */
+  const MESURE_AVANT = new Set('de du des d a au aux en sur par fait font mesure x environ et ou plus moins pour avec dans fois'.split(' '));
+  const SEP_ABREGE = ',;:.!?()/\n-';
+  function abregeSeul(s, debut, fin, unite) {
+    const apres = s.slice(fin), avant = s.slice(0, debut).replace(/\s+$/, '');
+    if (!/^\s*(?:$|[,;:.!?()\/\n-])/.test(apres)) return false;
+    if (!avant || SEP_ABREGE.includes(avant[avant.length - 1])) return true;
+    if (unite === 'm' || !/^\s*[.!]?\s*$/.test(apres)) return false;
+    const mot = /([a-z]+)$/.exec(avant);
+    return !!mot && !MESURE_AVANT.has(mot[1]);
+  }
+
   /* Une expression trouvée → { type: 'jour' | 'semaine' | 'periode', date | du, au, heure, relatif } (null si invalide ou passée) */
   function valeurDate(sorte, g, R) {
     const J = s => JOURS_I[s];
     switch (sorte) {
-      case 'dateMois': { const d = dateAnnee(R, nombre(g[2]), moisDe(g[3]), g[4] ? Number(g[4]) : 0); return d && { type: 'jour', date: d }; }
-      case 'dateNum': { const d = dateAnnee(R, Number(g[2]), Number(g[3]) - 1, g[4] ? Number(g[4]) : 0); return d && { type: 'jour', date: d }; }
+      case 'dateMois': case 'dateNum': {
+        const j = sorte === 'dateMois' ? nombre(g[2]) : Number(g[2]), mo = sorte === 'dateMois' ? moisDe(g[3]) : Number(g[3]) - 1, a = g[4] ? Number(g[4]) : 0;
+        const d = dateAnnee(R, j, mo, a);
+        return d && { type: 'jour', date: d, passe: !a && passeRecent(R, j, mo) };
+      }
       case 'jourNum': { const n = nombre(g[2]); if (n < 1 || n > 31) return null; const d = prochainJourDuMois(R, n); return d && { type: 'jour', date: d }; }
       case 'relatif': {
         const s = g[1];
         if (/^apres/.test(s)) return { type: 'jour', date: plusJours(R, 2) };
         if (s === 'demain') return { type: 'jour', date: plusJours(R, 1) };
-        return { type: 'jour', date: R, heure: /matin/.test(s) ? '09:00' : /apres|aprem/.test(s) ? '14:00' : '', vague: true };
+        return { type: 'jour', date: R, heure: /matin/.test(s) ? '09:00' : /apres|aprem/.test(s) ? '14:00' : '', vague: true, auj: true };
       }
       case 'jourSemaine': {
         const w = J(g[1]);
@@ -346,8 +395,10 @@
         return { type: 'jour', date: plusJours(R, ((w - R.getDay() + 7) % 7) || 7) };
       }
       case 'dans': case 'rappelDans': case 'abrege': case 'jPlus': {
-        const n = nombre(g[1]), u = sorte === 'jPlus' ? 'j' : g[2];
-        if (!n || n > 99) return null;
+        const n = nombre(g[1]), u = sorte === 'jPlus' ? 'j' : g[2], seul = sorte === 'abrege';
+        /* Plafonds : au-delà, c'est une mesure ou une faute de frappe, pas un rappel (un contact ne doit pas disparaître des années) */
+        const max = /^j/.test(u) ? (seul ? 31 : 99) : /^s/.test(u) ? (seul ? 8 : 52) : (seul ? 12 : 24);
+        if (!n || n > max) return null;
         if (/^j/.test(u)) return { type: 'jour', date: plusJours(R, n === 8 ? 7 : n === 15 ? 14 : n), relatif: true };
         if (/^s/.test(u)) return { type: 'jour', date: plusJours(R, 7 * n), relatif: true };
         return { type: 'jour', date: plusMois(R, n), relatif: true };
@@ -461,8 +512,9 @@
     for (const [sorte, re] of R_DATES) {
       re.lastIndex = 0;
       for (const g of m.matchAll(re)) {
+        if (sorte === 'abrege' && !abregeSeul(m, g.index, g.index + g[0].length, g[2])) continue;
         const v = valeurDate(sorte, g, R);
-        if (v) cands.push({ ...v, sorte, debut: g.index, fin: g.index + g[0].length, mot: sorte === 'rappelDans' ? 'rappel' : '' });
+        if (v) cands.push({ ...v, sorte, debut: g.index, fin: g.index + g[0].length, mot: sorte === 'rappelDans' ? 'rappel' : '', avant: n.slice(Math.max(0, g.index - 30), g.index) });
       }
     }
     const dates = sansChevauchement(cands);
@@ -500,37 +552,49 @@
       const x = AVANT_DATE.exec(avant);
       if (x && x[0]) d.debut -= x[0].length;
     }
-    /* Rappel ou créneau : le mot-clé le plus proche dans le même bout de phrase (avant la date de préférence) */
+    /* Rappel ou créneau : chaque mot-clé va à une seule date de son bout de phrase, la première qui le suit (« rappelle-moi jeudi »),
+       sinon la plus proche avant (« jeudi, je le rappelle ») */
     const seps = [];
     SEPARATEURS.lastIndex = 0;
     for (const x of n.matchAll(SEPARATEURS)) seps.push(x.index);
-    const motsCles = [];
+    const bout = d => [Math.max(-1, ...seps.filter(i => i < d.debut)), Math.min(n.length, ...seps.filter(i => i >= d.fin))];
+    for (const d of dates) { [d.dp, d.fp] = bout(d); d.mots = []; }
     for (const [re, k] of [[MOT_RAPPEL, 'rappel'], [MOT_RDV, 'rdv']]) {
       re.lastIndex = 0;
-      for (const x of n.matchAll(re)) motsCles.push({ k, s: x[0], debut: x.index, fin: x.index + x[0].length });
-    }
-    let rappel = '', creneau = { type: 'aucun', date: '', heure: '', du: '', au: '' }, objet = '', rappelLu = false, creneauLu = false;
-    for (const d of dates) {
-      const debutPhrase = Math.max(-1, ...seps.filter(i => i < d.debut));
-      const finPhrase = Math.min(n.length, ...seps.filter(i => i >= d.fin));
-      let kw = d.mot ? { k: d.mot, s: 'rappel' } : null, dist = 1e9;
-      if (!kw) {
-        for (const c of motsCles) {
-          if (c.debut <= debutPhrase || c.fin > finPhrase) continue;
-          if (c.debut < d.fin && d.debut < c.fin && c.k === 'rdv') { kw = c; dist = 0; continue; }
-          const e = c.fin <= d.debut ? d.debut - c.fin : c.debut >= d.fin ? 1000 + c.debut - d.fin : 0;
-          if (e < dist) { kw = c; dist = e; }
+      for (const x of n.matchAll(re)) {
+        const c = { k, s: x[0], debut: x.index, fin: x.index + x[0].length };
+        let best = null, ecart = 1e9;
+        for (const d of dates) {
+          if (c.debut <= d.dp || c.fin > d.fp) continue;
+          const e = c.debut < d.fin && d.debut < c.fin ? (k === 'rdv' ? -1 : 0) : c.fin <= d.debut ? d.debut - c.fin : 1000 + c.debut - d.fin;
+          if (e < ecart) { best = d; ecart = e; }
         }
+        if (best) best.mots.push({ ...c, e: ecart });
       }
-      const role = kw ? (kw.k === 'rappel' ? 'rappel' : 'creneau') : d.type === 'jour' && !d.heure ? 'rappel' : 'creneau';
-      if (role === 'rappel') {
+    }
+    for (const d of dates) {
+      d.kw = d.mot ? { k: d.mot, s: 'rappel' } : d.mots.sort((a, b) => a.e - b.e)[0] || null;
+      d.role = d.kw ? (d.kw.k === 'rappel' ? 'rappel' : 'creneau') : d.type === 'jour' && !d.heure ? 'rappel' : 'creneau';
+      /* Sans mot-clé, une date peut n'être que du contexte : le moment de la rencontre (« vu Karim ce matin », « Karim aujourd'hui »),
+         une date récente passée (« sa facture du 12/09 »), « depuis le 1er mars ». Gardés : « avant ce soir », « aujourd'hui 18h ». */
+      if (!d.kw && (d.passe || /\bdepuis(?:\s+(?:le|la|ce|cette))?\s*$/.test(d.avant)
+        || (d.auj && (VERBE_RENCONTRE.test(n.slice(d.dp + 1, d.debut)) || !(ECHEANCE.test(d.avant) || (d.heure && !d.vague)))))) d.role = '';
+    }
+    /* Les dates annoncées par un mot-clé d'abord, puis les autres dans l'ordre du texte (pour un créneau, une date à venir avant une date passée) */
+    const aVenir = d => (d.type === 'jour' ? d.date : d.du) > R ? 0 : 1;
+    const ordre = [...dates.filter(d => d.kw), ...dates.filter(d => !d.kw && d.role === 'rappel'),
+      ...dates.filter(d => !d.kw && d.role === 'creneau').sort((a, b) => aVenir(a) - aVenir(b) || a.debut - b.debut)];
+    let rappel = '', creneau = { type: 'aucun', date: '', heure: '', du: '', au: '' }, objet = '', rappelLu = false, creneauLu = false;
+    for (const d of ordre) {
+      const kw = d.kw;
+      if (d.role === 'rappel') {
         if (rappelLu) continue;
         rappelLu = true;
         const date = d.type === 'jour' ? (d.relatif ? jourOuvre(d.date) : d.date) : jourOuvre(d.du < R && d.au >= R ? R : d.du);
         const v = isoJ(date);
         const j = jeton('rappel', v, `rappel ${jourCourt(v)}`, d.debut, d.fin);
         if (!j.ignore) { rappel = v; retirer.push([d.debut, d.fin]); }
-      } else {
+      } else if (d.role === 'creneau') {
         if (creneauLu) continue;
         creneauLu = true;
         let c, lib;

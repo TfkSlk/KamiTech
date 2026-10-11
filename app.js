@@ -1588,7 +1588,7 @@ function nouvelleRenc(v, p = {}) {
 function versContact(a, v) {
   const r = nouvelleRenc(v);
   const touche = k => a[k] !== (k in a.lu ? a.lu[k] : a.defauts[k]);
-  for (const k of RENC_LUS) if (!['nom', 'entreprise', 'tel', 'activite'].includes(k) && touche(k)) r[k] = a[k];
+  for (const k of RENC_LUS) if (!['nom', 'entreprise', 'tel', 'activite'].includes(k) && rencGroupe(k).some(touche)) r[k] = a[k];
   Object.assign(r, { note: a.note, ignores: [...a.ignores], depuis: a.depuis, brouillonT: a.brouillonT, retourFocus: a.retourFocus });
   return r;
 }
@@ -1722,7 +1722,11 @@ function rencAller(delta) {
   clearTimeout(noteSaisie.t);
   if (delta > 0 && renc.etape === 1 && !renc.nom.trim()) { toast('Le nom de la personne, au moins'); $('#r-nom')?.focus(); return; }
   if (delta > 0 && renc.etape === 0) lireRencontre();
-  if (delta > 0 && renc.etape === 0 && !renc.v && !renc.nom.trim()) { renc.nom = premierNom(renc.note); renc.lu.nom = renc.nom; }
+  /* Sans nom lu, le début de la note ; sauf s'il n'est que l'entreprise lue (« Hôtel du Parc : … ») : « Qui ? » demande alors la personne */
+  if (delta > 0 && renc.etape === 0 && !renc.v && !renc.nom.trim()) {
+    const nom = premierNom(renc.note);
+    if (nom !== renc.entreprise.trim()) { renc.nom = nom; renc.lu.nom = renc.nom; }
+  }
   const j = Math.min(liste.length - 1, Math.max(0, i + delta));
   renc.etape = liste[j]; rencRender();
 }
@@ -1741,10 +1745,12 @@ const connus = () => [
    ce qu'une lecture précédente avait rempli et que la note ne dit plus revient à sa valeur de départ. */
 const RENC_LUS = ['nom', 'entreprise', 'tel', 'activite', 'attente', 'rappel', 'rappelJ', 'creneau', 'crDate', 'crHeure', 'crSemaine', 'crDu', 'crAu', 'objet', 'sujet'];
 function lectureVersRenc(x, j, force) {
-  const o = {};
+  const o = {}, local = Array.isArray(j.jetons); // le lecteur local donne ses jetons, Kami non
   if (!x.v) { if (j.nom) o.nom = j.nom; if (j.entreprise) o.entreprise = j.entreprise; if (j.tel) o.tel = j.tel; }
-  /* Contact connu : son service ne change pas sur un mot de la note (l'écran « Qui ? » est sauté), seulement si Kami le dit */
-  if (j.activite && secteurConnu(j.activite) && (!x.v || force)) o.activite = j.activite;
+  /* Contact connu : son service ne change pas sur un mot de la note (l'écran « Qui ? » est sauté), seulement si Kami le dit.
+     Nouveau contact : le service d'un contact reconnu (existant) n'est pas repris tant que la note n'est pas ajoutée à sa fiche */
+  const secteurLu = !local || j.jetons.some(t => t.cle === 'activite' && !t.ignore) || !(j.existant && j.existant.type === 'c');
+  if (j.activite && secteurConnu(j.activite) && (!x.v || force) && secteurLu) o.activite = j.activite;
   if (j.attente === 'lui' || j.attente === 'moi') o.attente = j.attente;
   /* Rappel : seulement une date dite dans la note ; sinon le rappel par défaut (3 jours ouvrés, ou celui déjà posé) reste */
   const dit = Array.isArray(j.jetons) ? j.jetons.some(t => t.cle === 'rappel' && !t.ignore) : !!j.rappel;
@@ -1758,15 +1764,22 @@ function lectureVersRenc(x, j, force) {
   if (c.type === 'semaine' && c.du) { o.creneau = 'semaine'; o.crSemaine = c.du; }
   if (c.type === 'periode' && c.du && c.au) { o.creneau = 'periode'; o.crDu = c.du; o.crAu = c.au; }
   if (o.creneau && j.objet) o.objet = j.objet;
-  if (j.sujet) o.sujet = j.sujet;
+  /* Le journal garde la note entière : seul le résumé de Kami la remplace. Le sujet du lecteur local (dates retirées, 140 caractères) n'y va pas */
+  if (j.sujet && !local) o.sujet = j.sujet;
   return o;
 }
+/* Le rappel et sa puce ne font qu'un : remplacés ou rétablis ensemble, seulement si aucun des deux n'a été changé à la main */
+const RENC_GROUPES = [['rappel', 'rappelJ']];
+const rencGroupe = k => RENC_GROUPES.find(g => g.includes(k)) || [k];
 function appliquerLecture(x, j, force = false) {
   const lu = x.lu || (x.lu = {}), def = x.defauts || {};
   const o = lectureVersRenc(x, j, force);
+  const intact = k => x[k] === (k in lu ? lu[k] : def[k]);
   for (const k of RENC_LUS) {
-    if (k in o) { if (force || x[k] === (k in lu ? lu[k] : def[k])) { x[k] = o[k]; lu[k] = o[k]; } }
-    else if (!force && k in lu && x[k] === lu[k]) { x[k] = def[k]; delete lu[k]; }
+    const g = rencGroupe(k);
+    if (g[0] !== k) continue; // un groupe est traité une seule fois, à sa première clé
+    if (g.some(c => c in o)) { if (force || g.every(intact)) for (const c of g) if (c in o) { x[c] = o[c]; lu[c] = o[c]; } }
+    else if (!force && g.some(c => c in lu) && g.every(intact)) for (const c of g) { x[c] = def[c]; delete lu[c]; }
   }
   x.noteLue = (x.note || '').trim();
 }
@@ -1832,18 +1845,29 @@ function compacterJetons() {
 function bandeauxHtml(r) {
   let h = '';
   if (r.brouillonT) h += `<div class="r-bandeau brouillon" id="r-brouillon"><span>${esc(brouillonTexte(r.brouillonT))}</span><button type="button" onpointerdown="event.preventDefault()" onclick="effacerNote()">Effacer</button></div>`;
-  const ex = r.lecture && r.lecture.existant;
-  const c = ex && ex.type === 'c' && !(r.v && r.v.id === ex.id) ? aVoir(ex.id) : null;
-  if (c) h += `<div class="r-bandeau doublon" id="r-doublon"><span><b>${esc(c.nom)}</b>${c.entreprise ? ` (${esc(c.entreprise)})` : ''} existe déjà</span><button type="button" onclick="rattacherContact('${esc(c.id)}')">Ajouter à sa fiche</button></div>`;
-  return h;
+  return h + doublonHtml(r);
 }
-/* « Ajouter à sa fiche » : la note part dans le journal du contact existant, aucun doublon n'est créé */
+/* Contact déjà connu, reconnu dans la note : « Ajouter à sa fiche » (aucun doublon). Sur « Qui ? », un dossier ou un abonné reconnu est signalé aussi. */
+function doublonHtml(r, indice = false) {
+  const ex = r.lecture && r.lecture.existant;
+  if (!ex) return '';
+  const c = ex.type === 'c' && !(r.v && r.v.id === ex.id) ? aVoir(ex.id) : null;
+  if (c) return `<div class="r-bandeau doublon" id="r-doublon"><span><b>${esc(nomDe(c))}</b>${c.entreprise ? ` (${esc(c.entreprise)})` : ''} existe déjà</span><button type="button" onclick="rattacherContact('${esc(c.id)}')">Ajouter à sa fiche</button></div>`;
+  if (!indice || r.v) return '';
+  const d = ex.type === 'd' ? dossier(ex.id) : null, a = ex.type === 'a' ? abonne(ex.id) : null;
+  const nom = d ? (d.entreprise || d.contact) : a ? (a.restaurant || a.contact) : '';
+  return nom ? `<div class="r-bandeau" id="r-connu"><span><b>${esc(nom)}</b> ${d ? 'a déjà un dossier' : 'est déjà abonné KamiFood'}</span></div>` : '';
+}
+/* « Ajouter à sa fiche » : la note part dans le journal du contact existant, aucun doublon n'est créé.
+   Depuis « Qui ? » (sautée pour un contact connu), on passe à « Et ensuite ? » ; depuis le récapitulatif, on y reste. */
 function rattacherContact(id) {
   const v = aVoir(id);
   if (!renc || !v) return;
   rencLire();
+  const etape = renc.etape;
   renc = versContact(renc, v);
   lireRencontre(true);
+  renc.etape = etape === 1 ? 2 : etape;
   rencRender(); sauverBrouillon();
   toast(`La note ira dans la fiche de ${nomDe(v, 'ce contact')}`);
 }
@@ -1974,6 +1998,7 @@ function rencRender() {
     <div class="r-compris"><div class="r-jetons" id="r-jetons" aria-label="Ce qui a été compris">${jetonsHtml(r)}</div><div id="r-kami">${kamiDispo() ? '<button type="button" class="r-affiner" id="r-affiner" onclick="analyserRencontre()">Affiner avec Kami</button>' : ''}</div></div>
     <div class="r-zone" id="r-zone">${r.qui ? quiHtml(r) : pucesHtml(r)}</div>`;
   if (r.etape === 1) corps = `
+    ${doublonHtml(r, true)}
     <label class="r-label" for="r-nom">Personne</label><input id="r-nom" value="${esc(r.nom)}" placeholder="Prénom, nom" autocomplete="off">
     <label class="r-label" for="r-entreprise">Entreprise</label><input id="r-entreprise" value="${esc(r.entreprise)}" placeholder="Facultatif" autocomplete="off">
     <label class="r-label">Service à présenter</label>
@@ -1994,6 +2019,7 @@ function rencRender() {
   if (r.etape === 4) {
     const suite = rencSuite(r);
     corps = `
+    ${doublonHtml(r)}
     <div class="recap">
       <div class="recap-nom">${esc(r.nom || '?')}${r.entreprise ? ` <span class="meta">· ${esc(r.entreprise)}</span>` : ''} ${tag(r.activite)}</div>
       <label class="r-label" for="r-sujet">De quoi vous avez parlé</label><input id="r-sujet" value="${esc(r.sujet || r.note)}">
