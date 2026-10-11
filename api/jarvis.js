@@ -35,7 +35,8 @@ const PERSONA = `Tu es Jarvis, l'assistant personnel de Toufek, fondateur de Kam
 # Les données que tu vois
 Le message système suivant contient la date du jour et une projection des données du tableau de bord : abonnés KamiFood, dossiers d'apport, RDV et tâches (planning), relances, notes mémorisées, résumé des gains. C'est la vérité du moment. Si une information n'y est pas, utilise l'outil chercher ou agenda avant de conclure qu'elle n'existe pas. N'invente jamais un client, un montant ou un RDV.
 
-Champs : un RDV a un titre, une date (AAAA-MM-JJ), une heure (HH:MM ou vide), une durée en minutes, une date de fin optionnelle (fin : s'il y en a une, c'est une PÉRIODE qui couvre plusieurs jours, ex. « réponse des fournisseurs d'énergie du 28 sept. au 4 oct. », durée 0), un drapeau important (alerte rouge à ne pas manquer, ex. « signature requise le jour de l'annonce des prix négociés »), un drapeau aPrevoir (période dans laquelle une date reste à caler : « voir Karim début 2027 » = période du 1er janvier au 28 février avec aPrevoir=true, lien "c:<id contact>"), un mode (place = sur place, visio, tel = téléphone, tache = tâche sans RDV), un secteur (activite : kamifood, cee, energie = négociation des fournitures énergétiques, foncier = taxe foncière et CFE, perso), un lien optionnel vers un client ("a:<id>" pour un abonné KamiFood, "d:<id>" pour un dossier d'apport) et un état fait (true/false). Un dossier a entreprise, activite, statut, contact, tel, email, ville, partenaire, commEstimee, commRecue, dateRelance, dateSignature, datePaiement, notes. Un abonné a restaurant, formule (id), prix mensuel HT, statut (essai, actif, resilie), debut, engagement (mois), fin, contact, tel, email, ville, notes.
+Champs : un RDV a un titre, une date (AAAA-MM-JJ), une heure (HH:MM ou vide), une durée en minutes, une date de fin optionnelle (fin : s'il y en a une, c'est une PÉRIODE qui couvre plusieurs jours, ex. « réponse des fournisseurs d'énergie du 28 sept. au 4 oct. », durée 0), un drapeau important (alerte rouge à ne pas manquer, ex. « signature requise le jour de l'annonce des prix négociés »), un drapeau aPrevoir (période dans laquelle une date reste à caler : « voir Karim début 2027 » = période du 1er janvier au 28 février avec aPrevoir=true, lien "c:<id contact>"), un mode (place = sur place, visio, tel = téléphone, tache = tâche sans RDV), un secteur (activite : kamifood, cee, energie = négociation des fournitures énergétiques, foncier = taxe foncière et CFE, perso), un lien optionnel vers un client ("a:<id>" pour un abonné KamiFood, "d:<id>" pour un dossier d'apport) et un état fait (true/false). Un dossier a entreprise, activite, statut, contact, tel, email, ville, partenaire, commEstimee, commRecue, dateRelance, dateSignature, datePaiement, notes. Un abonné a restaurant, formule (id), prix mensuel HT, statut (essai, actif, resilie), debut, engagement (mois), fin (date de résiliation ; un abonné résilié a toujours une fin), finEstimee (true = fin posée automatiquement faute de date : demande la vraie date à Toufek et corrige-la avec modifier_abonne), contact, tel, email, ville, notes, interne. L'abonné d'id "moi" (interne=true) est la licence éditeur de Toufek lui-même : ce n'est pas un client, il n'est jamais facturé, il ne compte ni dans les gains ni dans les abonnés actifs ; ne le modifie pas et ne le présente jamais comme un abonné.
+Les chiffres (résumé) : les gains KamiFood d'une période sont au prorata des jours d'abonnement sur la période (une semaine de 7 jours en octobre = prix × 7 / 31), ou les factures Stripe payées quand Stripe est synchronisé (resume.kamifoodGains dit lequel) ; une période d'essai ne rapporte rien, un résilié s'arrête à sa fin. Le temps planifié additionne la durée des RDV et tâches ; une période (date + fin) ne compte aucune heure.
 
 Les contacts (aVoir) : les gens que Toufek croise (il les connaît souvent) et à qui il a un service à présenter. Ce n'est pas un dossier : c'est un journal de prises de contact avec un rappel. Chaque contact a nom, entreprise, activite (le service à présenter : cee, energie, foncier, kamifood, perso), historique (liste de { date, texte } : chaque prise de contact et de quoi ils ont parlé, le dernier élément est le plus récent), attente ('' = rien, 'lui' = Toufek attend des informations de la personne, 'moi' = Toufek lui doit des informations), rappel (AAAA-MM-JJ : le jour où le tableau de bord doit alerter Toufek), statut (suivi = en cours, planifie = un RDV est posé, clos), priorite, tel, email, ville, lien (client lié), notes, eventId.
 Règle d'or des contacts : jamais sans suite. Un contact en cours a toujours une suite datée : un rappel (un rappel automatique ne tombe jamais un samedi ou un dimanche, il glisse au lundi), un RDV posé (statut planifie + eventId), ou il est clos explicitement (clos = ni rappel ni attente). Quand le RDV d'un contact est fait ou supprimé, le contact repasse en suivi avec un rappel au plus tard aujourd'hui (ses outils le font tout seuls) : demande alors à Toufek quelle suite donner. Un contact « RDV planifié » dont le RDV est passé apparaît dans les rappels du jour avec « RDV passé · quelle suite ? ».
@@ -170,8 +171,10 @@ function outils(state, actions) {
       const item = { id: uid(), fait: false, heure: '', notes: '', lien: '', important: false, duree: mode === 'place' ? 60 : 30, mode, ...f };
       if (item.fin && !dateOk(item.fin)) throw new Error('fin attendue au format AAAA-MM-JJ');
       if (item.fin && item.fin <= item.date) delete item.fin;
+      item.aPrevoir = !!item.aPrevoir && !!item.fin;
       item.duree = item.fin ? num(item.duree) : (num(item.duree) || 30);
-      if (item.fin && !item.heure) item.mode = 'tache';
+      /* Comme le tableau de bord : une période sans heure est une tâche de durée 0 (elle ne compte pas d'heures) */
+      if (item.fin && !item.heure) { item.mode = 'tache'; item.duree = 0; }
       return { ok: true, rdv: add('events', item), client: nomLien(item.lien) };
     },
     modifier_rdv({ id, ...rest }) {
@@ -179,6 +182,13 @@ function outils(state, actions) {
       const f = nettoyer(rest, champsRdv);
       if (f.date && !dateOk(f.date)) throw new Error('date attendue au format AAAA-MM-JJ');
       if (f.lien && !nomLien(f.lien)) throw new Error(`lien inconnu : ${f.lien}`);
+      if (f.fin && !dateOk(f.fin)) throw new Error('fin attendue au format AAAA-MM-JJ');
+      /* Mêmes règles qu'à la saisie : fin après la date sinon retirée, « à prévoir » seulement dans une période, période sans heure = durée 0 */
+      const date = f.date ?? e.date, heure = f.heure ?? e.heure;
+      if ((f.fin ?? e.fin) && (f.fin ?? e.fin) <= date) f.fin = '';
+      const periode = !!((f.fin ?? e.fin) && (f.fin ?? e.fin) > date);
+      if (!periode && (f.aPrevoir || (f.aPrevoir === undefined && e.aPrevoir))) f.aPrevoir = false;
+      if (periode && !heure) { f.mode = 'tache'; f.duree = 0; }
       const etaitFait = !!e.fait;
       update('events', e, f);
       const contact = f.fait === true && !etaitFait ? liberer(e) : null;
@@ -214,6 +224,7 @@ function outils(state, actions) {
       const formule = s.formules.find(x => x.id === f.formule) || s.formules.find(x => norm(x.nom) === norm(f.formule)) || s.formules[0];
       const item = { id: uid(), createdAt: Date.now(), statut: 'actif', debut: s.aujourdhui, engagement: 12, ...f, formule: formule?.id || '' };
       if (!num(item.prix) && formule) item.prix = formule.prix;
+      if (item.statut === 'resilie' && !item.fin) item.fin = s.aujourdhui; // un résilié a toujours une fin
       add('abonnes', item);
       const rdvs = [];
       if (planifier_rdv_inclus) {
@@ -230,7 +241,12 @@ function outils(state, actions) {
     modifier_abonne({ id, ...rest }) {
       const a = abonne(id); if (!a) throw new Error(`abonné introuvable : ${id}`);
       const f = nettoyer(rest, champsAbonne);
+      if (a.id === 'moi') {
+        if ((f.statut && f.statut !== 'actif') || num(f.prix)) throw new Error("c'est la licence éditeur de Toufek : elle reste active et gratuite");
+      }
       if (f.statut === 'resilie' && !a.fin && !f.fin) f.fin = s.aujourdhui;
+      /* Une vraie date (ou la fin de la résiliation) remplace la date estimée */
+      if (a.finEstimee && (f.fin || (f.statut && f.statut !== 'resilie'))) f.finEstimee = false;
       return { ok: true, abonne: update('abonnes', a, f) };
     },
     prise_de_contact({ id, nom, entreprise, activite, sujet, date, attente, rappel_jours, rappel, clore, tel, lien }) {

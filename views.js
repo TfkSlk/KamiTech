@@ -12,12 +12,13 @@ const moisCourt = d => cap(d.toLocaleDateString('fr-FR', { month: 'short' }).rep
 const heureTxt = (h, m) => `${h} h${m ? ' ' + pad(m) : ''}`;
 
 /* ---------- Séries pour les graphiques ---------- */
+/* Même règle que les KPI (gainsPeriode) : une colonne de graphique dit la même chose que « Gagné » */
 function gainsEntre(secteur, from, to) {
-  if (secteur === 'kamifood') return state.abonnes.reduce((s, a) => s + moisFactures(a, from, to) * num(a.prix), 0);
-  return state.dossiers.filter(d => d.activite === secteur && d.datePaiement >= from && d.datePaiement <= to).reduce((s, d) => s + num(d.commRecue), 0);
+  return gainsPeriode(secteur, from, to).gagne;
 }
+/* Heures planifiées : ni les périodes (plusieurs jours, sans heures réelles) ni les relances */
 function tempsEntre(secteur, from, to) {
-  return state.events.filter(e => e.activite === secteur && e.date >= from && e.date <= to).reduce((s, e) => s + num(e.duree), 0);
+  return state.events.filter(e => e.activite === secteur && e.date >= from && e.date <= to && compteHeures(e)).reduce((s, e) => s + num(e.duree), 0);
 }
 function serieMois(n = 6) {
   const now = new Date(), out = [];
@@ -67,7 +68,11 @@ function donut(parts, fmt = eur, sub = '') {
     const g = span > gap * 3 ? gap / 2 : 0;
     const s = a + g, e = a + span - g, big = e - s > Math.PI ? 1 : 0;
     a += span;
-    return `<path d="M${P(s, R)} A${R} ${R} 0 ${big} 1 ${P(e, R)} L${P(e, r)} A${r} ${r} 0 ${big} 0 ${P(s, r)} Z" fill="var(--${p.k})" data-tip="${tip(`${p.label}\n${fmt(p.value)} · ${pct(p.value, sum)} %`)}"><title>${esc(p.label)} : ${esc(fmt(p.value))}</title></path>`;
+    /* Un seul secteur : un arc dont le début et la fin coïncident ne se dessine pas, on trace donc l'anneau complet en deux moitiés */
+    const d = vis.length === 1
+      ? `M${P(s, R)} A${R} ${R} 0 1 1 ${P(s + Math.PI, R)} A${R} ${R} 0 1 1 ${P(s, R)} Z M${P(s, r)} A${r} ${r} 0 1 0 ${P(s + Math.PI, r)} A${r} ${r} 0 1 0 ${P(s, r)} Z`
+      : `M${P(s, R)} A${R} ${R} 0 ${big} 1 ${P(e, R)} L${P(e, r)} A${r} ${r} 0 ${big} 0 ${P(s, r)} Z`;
+    return `<path d="${d}" fill="var(--${p.k})" data-tip="${tip(`${p.label}\n${fmt(p.value)} · ${pct(p.value, sum)} %`)}"><title>${esc(p.label)} : ${esc(fmt(p.value))}</title></path>`;
   }).join('');
   const principal = vis.reduce((m, p) => (p.value > m.value ? p : m), vis[0]);
   return `<div class="donut-wrap">
@@ -145,7 +150,7 @@ function dashboard() {
   const todayItems = [...rappelsContacts().filter(r => r.date === t), ...todayEv, ...relances().filter(r => r.date === t)].sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
   const retard = [...rappelsContacts().filter(r => r.date < t), ...relances().filter(r => r.date < t), ...state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t))].sort((a, c) => a.date.localeCompare(c.date));
   const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
-  const empty = !donneesIllisibles && !state.dossiers.length && !state.events.length && !state.abonnes.length && !state.aVoir.length;
+  const empty = !donneesIllisibles && estVide(); // la licence éditeur seule ne compte pas comme une donnée
   /* En cours, plus les « RDV planifié » dont le RDV est passé : ils attendent une suite */
   const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi' || rdvPasse(v)).sort(aVoirTri);
   const contactsDus = rappelsContacts().length;
@@ -201,7 +206,7 @@ function dashboard() {
   <div class="grid cols-2 agenda-row">
     <div class="card"><div class="card-head"><div><h2>Aujourd'hui</h2><p class="meta">${retard.length ? `${retard.length} en retard à traiter d'abord` : (todayEv.length ? `${todayEv.length} RDV · ${esc(hrs(minJour))}` : 'Journée libre')}</p></div><a class="link" href="#planning">Planning →</a></div>
       ${itemList([...retard.map(e => ({ ...e, retard: true })), ...todayItems], false) || '<div class="empty">Rien de prévu aujourd\'hui, et rien en retard.</div>'}</div>
-    <div class="card"><div class="card-head"><div><h2>7 prochains jours</h2><p class="meta">${next7.length} RDV · ${esc(hrs(next7.reduce((s, e) => s + num(e.duree), 0)))}</p></div></div>
+    <div class="card"><div class="card-head"><div><h2>7 prochains jours</h2><p class="meta">${next7.length} RDV · ${esc(hrs(next7.filter(compteHeures).reduce((s, e) => s + num(e.duree), 0)))}</p></div></div>
       ${itemList(next7, true) || '<div class="empty">Aucun RDV planifié.</div>'}</div>
   </div>
   <div class="card avoir-card"><div class="card-head"><div><h2>Contacts</h2><p class="meta">${contactsDus ? `${contactsDus} à rappeler` : contactsSuivis.length ? `${contactsSuivis.length} en cours, rien à rappeler aujourd'hui` : 'Personne en suivi'}</p></div><div class="btn-row"><button class="btn small" onclick="openContact()">+ Prise de contact</button><a class="link" href="#contacts">Tous →</a></div></div>
@@ -264,7 +269,7 @@ function planning() {
 function vueSemaine(all, lundi) {
   const jours = [...Array(7)].map((_, i) => iso(addDays(lundi, i)));
   const t = today();
-  const sem = state.events.filter(e => e.date >= jours[0] && e.date <= jours[6]);
+  const sem = state.events.filter(e => e.date >= jours[0] && e.date <= jours[6] && compteHeures(e));
   const totalMin = sem.reduce((s, e) => s + num(e.duree), 0);
   const charge = Object.keys(SECTEURS).map(k => [k, sem.filter(e => e.activite === k).reduce((s, e) => s + num(e.duree), 0)]).filter(([, m]) => m);
   return `<div class="card load-card">
@@ -307,7 +312,7 @@ function vueMois(all, d) {
     return `<div class="mcell ${day.getMonth() !== d.getMonth() ? 'hors' : ''} ${ds === t ? 'today' : ''}" onclick="allerAuJour('${ds}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')allerAuJour('${ds}')">
       <div class="mhead"><b>${day.getDate()}</b>${min ? `<span class="meta">${esc(hrs(min))}</span>` : ''}</div>
       ${traits}
-      ${visibles.map(e => `<div class="mchip ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${estPeriode(e) ? 'periode' : ''} ${e.aPrevoir ? 'prevoir' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.heure ? e.heure + ' · ' : ''}${e.titre}${e.relance ? '' : ' · ' + hrs(num(e.duree))}`)}"><i style="background:var(--${e.activite})"></i><span>${e.important ? '⚠ ' : ''}${e.heure ? `<b>${esc(e.heure)}</b> ` : ''}${esc(e.titre)}</span></div>`).join('')}
+      ${visibles.map(e => `<div class="mchip ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${estPeriode(e) ? 'periode' : ''} ${e.aPrevoir ? 'prevoir' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.heure ? e.heure + ' · ' : ''}${e.titre}${e.relance || estPeriode(e) ? '' : ' · ' + hrs(num(e.duree))}`)}"><i style="background:var(--${e.activite})"></i><span>${e.important ? '⚠ ' : ''}${e.heure ? `<b>${esc(e.heure)}</b> ` : ''}${esc(e.titre)}</span></div>`).join('')}
       ${evs.length > 3 ? `<div class="mplus">+ ${evs.length - 3}</div>` : ''}
     </div>`;
   }).join('');
@@ -323,7 +328,7 @@ function grilleHeures(jours, all) {
   const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
   const heures = [...Array(H1 - H0 + 1)].map((_, i) => H0 + i);
   const head = jours.map(ds => {
-    const d = parse(ds), min = state.events.filter(e => e.date === ds).reduce((s, e) => s + num(e.duree), 0);
+    const d = parse(ds), min = state.events.filter(e => e.date === ds && compteHeures(e)).reduce((s, e) => s + num(e.duree), 0);
     return `<div class="tg-day ${ds === t ? 'today' : ''}" onclick="allerAuJour('${ds}')"><span>${esc(d.toLocaleDateString('fr-FR', { weekday: jours.length > 1 ? 'short' : 'long' }).replace('.', ''))}</span><b>${d.getDate()}</b>${min ? `<em>${esc(hrs(min))}</em>` : ''}</div>`;
   }).join('');
   const allday = jours.map(ds => {
@@ -338,7 +343,7 @@ function grilleHeures(jours, all) {
     return `<div class="bandeau ${periodeLongue(e) ? 'fil' : ''} ${e.aPrevoir ? 'prevoir' : ''} ${e.fait ? 'done' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite});grid-column:${debut + 2} / ${fin + 3}" onclick="${ouvrir(e)}" data-tip="${tip(`${e.aPrevoir ? 'À prévoir · ' : ''}${e.titre}\n${fmtDate(e.date)} → ${fmtDate(e.fin)} (${joursPeriode(e)} j)${lienNom(e.lien) ? '\n' + lienNom(e.lien) : ''}`)}">${e.important ? '⚠ ' : ''}${e.aPrevoir ? '<em>à prévoir</em> ' : ''}${esc(e.titre)}<span class="meta"> ${e.date < jours[0] ? esc(fmtDate(e.date)) + ' ' : ''}→ ${esc(fmtDate(e.fin))}</span></div>`;
   }).join('');
   const cols = jours.map(ds => {
-    const evs = all.filter(e => e.date === ds && e.heure && !e.relance).map(e => ({ e, s: minutesDe(e.heure), f: minutesDe(e.heure) + Math.max(15, num(e.duree) || 30) })).sort((a, c) => a.s - c.s);
+    const evs = all.filter(e => e.date === ds && e.heure && !e.relance && !estPeriode(e)).map(e => ({ e, s: minutesDe(e.heure), f: minutesDe(e.heure) + Math.max(15, num(e.duree) || 30) })).sort((a, c) => a.s - c.s);
     // voies : seuls les RDV qui se chevauchent réellement se partagent la largeur (par groupe)
     let groupe = [], fin = -1; const groupes = [];
     evs.forEach(x => { if (groupe.length && x.s >= fin) { groupes.push(groupe); groupe = []; fin = -1; } groupe.push(x); fin = Math.max(fin, x.f); });
@@ -410,5 +415,8 @@ function gainsView() {
       <tfoot><tr><td>Ensemble pro <span class="meta">(hors perso)</span></td><td class="num">${esc(eur(b.tot.gagne))}</td><td class="num">${esc(eur(b.tot.prevu))}</td><td class="num">${esc(hrs(b.tot.total))}</td><td class="num">${b.tot.rdv}</td><td class="num">${esc(parHeure(b.tot.gagne, b.tot.total))}</td></tr></tfoot>
     </table>
   </div>
-  <p class="note">Le temps est le temps planifié : la durée de chaque RDV et tâche du planning sur la période, RDV à venir compris. Le total « pro » exclut Perso / Groupe. KamiFood compte un mois d'abonnement par mois actif (hors période d'essai). L'apport d'affaires compte les commissions reçues à leur date de paiement.</p>`;
+  <p class="note">${stripeReel()
+    ? 'KamiFood : factures Stripe payées sur la période.'
+    : '<b>KamiFood : estimation</b>, au prorata des jours d\'abonnement sur la période (hors période d\'essai et licence éditeur ; un résilié s\'arrête à sa date de fin). Connecte Stripe pour les vrais encaissements.'}
+    L'apport d'affaires compte les commissions reçues à leur date de paiement. Le temps est le temps planifié : la durée de chaque RDV et tâche sur la période, à venir compris ; les périodes de plusieurs jours ne comptent pas d'heures. Le total « pro » exclut Perso / Groupe.</p>`;
 }

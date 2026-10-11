@@ -9,14 +9,15 @@ const CAPTURES = process.env.CAPTURES || '';
 const capture = async (p, nom) => { if (CAPTURES) await p.screenshot({ path: path.join(CAPTURES, nom + '.png') }); };
 const sansScrollHorizontal = p => p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 const pause = (p, ms = 120) => p.waitForTimeout(ms);
-/* État complet et sain : le chargement ne le réécrit pas (aucune migration ni réparation à faire) */
+/* État complet et sain : le chargement ne le réécrit pas (aucune migration ni réparation à faire).
+   Toute nouvelle migration nommée doit être ajoutée à prefs.migrations ci-dessous. */
 const etatSain = (extra = {}) => ({
   nom: 'Kami Groupe', dossiers: [], events: [], memoire: [],
   abonnes: [{ id: 'moi', createdAt: 1, interne: true, restaurant: 'Toufek · licence éditeur', contact: 'Toufek', statut: 'actif', prix: 0, engagement: 0, debut: '2026-01-01', formule: 'f3', notes: '' }],
   aVoir: [],
   formules: [{ id: 'f1', nom: 'Essentiel', prix: 79 }, { id: 'f2', nom: 'Pro', prix: 149 }, { id: 'f3', nom: 'Premium', prix: 249 }],
   rdvModele: [{ titre: 'Installation', jours: 7, duree: 60, mode: 'place' }],
-  prefs: { periode: 'mois', theme: 'light', planVue: 'semaine', migrations: { rappelsRecuperes: true }, persistDemande: true, jourCopie: '2026-10-10' },
+  prefs: { periode: 'mois', theme: 'light', planVue: 'semaine', migrations: { rappelsRecuperes: true, dureesPeriodes: true, resilieSansFin: true, dedoublonMoi: true }, persistDemande: true, jourCopie: '2026-10-10' },
   stripe: null, rev: 3,
   ...extra,
 });

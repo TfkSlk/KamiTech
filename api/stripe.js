@@ -28,7 +28,9 @@ async function tout(path, params, key, fetchImpl, max = 1000) {
     after = page.data[page.data.length - 1].id;
   }
 }
-const jour = ts => ts ? new Date(ts * 1000).toISOString().slice(0, 10) : '';
+/* Jour AAAA-MM-JJ en heure de Paris (une facture payée à 0 h 30 le 1er compte le 1er, pas la veille en UTC) */
+const JOUR_PARIS = new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' });
+const jour = ts => ts ? JOUR_PARIS.format(new Date(ts * 1000)) : '';
 const norm = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 /* Mensualise un prix Stripe (annuel → /12, hebdo → ×52/12), en euros HT si Stripe gère la taxe en sus */
@@ -70,7 +72,8 @@ export async function lireStripe({ key, filtre, fetchImpl = fetch, depuis }) {
     const c = typeof s.customer === 'object' && s.customer ? s.customer : { id: s.customer };
     const items = s.items?.data || [];
     const prix = items.reduce((t, it) => t + mensuel(it.price, it.quantity || 1), 0);
-    const statut = ['active', 'past_due', 'unpaid'].includes(s.status) ? 'actif' : s.status === 'trialing' ? 'essai' : 'resilie';
+    /* incomplete / incomplete_expired : premier paiement jamais abouti, rien n'est compté (comme un essai) */
+    const statut = ['active', 'past_due', 'unpaid'].includes(s.status) ? 'actif' : ['trialing', 'incomplete', 'incomplete_expired'].includes(s.status) ? 'essai' : 'resilie';
     return {
       stripeId: s.id, stripeClient: c.id,
       restaurant: c.name || c.description || c.email || s.id, email: c.email || '', tel: c.phone || '',
@@ -86,7 +89,8 @@ export async function lireStripe({ key, filtre, fetchImpl = fetch, depuis }) {
     .map(i => ({
       id: i.id, client: typeof i.customer === 'object' ? i.customer.id : i.customer, abonnement: typeof i.subscription === 'object' ? i.subscription?.id : i.subscription,
       date: jour(i.status_transitions?.paid_at || i.created),
-      ht: ((i.subtotal_excluding_tax ?? i.total_excluding_tax ?? i.subtotal ?? i.amount_paid) || 0) / 100,
+      /* HT réellement facturé (remises déduites) d'abord */
+      ht: ((i.total_excluding_tax ?? i.subtotal_excluding_tax ?? i.subtotal ?? i.amount_paid) || 0) / 100,
       ttc: (i.amount_paid || 0) / 100,
     }));
   const mrr = abonnes.filter(a => a.statut === 'actif').reduce((t, a) => t + a.prix, 0);

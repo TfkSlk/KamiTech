@@ -61,7 +61,8 @@ let state = load();
 
 /* Ici, load(), migrate(), assainir() et ce qu'elles appellent tournent AVANT la définition des const utilitaires
    (zone morte) : seulement du code en ligne et des fonctions déclarées avec function (jourLocal, uid, serialiser). */
-function jourLocal() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+/* Jour local AAAA-MM-JJ (aujourd'hui, ou celui d'un horodatage ; un horodatage illisible donne aujourd'hui) */
+function jourLocal(ts) { let d = ts == null ? new Date() : new Date(ts); if (isNaN(d)) d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 /* rev en tête du texte stocké : save() le relit sans tout analyser */
 function serialiser(s) { return JSON.stringify({ rev: s.rev || 0, ...s }); }
@@ -99,19 +100,23 @@ function garderIllisible(brut) {
 }
 
 function load() {
-  let s = blank(), lu = null;
+  let s = blank(), lu = null, avant = {};
   donneesIllisibles = false;
   const brut = lireCle(KEY);
   if (brut) {
     try { lu = JSON.parse(brut); } catch (e) { lu = undefined; }
     if (!lu || typeof lu !== 'object' || Array.isArray(lu)) { garderIllisible(brut); lu = null; }
-    else s = { ...s, ...lu };
+    else {
+      s = { ...s, ...lu };
+      /* Copie des drapeaux AVANT migrate : il modifie le même objet prefs.migrations, une nouvelle migration passerait sinon inaperçue */
+      const m = lu.prefs && lu.prefs.migrations;
+      if (m && typeof m === 'object' && !Array.isArray(m)) avant = { ...m };
+    }
   }
   s = migrate(s);
   /* Une migration nommée vient de tourner, ou des données ont été réparées : on l'écrit tout de suite pour que ce soit stable
      (save() n'est pas encore utilisable ici). La valeur d'avant part d'abord dans la copie de la veille. */
   if (lu) {
-    const avant = (lu.prefs && typeof lu.prefs.migrations === 'object' && lu.prefs.migrations) || {};
     if (migrate.corrections || Object.keys(s.prefs.migrations).some(k => !avant[k])) {
       try { copieVeille(s, brut); localStorage.setItem(KEY, serialiser(s)); } catch (e) { /* stockage plein ou bloqué : rejouera au prochain chargement, sans dommage */ }
     }
@@ -129,12 +134,12 @@ function migrate(s) {
   s.abonnes = s.abonnes || [];
   s.memoire = s.memoire || [];
   s.aVoir = s.aVoir || [];
-  /* Toufek est l'éditeur de KamiFood : sa licence est permanente et jamais facturée */
-  if (!s.abonnes.some(a => a.interne)) s.abonnes.push({ id: 'moi', createdAt: Date.now(), interne: true, restaurant: 'Toufek · licence éditeur', contact: 'Toufek', statut: 'actif', prix: 0, engagement: 0, debut: jourLocal(), formule: (s.formules || []).find(f => f.nom === 'Premium')?.id || '', notes: 'Licence éditeur KamiFood : activée en permanence, jamais facturée.' });
+  /* Toufek est l'éditeur de KamiFood : sa licence (id 'moi') est permanente et jamais facturée */
+  if (!s.abonnes.some(a => a.id === 'moi')) s.abonnes.push({ id: 'moi', createdAt: Date.now(), interne: true, restaurant: 'Toufek · licence éditeur', contact: 'Toufek', statut: 'actif', prix: 0, engagement: 0, debut: jourLocal(), formule: (s.formules || []).find(f => f.nom === 'Premium')?.id || '', notes: 'Licence éditeur KamiFood : activée en permanence, jamais facturée.' });
   s.stripe = s.stripe || null;
   s.aVoir.forEach(v => {
     if (!Array.isArray(v.historique)) v.historique = [];
-    if (v.objet) { v.historique.unshift({ date: v.createdAt ? new Date(v.createdAt).toISOString().slice(0, 10) : jourLocal(), texte: v.objet }); delete v.objet; }
+    if (v.objet) { v.historique.unshift({ date: v.createdAt ? jourLocal(v.createdAt) : jourLocal(), texte: v.objet }); delete v.objet; }
     if (v.relance) { v.rappel = v.rappel || v.relance; delete v.relance; }
     if (v.statut === 'attente') v.attente = v.attente || 'lui';
     if (['contacter', 'attente', 'planifier'].includes(v.statut)) v.statut = 'suivi';
@@ -145,7 +150,8 @@ function migrate(s) {
   s.events.forEach(e => {
     if (e.lien === undefined) e.lien = e.dossierId ? 'd:' + e.dossierId : '';
     delete e.dossierId;
-    if (!e.duree) e.duree = 60;
+    /* Durée absente : 0 pour une période (elle ne compte pas d'heures), 60 min sinon. Une durée 0 choisie reste 0. */
+    if (e.duree === undefined || e.duree === null || e.duree === '') e.duree = (e.fin && e.fin > e.date) ? 0 : 60;
     if (!e.mode) e.mode = 'place';
   });
   /* Migrations nommées : chacune ne tourne qu'une fois (drapeau dans prefs.migrations), dans n'importe quel ordre.
@@ -163,6 +169,43 @@ function migrate(s) {
       }
     });
     s.prefs.migrations.rappelsRecuperes = true;
+  }
+  /* Périodes sans heure : l'ancien chargement leur donnait 60 min à tort ; elles reviennent à 0 */
+  if (!s.prefs.migrations.dureesPeriodes) {
+    s.events.forEach(e => { if (typeof e.fin === 'string' && e.fin && e.fin > e.date && !e.heure) e.duree = 0; });
+    s.prefs.migrations.dureesPeriodes = true;
+  }
+  /* Résilié sans date de fin : il rapportait encore. Fin posée au jour de la migration, signalée « estimée, à corriger » */
+  if (!s.prefs.migrations.resilieSansFin) {
+    const j = jourLocal();
+    s.abonnes.forEach(a => { if (a.statut === 'resilie' && !a.fin) { a.fin = j; a.finEstimee = true; } });
+    s.prefs.migrations.resilieSansFin = true;
+  }
+  /* Licence éditeur en double (case décochée puis recréée au chargement) : un seul 'moi', toujours interne.
+     Une copie de licence (prix nul) est retirée en gardant sa note ; un « moi » devenu vrai restaurant (prix ou Stripe)
+     reçoit un nouvel id (avec ses liens s'il était celui affiché). Rien d'autre n'est touché. */
+  if (!s.prefs.migrations.dedoublonMoi) {
+    const prixDe = a => Number(String(a.prix ?? '').replace(',', '.')) || 0;
+    const mois = s.abonnes.filter(a => a.id === 'moi');
+    const garde = mois.find(a => !prixDe(a) && !a.stripeId) || mois[0];
+    if (garde) {
+      const retires = new Set();
+      mois.forEach((a, i) => {
+        if (a === garde) return;
+        if (prixDe(a) || a.stripeId) {
+          const nv = uid();
+          if (i === 0) [...s.events, ...s.aVoir].forEach(x => { if (x.lien === 'a:moi') x.lien = 'a:' + nv; });
+          a.id = nv;
+        } else {
+          const n = typeof a.notes === 'string' ? a.notes.trim() : '';
+          if (n && !n.startsWith('Licence éditeur KamiFood :') && !String(garde.notes || '').includes(n)) garde.notes = [garde.notes, n].filter(Boolean).join('\n');
+          retires.add(a);
+        }
+      });
+      s.abonnes = s.abonnes.filter(a => !retires.has(a));
+      garde.interne = true;
+    }
+    s.prefs.migrations.dedoublonMoi = true;
   }
   migrate.corrections = assainir(s);
   return s;
@@ -229,7 +272,10 @@ function assainir(s) {
     if (!APPORT.includes(d.activite)) maj(d, 'activite', 'cee');
     if (!connu(STATUTS, d.statut)) maj(d, 'statut', 'prospect');
   });
-  s.abonnes.forEach(a => { if ('formule' in a) maj(a, 'formule', refId(a.formule, 'f')); });
+  s.abonnes.forEach(a => {
+    if ('formule' in a) maj(a, 'formule', refId(a.formule, 'f'));
+    if ('finEstimee' in a && typeof a.finEstimee !== 'boolean') maj(a, 'finEstimee', !!a.finEstimee);
+  });
   /* Réglages et petits champs dont dépend l'affichage */
   if (!connu(PERIODES, s.prefs.periode)) maj(s.prefs, 'periode', 'mois');
   if (!['jour', 'semaine', 'mois'].includes(s.prefs.planVue)) maj(s.prefs, 'planVue', 'semaine');
@@ -306,7 +352,13 @@ const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 /* Un rappel ou un RDV automatique ne tombe jamais un week-end : samedi et dimanche glissent au lundi */
 const jourOuvre = d => { const x = new Date(d); const j = x.getDay(); if (j === 6) x.setDate(x.getDate() + 2); else if (j === 0) x.setDate(x.getDate() + 1); return x; };
 const rappelDans = n => iso(jourOuvre(addDays(new Date(), n)));
-const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; };
+/* + n mois, le jour borné au dernier jour du mois visé (31 janv. + 1 mois = 28 ou 29 févr., jamais début mars) */
+const addMonths = (d, n) => {
+  const x = new Date(d), j = x.getDate();
+  x.setDate(1); x.setMonth(x.getMonth() + n);
+  x.setDate(Math.min(j, new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()));
+  return x;
+};
 const monday = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
 const eur = n => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n || 0);
 const num = v => Number(String(v ?? '').replace(',', '.')) || 0;
@@ -374,30 +426,38 @@ function range(p) {
   return [iso(new Date(n.getFullYear(), n.getMonth(), 1)), iso(new Date(n.getFullYear(), n.getMonth() + 1, 0))];
 }
 
-/* Mois facturés d'un abonné entre deux dates (un mois compte dès que l'abonnement est actif ce mois-là) */
-function moisFactures(a, from, to) {
-  if (a.interne || a.statut === 'essai' || !a.debut) return 0;
-  const start = parse(a.debut);
-  const stop = a.statut === 'resilie' && a.fin ? a.fin : '9999-12-31';
-  let n = 0;
-  for (let m = new Date(start.getFullYear(), start.getMonth(), 1); iso(m) <= to; m = addMonths(m, 1)) {
-    const mEnd = iso(new Date(m.getFullYear(), m.getMonth() + 1, 0));
-    if (mEnd >= from && iso(m) <= stop) n++;
+/* Revenu d'un abonné entre deux dates incluses, au prorata des jours : pour chaque mois couvert par
+   [from, to] ∩ [début, fin], prix × jours couverts ÷ jours du mois. Un mois entier vaut donc exactement le prix.
+   Rien pour la licence éditeur (interne), une période d'essai ou un abonné sans date de début ; un résilié s'arrête à sa fin. */
+function revenuAbonne(a, from, to) {
+  if (!a || a.interne || a.statut === 'essai' || !a.debut) return 0;
+  const stop = a.statut === 'resilie' ? (a.fin || a.debut) : '9999-12-31';
+  const lo = from > a.debut ? from : a.debut, hi = to < stop ? to : stop;
+  if (lo > hi) return 0;
+  const prix = num(a.prix);
+  let total = 0;
+  for (let m = new Date(parse(lo).getFullYear(), parse(lo).getMonth(), 1); iso(m) <= hi; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+    const dernier = new Date(m.getFullYear(), m.getMonth() + 1, 0);
+    const d1 = lo > iso(m) ? lo : iso(m), d2 = hi < iso(dernier) ? hi : iso(dernier);
+    const jours = Math.round((parse(d2) - parse(d1)) / 864e5) + 1; // arrondi : un changement d'heure ne fausse pas le compte
+    total += prix * jours / dernier.getDate();
   }
-  return n;
+  return total;
 }
 const mrr = () => state.abonnes.filter(a => a.statut === 'actif' && !a.interne).reduce((s, a) => s + num(a.prix), 0);
+/* Encaissements KamiFood réels : des factures Stripe ont été synchronisées */
+const stripeReel = () => !!state.stripe?.factures?.length;
 
-/* Gagné = encaissé sur la période, jusqu'à aujourd'hui. Prévu = ce qui reste attendu sur la période. */
-function gains(secteur, p) {
-  const [from, to] = range(p);
+/* Une seule règle de gains, pour toute période [from, to] (KPI, cartes, graphiques, Kami).
+   Gagné = encaissé sur la période jusqu'à aujourd'hui. Prévu = ce qui reste attendu sur la période. */
+function gainsPeriode(secteur, from, to) {
   const t = today();
   if (secteur === 'kamifood') {
     const upTo = to < t ? to : t;
-    const total = state.abonnes.reduce((s, a) => s + moisFactures(a, from, to) * num(a.prix), 0);
-    const estime = state.abonnes.reduce((s, a) => s + moisFactures(a, from, upTo) * num(a.prix), 0);
-    /* Si Stripe est synchronisé, l'encaissé est le vrai : les factures payées sur la période */
-    const gagne = state.stripe?.factures?.length ? state.stripe.factures.filter(f => f.date >= from && f.date <= upTo).reduce((s, f) => s + num(f.ht), 0) : estime;
+    const total = state.abonnes.reduce((s, a) => s + revenuAbonne(a, from, to), 0);
+    const estime = state.abonnes.reduce((s, a) => s + revenuAbonne(a, from, upTo), 0);
+    /* Si Stripe est synchronisé, l'encaissé est le vrai : les factures payées sur la période ; sinon l'estimation au prorata */
+    const gagne = stripeReel() ? state.stripe.factures.filter(f => f.date >= from && f.date <= upTo).reduce((s, f) => s + num(f.ht), 0) : estime;
     return { gagne, prevu: Math.max(0, total - estime) };
   }
   const ds = state.dossiers.filter(d => d.activite === secteur);
@@ -405,9 +465,12 @@ function gains(secteur, p) {
   const prevu = ds.filter(d => d.statut === 'signe').reduce((s, d) => s + Math.max(0, num(d.commEstimee) - num(d.commRecue)), 0);
   return { gagne, prevu };
 }
+function gains(secteur, p) { return gainsPeriode(secteur, ...range(p)); }
+/* Temps planifié : la durée des RDV et tâches. Une période (plusieurs jours) et une relance ne comptent pas d'heures. */
+const compteHeures = e => !estPeriode(e) && !e.relance;
 function temps(secteur, p) {
   const [from, to] = range(p);
-  const evs = state.events.filter(e => e.activite === secteur && e.date >= from && e.date <= to);
+  const evs = state.events.filter(e => e.activite === secteur && e.date >= from && e.date <= to && compteHeures(e));
   return {
     total: evs.reduce((s, e) => s + num(e.duree), 0),
     fait: evs.filter(e => e.fait).reduce((s, e) => s + num(e.duree), 0),
@@ -422,6 +485,8 @@ function bilan(p) {
   return { rows, tot, perso };
 }
 const parHeure = (g, min) => min ? eur(g / (min / 60)) : '—';
+/* Premier lancement : rien de saisi, à part la licence éditeur (et les autres licences internes) */
+const estVide = () => !state.dossiers.length && !state.events.length && !state.aVoir.length && !state.abonnes.some(a => !a.interne);
 
 /* Relances des dossiers, affichées dans le planning */
 function relances() {
@@ -517,14 +582,22 @@ function kamifood() {
   const t = today();
   const ab = [...state.abonnes].sort((a, c) => (a.statut === 'resilie') - (c.statut === 'resilie') || (a.restaurant || '').localeCompare(c.restaurant || ''));
   const actifs = state.abonnes.filter(a => a.statut === 'actif' && !a.interne);
+  const clients = state.abonnes.some(a => !a.interne);
+  const licence = state.abonnes.find(a => a.id === 'moi');
   const prochain = id => state.events.filter(e => e.lien === 'a:' + id && e.date >= t && !e.fait).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure))[0];
   const g = gains('kamifood', 'annee');
+  /* Aucun client (la licence éditeur seule) : une explication d'abord, plutôt qu'une page de zéros */
+  const vide = clients ? '' : `<div class="card vide-kf">
+      <div><h2>Aucun abonné pour l'instant</h2><p class="empty">Ajoute ton premier restaurant avec « + Abonné » : ses RDV inclus seront planifiés automatiquement.</p></div>
+      ${licence ? `<button type="button" class="vide-licence" onclick="openAbonne('moi')"><span class="status paye">Éditeur</span><span>Ta licence éditeur : active, hors des gains</span></button>` : ''}
+    </div>`;
 
   return `
   <div class="page-head">
     <div><h1>KamiFood</h1><p>Abonnements restaurants et RDV inclus dans la souscription</p></div>
     <div class="btn-row"><button class="btn" onclick="synchroniserStripe()" id="btn-stripe">${state.stripe?.sync ? 'Synchroniser Stripe' : 'Connecter Stripe'}</button><button class="btn primary" onclick="openAbonne()">+ Abonné</button></div>
   </div>
+  ${vide}
   ${stripeCarte()}
   <div class="grid kpis">
     <div class="card kpi"><div class="label">Abonnés actifs</div><div class="value">${actifs.length}</div><div class="sub">${state.abonnes.filter(a => a.statut === 'essai').length} en période d'essai</div></div>
@@ -532,22 +605,21 @@ function kamifood() {
     <div class="card kpi"><div class="label">Encaissé cette année</div><div class="value">${eur(g.gagne)}</div><div class="sub">+ ${eur(g.prevu)} d'ici décembre</div></div>
     <div class="card kpi"><div class="label">RDV clients à venir</div><div class="value">${state.events.filter(e => e.activite === 'kamifood' && e.date >= t && !e.fait).length}</div><div class="sub">installations, formations, suivis</div></div>
   </div>
-  <div class="card table-wrap">${ab.length ? `
+  ${clients ? `<div class="card table-wrap">
     <table>
       <thead><tr><th>Restaurant</th><th>Formule</th><th class="num">Prix / mois</th><th>Statut</th><th class="num hide-sm">Fin d'engagement</th><th class="hide-sm">Prochain RDV</th></tr></thead>
       <tbody>${ab.map(a => {
         const n = prochain(a.id);
         const finEng = a.debut ? iso(addMonths(parse(a.debut), num(a.engagement) || 12)) : '';
         return `<tr class="clickable" onclick="openAbonne('${a.id}')">
-        <td><strong>${esc(a.restaurant)}</strong>${a.interne ? ' <span class="status paye">Éditeur</span>' : ''}${a.impaye ? ' <span class="status perdu">Impayé</span>' : ''}<div class="meta">${esc([a.contact, a.ville, a.stripeId ? 'Stripe' : ''].filter(Boolean).join(' · '))}</div></td>
+        <td><strong>${esc(a.restaurant)}</strong>${a.interne ? ' <span class="status paye">Éditeur</span>' : ''}${a.impaye ? ' <span class="status perdu">Impayé</span>' : ''}<div class="meta">${esc([a.contact, a.ville, a.stripeId ? 'Stripe' : '', a.statut === 'resilie' && a.finEstimee ? 'fin estimée, à corriger' : ''].filter(Boolean).join(' · '))}</div></td>
         <td>${esc(a.formuleNom || formule(a.formule)?.nom || '—')}</td>
         <td class="num">${a.interne ? '<span class="meta">licence</span>' : eur(a.prix)}</td>
         <td>${abBadge(a.statut)}</td>
         <td class="num hide-sm">${fmtDate(finEng)}</td>
         <td class="hide-sm">${n ? `${fmtDate(n.date)} · ${esc(n.titre)}` : '<span class="meta">—</span>'}</td>
       </tr>`; }).join('')}</tbody>
-    </table>` : '<div class="empty">Aucun abonné pour le moment. Ajoute ton premier restaurant : ses RDV inclus seront planifiés automatiquement.</div>'}
-  </div>`;
+    </table></div>` : ''}`;
 }
 
 /* ---------- Stripe : lecture des abonnements KamiFood (facturation séparée de KGD Pro) ---------- */
@@ -586,6 +658,8 @@ function fusionnerStripe(j) {
     let a = state.abonnes.find(x => x.stripeId === sa.stripeId) || state.abonnes.find(x => !x.stripeId && !x.interne && cle(x.restaurant) === cle(sa.restaurant));
     if (!a) { a = { id: uid(), createdAt: Date.now(), restaurant: sa.restaurant, engagement: 12, notes: '' }; state.abonnes.push(a); nouveaux++; }
     Object.assign(a, { stripeId: sa.stripeId, stripeClient: sa.stripeClient, stripeStatut: sa.stripeStatut, formuleNom: sa.formuleNom, prix: sa.prix, statut: sa.statut, impaye: sa.impaye, debut: sa.debut || a.debut, fin: sa.fin || a.fin });
+    if (sa.fin) delete a.finEstimee;
+    else if (a.statut === 'resilie' && !a.fin) { a.fin = today(); a.finEstimee = true; } // résilié sans date : arrêté aujourd'hui, à corriger
     if (sa.email && !a.email) a.email = sa.email;
     if (sa.tel && !a.tel) a.tel = sa.tel;
     if (!a.formule) { const f = state.formules.find(x => cle(sa.formuleNom).includes(cle(x.nom))); if (f) a.formule = f.id; }
@@ -868,6 +942,9 @@ const actions = (delBtn, extra = '') => `<div class="modal-actions">
 
 function openAbonne(id) {
   const a = id ? abonne(id) : { statut: 'actif', debut: today(), formule: state.formules[0]?.id, prix: state.formules[0]?.prix || '', engagement: 12 };
+  /* La licence éditeur (id 'moi') reste toujours interne : pas de case à décocher, pas de suppression (elle reviendrait) */
+  const estMoi = id === 'moi';
+  const estimee = a.statut === 'resilie' && !!a.finEstimee;
   const fOpts = Object.fromEntries(state.formules.map(f => [f.id, `${f.nom}${num(f.prix) ? ' — ' + eur(f.prix) + ' / mois' : ''}`]));
   showModal(`
     <h2>${id ? "Modifier l'abonné" : 'Nouvel abonné KamiFood'}</h2>
@@ -882,19 +959,24 @@ function openAbonne(id) {
       ${field('statut', 'Statut', sel('statut', STATUTS_AB, a.statut))}
       ${field('debut', 'Début de facturation', inp('debut', a.debut, 'date', 'required'))}
       ${field('engagement', 'Engagement (mois)', inp('engagement', a.engagement, 'number', 'min="0" step="1"'))}
-      ${field('fin', 'Date de résiliation', inp('fin', a.fin, 'date'))}
+      ${field('fin', estimee ? 'Date de résiliation <b class="estimee">estimée, à corriger</b>' : 'Date de résiliation', inp('fin', a.fin, 'date', estimee ? 'oninput="this.dataset.touche=1"' : ''))}
       ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(a.notes || '')}</textarea>`, true)}
-      <label class="check full"><input type="checkbox" name="interne" ${a.interne ? 'checked' : ''}> Licence éditeur (moi) : activée en permanence, jamais facturée, hors des gains</label>
+      ${estMoi ? '' : `<label class="check full"><input type="checkbox" name="interne" ${a.interne ? 'checked' : ''}> Licence éditeur (moi) : activée en permanence, jamais facturée, hors des gains</label>`}
       ${a.stripeId ? `<p class="meta full">Synchronisé avec Stripe (${esc(a.stripeStatut || '')}, ${esc(a.formuleNom || '')}). Le prix et le statut sont repris de Stripe à chaque synchronisation.</p>` : ''}
       ${!id && state.rdvModele.length ? `<label class="check full"><input type="checkbox" name="planifier" checked> Planifier les ${state.rdvModele.length} RDV inclus dans la souscription (${state.rdvModele.map(r => esc(r.titre)).join(', ')})</label>` : ''}
     </div>
-    ${actions(id ? `<button type="button" class="btn danger" onclick="supprimerAbonne('${id}')">Supprimer</button>` : '',
+    ${actions(id && !estMoi ? `<button type="button" class="btn danger" onclick="supprimerAbonne('${id}')">Supprimer</button>` : '',
       id ? `<button type="button" class="btn" onclick="openEvent(null,null,'a:${id}')">+ RDV</button>` : '')}`,
   f => {
     const planifier = f.planifier; delete f.planifier;
-    f.interne = !!f.interne;
+    f.interne = estMoi || !!f.interne;
+    /* Résilié sans date : arrêté aujourd'hui (sinon il rapporterait encore) */
+    if (f.statut === 'resilie' && !f.fin) f.fin = today();
+    /* Une date estimée touchée ou changée devient la vraie date */
+    const corrigee = !!a.finEstimee && (f.statut !== 'resilie' || f.fin !== a.fin || !!$('#f-fin')?.dataset.touche);
     const target = id ? a : { id: uid(), createdAt: Date.now() };
     Object.assign(target, f);
+    if (corrigee) delete target.finEstimee;
     if (!id) {
       state.abonnes.push(target);
       if (planifier) planifierInclus(target);
@@ -987,8 +1069,8 @@ function openEvent(id, date, lien, heure, apres, prefill) {
   f => {
     f.duree = num(f.duree);
     f.important = !!f.important;
-    f.aPrevoir = !!f.aPrevoir && !!f.fin;
     if (f.fin && f.fin <= f.date) f.fin = '';
+    f.aPrevoir = !!f.aPrevoir && !!f.fin;
     if (f.fin && !f.heure) { f.mode = 'tache'; f.duree = 0; }
     let ev = e;
     if (id) Object.assign(e, f);
@@ -1403,7 +1485,8 @@ function projection() {
     resume: {
       gagneMois: mois.tot.gagne, attenduMois: mois.tot.prevu, tempsMoisMin: mois.tot.total,
       gagneAnnee: annee.tot.gagne, parSecteurAnnee: Object.fromEntries(annee.rows.map(r => [r.k, { gagne: r.gagne, tempsMin: r.total }])),
-      recurrentMensuelKamiFood: mrr(), stripe: state.stripe ? { sync: state.stripe.sync, mrr: state.stripe.mrr, encaisse30j: state.stripe.factures.filter(f => f.date >= iso(addDays(new Date(), -30))).reduce((s, f) => s + num(f.ht), 0), impayes: state.stripe.abonnes.filter(a => a.impaye).length } : null, abonnesActifs: state.abonnes.filter(a => a.statut === 'actif').length,
+      recurrentMensuelKamiFood: mrr(), stripe: state.stripe ? { sync: state.stripe.sync, mrr: state.stripe.mrr, encaisse30j: state.stripe.factures.filter(f => f.date >= iso(addDays(new Date(), -30))).reduce((s, f) => s + num(f.ht), 0), impayes: state.stripe.abonnes.filter(a => a.impaye).length } : null, abonnesActifs: state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length,
+      kamifoodGains: stripeReel() ? 'factures Stripe payées' : 'estimation au prorata des jours d\'abonnement',
       dossiersEnCours: state.dossiers.filter(d => ACTIFS.includes(d.statut)).length,
       contactsARappeler: rappelsContacts().length, contactsEnAttente: state.aVoir.filter(v => v.statut === 'suivi' && v.attente).length,
       enRetard: relances().filter(r => r.date < t).length + state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t)).length + rappelsContacts().filter(r => r.date < t).length,
@@ -1594,7 +1677,7 @@ if (jarvis.mainsLibres && SR) setTimeout(() => demarrerEcoute(), 500);
 
 /* ---------- Exemple ---------- */
 async function loadDemo() {
-  if ((state.dossiers.length || state.events.length || state.abonnes.length) && !await confirmer("Ajouter les données d'exemple à tes données actuelles ?", 'Ajouter')) return;
+  if (!estVide() && !await confirmer("Ajouter les données d'exemple à tes données actuelles ?", 'Ajouter')) return;
   const d = n => iso(addDays(new Date(), n));
   const m = n => iso(addMonths(new Date(), n));
   if (!state.formules.some(f => num(f.prix))) {
