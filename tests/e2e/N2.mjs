@@ -227,11 +227,18 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     const brut = await p.evaluate(() => JSON.parse(localStorage.getItem('kgd-brouillon')));
     verifier(`${ecran} 6. brouillon écrit à chaque saisie : {note, contactId, etape, t}`, brut && brut.note === 'croisé Léa de la Boulangerie Sud, KamiFood' && brut.contactId === null && brut.etape === 0 && typeof brut.t === 'number', JSON.stringify(brut));
     await p.reload({ waitUntil: 'domcontentloaded' }); await pause(p, 300);
-    const apresRechargement = await p.evaluate(() => ({ ouverte: !document.querySelector('#rencontre').hidden, hash: location.hash }));
+    /* Rechargement pendant la saisie (onglet tué pendant un appel) : Noter revient tout seul avec la note, sur la même entrée d'historique */
+    const apresRechargement = await p.evaluate(() => ({ ouverte: !document.querySelector('#rencontre').hidden, hash: location.hash, note: $('#r-note')?.value, couche: history.state && history.state.couche, couches: couches.length }));
+    verifier(`${ecran} 5. rechargement avec Noter ouvert : Noter revient avec la note, le # ne bouge pas`,
+      apresRechargement.ouverte && apresRechargement.note === 'croisé Léa de la Boulangerie Sud, KamiFood' && apresRechargement.hash === '#dashboard' && apresRechargement.couche === 'rencontre' && apresRechargement.couches === 1, JSON.stringify(apresRechargement));
+    await p.evaluate(() => history.back()); await pause(p, 250);
+    const premierRetour = await p.evaluate(() => ({ ferme: $('#rencontre').hidden, hash: location.hash, brouillon: JSON.parse(localStorage.getItem('kgd-brouillon') || 'null')?.note }));
+    verifier(`${ecran} 5. après le rechargement, le premier retour ferme Noter (#dashboard), le brouillon reste`,
+      premierRetour.ferme && premierRetour.hash === '#dashboard' && premierRetour.brouillon === 'croisé Léa de la Boulangerie Sud, KamiFood', JSON.stringify(premierRetour));
     await noter(p);
     const repris = await p.evaluate(() => ({ note: $('#r-note').value, bandeau: $('#r-brouillon span')?.textContent.trim() + ' · ' + $('#r-brouillon button')?.textContent.trim(), nom: renc.nom }));
     verifier(`${ecran} 5. note, rechargement, réouverture de Noter : le texte est revenu avec « Brouillon … repris »`,
-      !apresRechargement.ouverte && repris.note === 'croisé Léa de la Boulangerie Sud, KamiFood' && /^Brouillon de \d\d:\d\d repris · Effacer$/.test(repris.bandeau) && repris.nom === 'Léa', JSON.stringify({ apresRechargement, repris }));
+      repris.note === 'croisé Léa de la Boulangerie Sud, KamiFood' && /^Brouillon de \d\d:\d\d repris · Effacer$/.test(repris.bandeau) && repris.nom === 'Léa', JSON.stringify({ apresRechargement, repris }));
     await capture(p, `n2-brouillon-${largeur}`);
     /* Échap ferme, le brouillon reste */
     await p.keyboard.press('Escape'); await pause(p, 150);
@@ -250,6 +257,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await p.click('#toast .toast-action'); await pause(p, 120);
     const retabli = await p.evaluate(() => ({ ouverte: !$('#rencontre').hidden, note: $('#r-note')?.value }));
     verifier(`${ecran} 6. « Rétablir » rouvre Noter avec la note`, retabli.ouverte && retabli.note === 'vu Marc au salon, CEE', JSON.stringify(retabli));
+    await p.click('#r-brouillon button'); await pause(p, 80); // « Effacer »
     await p.evaluate(() => fermerRencontre());
     /* Brouillon d'un autre contact : jamais repris ailleurs ; plus de 24 h : oublié */
     const roth = await p.evaluate(() => { const v = { id: 'roth1', createdAt: 1, nom: 'Mme Roth', entreprise: 'Pharmacie', activite: 'foncier', priorite: 'normale', statut: 'suivi', attente: 'lui', rappel: '2026-10-10', historique: [] }; state.aVoir.push(v); save(); render(); return v.id; });
@@ -429,6 +437,214 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     verifier(`${ecran} 7. #fab inerte pendant Noter`, await p.evaluate(() => $('#fab').hasAttribute('inert')));
     await p.evaluate(() => fermerRencontre());
     verifier(`${ecran} 4. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* ---------- Recette N2 : rien de perdu, rien de compris à tort ---------- */
+  {
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, exemple: true });
+    await pause(p, 2500); // le toast « Exemple chargé » est parti
+    const roth = await p.evaluate(() => state.aVoir.find(v => v.nom === 'Mme Roth').id);
+    const brouillon = () => p.evaluate(() => JSON.parse(localStorage.getItem('kgd-brouillon') || 'null'));
+    const NOTE_K = 'croisé Karim de Karim SARL pour les CEE, je lui envoie le devis';
+    /* Une note commencée pour un nouveau contact, coupée (retour) ; puis « Contacté » sur Mme Roth, rien de tapé, Annuler ou Enregistrer */
+    for (const fin of ['Annuler', 'Enregistrer']) {
+      await noter(p);
+      await p.keyboard.type(NOTE_K, { delay: 1 });
+      await p.evaluate(() => history.back()); await pause(p, 200);
+      await p.locator('#main button:has-text("Contacté")').first().click(); await pause(p, 120);
+      const qui = await p.$eval('#rencontre .r-head .meta', e => e.textContent);
+      await p.click(fin === 'Annuler' ? '#rencontre .r-annuler' : '#r-enregistrer'); await pause(p, 250);
+      const b = await brouillon();
+      await noter(p);
+      const rouverte = await p.$eval('#r-note', e => e.value);
+      verifier(`${ecran} recette : ${fin} sur une autre fiche (${qui.replace('Prise de contact · ', '')}) n'efface pas la note commencée pour un nouveau contact`,
+        /Prise de contact · /.test(qui) && b && b.note === NOTE_K && b.contactId === null && rouverte === NOTE_K, JSON.stringify({ qui, b, rouverte }));
+      if (fin === 'Annuler') { await p.click('#r-brouillon button'); await pause(p, 80); } // « Effacer » : on repart d'une note vide
+      await p.evaluate(() => fermerRencontre());
+    }
+    /* Deux rencontres, deux brouillons : taper chez Mme Roth n'écrase pas la note du nouveau contact */
+    await p.evaluate(id => openContact(id), roth); await pause(p);
+    await p.locator('#r-note').pressSequentially('il me rappelle', { delay: 1 });
+    await p.evaluate(() => history.back()); await pause(p, 200);
+    const deux = await brouillon();
+    await noter(p);
+    const nouveau = await p.$eval('#r-note', e => e.value);
+    await p.evaluate(() => history.back()); await pause(p, 200);
+    await p.evaluate(id => openContact(id), roth); await pause(p);
+    const chezRoth = await p.$eval('#r-note', e => e.value);
+    verifier(`${ecran} recette : un brouillon par rencontre (nouveau contact et Mme Roth), chacun repris à sa place`,
+      nouveau === NOTE_K && chezRoth === 'il me rappelle' && deux.note === 'il me rappelle' && deux.contactId === roth && deux.autres?.nouveau?.note === NOTE_K, JSON.stringify({ nouveau, chezRoth, deux }));
+    /* Enregistrer chez Mme Roth n'efface que son brouillon */
+    await p.click('#r-enregistrer'); await pause(p, 200);
+    const apresRoth = await brouillon();
+    verifier(`${ecran} recette : Enregistrer chez Mme Roth efface son brouillon, celui du nouveau contact reste`,
+      apresRoth && apresRoth.note === NOTE_K && !apresRoth.autres, JSON.stringify(apresRoth));
+    await noter(p); await p.click('#r-brouillon button'); await pause(p, 80); await p.evaluate(() => fermerRencontre());
+
+    /* Contact connu : le numéro lu va dans sa fiche s'il n'en a pas ; ni le service ni « Important » (sans RDV) ne sont montrés comme compris */
+    await p.evaluate(id => openContact(id), roth); await pause(p);
+    await p.locator('#r-note').pressSequentially("elle m'a donné son portable 06 12 34 56 78, on a parlé des CEE, signature !", { delay: 1 });
+    await pause(p, 250);
+    const jsRoth = await jetons(p);
+    await p.click('#r-enregistrer'); await pause(p, 200);
+    const fiche = await p.evaluate(id => { const v = aVoir(id); return { tel: v.tel, activite: v.activite, journal: v.historique.at(-1).texte }; }, roth);
+    verifier(`${ecran} recette : contact connu, jetons montrés = ce qui sera enregistré (Tél. seulement, ni CEE ni Important)`,
+      jsRoth.map(j => j.t).join(' | ') === 'Tél. 06 12 34 56 78', JSON.stringify(jsRoth));
+    verifier(`${ecran} recette : contact connu sans numéro → 06 12 34 56 78 dans sa fiche, la note entière au journal, service inchangé`,
+      fiche.tel === '06 12 34 56 78' && /06 12 34 56 78/.test(fiche.journal) && fiche.activite === 'foncier', JSON.stringify(fiche));
+    await p.evaluate(id => openContact(id), roth); await pause(p);
+    await p.fill('#r-note', 'nouveau numéro 07 11 22 33 44'); await pause(p, 200);
+    const autreTel = await jetons(p);
+    await p.click('#r-enregistrer'); await pause(p, 200);
+    const telGarde = await p.evaluate(id => aVoir(id).tel, roth);
+    verifier(`${ecran} recette : un numéro déjà connu n'est jamais remplacé (pas de jeton Tél. trompeur, la note le garde)`,
+      telGarde === '06 12 34 56 78' && !autreTel.some(j => /^Tél/.test(j.t)), JSON.stringify({ telGarde, autreTel }));
+    /* « Important » : seulement avec un RDV, qui passe en alerte */
+    await noter(p);
+    await p.fill('#r-note', 'croisé Paul Dubois de Dubois BTP, CEE, signature !'); await pause(p, 200);
+    const sansRdv = await jetons(p);
+    await p.fill('#r-note', 'croisé Paul Dubois de Dubois BTP, CEE, rdv jeudi 14h pour la signature !'); await pause(p, 200);
+    const avecRdv = await jetons(p);
+    await p.click('#r-enregistrer'); await pause(p, 200);
+    const evImp = await p.evaluate(() => { const v = state.aVoir.at(-1); const e = state.events.find(x => x.id === v.eventId); return { nom: v.nom, date: e?.date, heure: e?.heure, important: e?.important }; });
+    verifier(`${ecran} recette : « Important » n'est montré qu'avec un RDV, et le RDV créé est en alerte`,
+      !sansRdv.some(j => j.t === 'Important') && avecRdv.some(j => j.t === 'Important') && evImp.nom === 'Paul Dubois' && evImp.date === '2026-10-15' && evImp.heure === '14:00' && evImp.important === true, JSON.stringify({ sansRdv: sansRdv.map(j => j.t), avecRdv: avecRdv.map(j => j.t), evImp }));
+
+    /* « Qui ? » affiché, puis le nom écrit dans la phrase : les puces reviennent et Enregistrer crée le contact */
+    await noter(p);
+    await p.fill('#r-note', 'rappelle-moi jeudi pour le devis'); await pause(p, 200);
+    await p.click('#r-enregistrer'); await pause(p, 120);
+    const quiVu = !!await p.$('#r-qui');
+    await p.fill('#r-note', 'croisé Hugo de Hugo Peinture, rappelle-moi jeudi pour le devis'); await pause(p, 250);
+    const zone = await p.evaluate(() => ({ qui: !!$('#r-qui'), puces: !!$('#r-rappels'), nom: renc.nom }));
+    await p.click('#r-enregistrer'); await pause(p, 200);
+    const hugo = await p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, entreprise: v.entreprise, rappel: v.rappel, ferme: $('#rencontre').hidden }; });
+    verifier(`${ecran} recette : « Qui ? » puis le nom dans la phrase → les puces reviennent, Enregistrer crée Hugo (rappel jeudi)`,
+      quiVu && !zone.qui && zone.puces && zone.nom === 'Hugo' && hugo.nom === 'Hugo' && hugo.entreprise === 'Hugo Peinture' && hugo.rappel === '2026-10-15' && hugo.ferme, JSON.stringify({ quiVu, zone, hugo }));
+    /* « Qui ? » laissé vide alors que la phrase donne le nom (le champ garde le focus) : Enregistrer prend le nom lu */
+    await noter(p);
+    await p.fill('#r-note', 'rappelle-moi lundi'); await pause(p, 200);
+    await p.click('#r-enregistrer'); await pause(p, 120);
+    await p.evaluate(() => { const t = $('#r-note'); t.value = 'vu Inès de Atelier Sud, rappelle-moi lundi'; noteSaisie(t.value); $('#r-qui').focus(); });
+    await pause(p, 250);
+    await p.click('#r-enregistrer'); await pause(p, 200);
+    const ines = await p.evaluate(() => ({ nom: state.aVoir.at(-1).nom, ferme: $('#rencontre').hidden, toast: $('#toast').textContent }));
+    verifier(`${ecran} recette : « Qui ? » vide n'efface pas le nom lu dans la phrase`, ines.nom === 'Inès' && ines.ferme, JSON.stringify(ines));
+
+    /* Contact sans nom (ancien stockage) : son entreprise le nomme partout */
+    await p.evaluate(() => { state.aVoir.push({ id: 'sansnom1', createdAt: 1, nom: '', entreprise: 'Boulangerie Martin', activite: 'energie', priorite: 'normale', statut: 'suivi', attente: '', rappel: '2026-10-20', historique: [] }); save(); render(); });
+    await noter(p);
+    await p.fill('#r-note', 'passé à la Boulangerie Martin, le gérant veut un devis'); await pause(p, 250);
+    const sn = await p.evaluate(() => ({ bandeau: $('#r-doublon > span')?.textContent, compris: $('#r-jetons').textContent }));
+    await p.click('#r-doublon button'); await pause(p, 80);
+    const sn2 = await p.evaluate(() => ({ toast: $('#toast').textContent, entete: $('#rencontre .r-head .meta').textContent }));
+    await p.click('#r-enregistrer'); await pause(p, 200);
+    const sn3 = await p.evaluate(() => $('#toast').textContent);
+    verifier(`${ecran} recette : contact sans nom → « Boulangerie Martin existe déjà », toast et en-tête à son nom`,
+      sn.bandeau === 'Boulangerie Martin existe déjà' && !/Rien de reconnu/.test(sn.compris) && sn2.toast === 'La note ira dans la fiche de Boulangerie Martin' && sn2.entete === 'Prise de contact · Boulangerie Martin' && /^Boulangerie Martin · rappel /.test(sn3), JSON.stringify({ sn, sn2, sn3 }));
+
+    /* « Rétablir » (après Annuler) n'écrase pas une nouvelle note : le toast part dès qu'on écrit */
+    await noter(p);
+    await p.fill('#r-note', 'vu Marc au salon, CEE'); await pause(p, 100);
+    await p.click('#rencontre .r-annuler'); await pause(p, 150);
+    const retablirVu = await p.evaluate(() => $('#toast').classList.contains('show') && !!$('#toast .toast-action'));
+    await noter(p);
+    await p.keyboard.type('croisé Julie Martin de Solaris, foncier', { delay: 1 }); await pause(p, 150);
+    const toastParti = await p.evaluate(() => !$('#toast').classList.contains('show'));
+    await p.evaluate(() => $('#toast .toast-action')?.click()); await pause(p, 150);
+    const julie = await p.evaluate(() => ({ note: $('#r-note').value, b: JSON.parse(localStorage.getItem('kgd-brouillon')).note }));
+    verifier(`${ecran} recette : après Annuler, une nouvelle note fait partir « Rétablir », qui ne l'écrase jamais`,
+      retablirVu && toastParti && julie.note === 'croisé Julie Martin de Solaris, foncier' && julie.b === julie.note, JSON.stringify({ retablirVu, toastParti, julie }));
+    await p.click('#rencontre .r-annuler'); await pause(p, 150);
+
+    /* Toast pendant Noter : en haut (sur l'en-tête au téléphone), jamais sur la note, les jetons, les puces ni les boutons */
+    {
+      await noter(p);
+      await p.fill('#r-note', "Mme Roth m'envoie ses avis, rappelle-moi jeudi"); await pause(p, 250);
+      await p.click('#r-doublon button'); await pause(p, 250);
+      const pos = await p.evaluate(() => {
+        const t = $('#toast').getBoundingClientRect(), coupe = s => { const b = $(s).getBoundingClientRect(); return !(t.bottom <= b.top || t.top >= b.bottom || t.right <= b.left || t.left >= b.right); };
+        return { visible: $('#toast').classList.contains('show'), haut: Math.round(t.top), bas: Math.round(t.bottom), tete: Math.round($('#rencontre .r-head').getBoundingClientRect().bottom), note: coupe('#r-note'), jetons: coupe('#r-jetons'), puces: coupe('#r-zone'), pied: coupe('#rencontre .r-foot') };
+      });
+      verifier(`${ecran} recette : toast pendant Noter posé en haut (ni note, ni jetons, ni puces, ni boutons)`,
+        pos.visible && !pos.note && !pos.jetons && !pos.puces && !pos.pied && pos.bas <= pos.tete + 2, JSON.stringify(pos));
+      await capture(p, `n2-toast-noter-${largeur}`);
+      await p.evaluate(() => annulerRencontre());
+      const horsNoter = await p.evaluate(() => { toast('essai'); return Math.round(innerHeight - $('#toast').getBoundingClientRect().bottom); });
+      verifier(`${ecran} recette : hors de Noter, le toast reste en bas${tel ? ', au-dessus du bouton +' : ''}`, tel ? horsNoter >= 140 : horsNoter >= 20 && horsNoter < 60, String(horsNoter));
+    }
+    if (tel) {
+
+      /* Double toucher impatient sur + : le second toucher (sur la puce « Clore ») ne fait rien */
+      for (const delai of [120, 250]) {
+        await p.evaluate(() => { location.hash = '#dashboard'; localStorage.removeItem('kgd-brouillon'); }); await pause(p, 120);
+        const box = await p.locator('#fab').boundingBox();
+        const x = box.x + box.width / 2, y = box.y + box.height / 2;
+        await p.touchscreen.tap(x, y); await pause(p, delai);
+        const sous = await p.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('button')?.textContent.trim(), [x, y]);
+        await p.touchscreen.tap(x, y); await pause(p, 150);
+        const r = await p.evaluate(() => ({ ouvert: !$('#rencontre').hidden, rappelJ: renc && renc.rappelJ }));
+        await p.fill('#r-note', 'croisé Nadia de Nadia Fleurs, CEE'); await pause(p, 200);
+        await p.waitForTimeout(400);
+        await p.touchscreen.tap(...await p.locator('#r-rappels .chip[data-j="7"]').boundingBox().then(b => [b.x + b.width / 2, b.y + b.height / 2])); await pause(p, 80);
+        const puceApres = await p.evaluate(() => renc.rappelJ);
+        await p.click('#r-enregistrer'); await pause(p, 200);
+        const nadia = await p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, statut: v.statut, rappel: v.rappel }; });
+        verifier(`${ecran} recette : double toucher (${delai} ms) sur + : le second (sur « ${sous} ») ne change rien ; ensuite les puces répondent`,
+          sous === 'Clore' && r.ouvert && r.rappelJ === '3' && puceApres === '7' && nadia.nom === 'Nadia' && nadia.statut === 'suivi' && nadia.rappel === '2026-10-19', JSON.stringify({ sous, r, puceApres, nadia }));
+      }
+
+      /* Rechargement depuis #contacts (après #planning) avec Noter ouvert : Noter revient ; retour → ferme Noter ; retour → #planning */
+      await p.evaluate(() => { location.hash = '#planning'; }); await pause(p, 150);
+      await p.evaluate(() => { location.hash = '#contacts'; }); await pause(p, 150);
+      await p.tap('#fab'); await pause(p, 100);
+      await p.keyboard.type('vu Paul pour la fibre'); await pause(p, 150);
+      await p.reload({ waitUntil: 'domcontentloaded' }); await pause(p, 300);
+      const r0 = await p.evaluate(() => ({ hash: location.hash, ouvert: !$('#rencontre').hidden, note: $('#r-note')?.value }));
+      await p.evaluate(() => history.back()); await pause(p, 300);
+      const r1 = await p.evaluate(() => ({ hash: location.hash, ouvert: !$('#rencontre').hidden }));
+      await p.evaluate(() => history.back()); await pause(p, 300);
+      const r2 = await p.evaluate(() => location.hash);
+      verifier(`${ecran} recette : rechargement avec Noter ouvert sur #contacts → Noter revient ; 1er retour le ferme (#contacts) ; 2e retour → #planning`,
+        r0.hash === '#contacts' && r0.ouvert && r0.note === 'vu Paul pour la fibre' && r1.hash === '#contacts' && !r1.ouvert && r2 === '#planning', JSON.stringify({ r0, r1, r2 }));
+    }
+    verifier(`${ecran} recette : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* Brouillon de la veille au soir, repris le lendemain : « demain » et le journal restent ceux de la veille */
+  {
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, horloge: '2026-10-14T09:00:00' });
+    await p.evaluate(() => localStorage.setItem('kgd-brouillon', JSON.stringify({ note: 'croisé Paul de Dupont, rappelle-moi demain', contactId: null, etape: 0, t: new Date(2026, 9, 13, 22, 0).getTime() })));
+    await noter(p);
+    const r = await p.evaluate(() => ({ bandeau: $('#r-brouillon span')?.textContent, jetons: [...document.querySelectorAll('#r-jetons .jeton')].map(j => j.textContent), rappel: renc.rappel }));
+    await p.click('#r-enregistrer'); await pause(p, 150);
+    const v = await p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, rappel: v.rappel, journal: v.historique.at(-1).date }; });
+    verifier(`${ecran} recette : brouillon d'hier 22:00 repris → « demain » = mer. 14 oct., journal daté du 13`,
+      r.bandeau === 'Brouillon d\'hier, 22:00 repris' && r.jetons.includes('Rappel mer. 14 oct.') && v.nom === 'Paul' && v.rappel === '2026-10-14' && v.journal === '2026-10-13', JSON.stringify({ r, v }));
+    verifier(`${ecran} recette (veille) : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* « Affiner avec Kami » : une seule demande à la fois, même si la note change pendant que Kami lit */
+  {
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur });
+    await p.evaluate(() => { jarvis.token = 'jeton-test'; });
+    let appels = 0;
+    await p.route('**/api/analyser', async r => { appels++; await new Promise(o => setTimeout(o, 1200)); await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ nom: '', entreprise: '', activite: '', sujet: 'Karim veut un devis', attente: '', rappel: '', creneau: { type: 'aucun' }, objet: '', tel: '', resume: 'Karim, devis.' }) }); });
+    await noter(p);
+    await p.fill('#r-note', KARIM); await pause(p, 200);
+    await p.click('#r-affiner'); await pause(p, 60);
+    await p.locator('#r-note').pressSequentially(' ok', { delay: 1 }); await pause(p, 250);
+    const pendant = await p.$eval('#r-affiner', e => ({ disabled: e.disabled, texte: e.textContent }));
+    await p.evaluate(() => { $('#r-affiner').disabled = false; $('#r-affiner').click(); analyserRencontre(); });
+    await pause(p, 1800);
+    const fin = await p.evaluate(() => ({ t: $('#rencontre h2').textContent, enCours: renc.kamiEnCours }));
+    verifier(`${ecran} recette : pendant que Kami lit, « Kami lit… » reste désactivé ; un seul appel à /api/analyser`,
+      pendant.disabled && pendant.texte === 'Kami lit…' && appels === 1 && fin.t === 'On enregistre ?' && fin.enCours === false, JSON.stringify({ pendant, appels, fin }));
+    await p.evaluate(() => { fermerRencontre(); jarvis.token = ''; });
+    verifier(`${ecran} recette (Kami) : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
     await fermer();
   }
 

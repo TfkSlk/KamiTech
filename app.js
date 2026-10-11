@@ -1443,6 +1443,8 @@ function retablir(diff) {
 /* ---------- Contacts : prises de contact et rappels ---------- */
 /* Nom affiché d'un contact : « Sans nom » (ou le repli donné) pour une fiche ancienne ou importée sans nom */
 const nomDe = (v, repli = 'Sans nom') => String((v && v.nom) || '').trim() || repli;
+/* Un contact sans nom (ancien stockage, saisie rapide) se lit par son entreprise */
+const libelleContact = (v, repli = 'Sans nom') => nomDe(v, String((v && v.entreprise) || '').trim() || repli);
 /* Options « Client lié » : le lien actuel reste toujours proposé (même vers un contact clos ou disparu),
    pour qu'un enregistrement sans modification ne le perde jamais ; exclure retire la fiche elle-même. */
 const liensOpts = (courant = '', exclure = '') => {
@@ -1522,11 +1524,13 @@ const jourCourt = s => s ? parse(s).toLocaleDateString('fr-FR', { weekday: 'shor
    qui retire son entrée. Pendant ce retrait (asynchrone), une nouvelle couche attend pour pousser la sienne : l'historique reste propre. */
 const couches = [];
 let popIgnore = 0;
-function pousserCouche(c) { try { history.pushState({ couche: c.nom }, ''); c.pousse = true; } catch (e) { /* historique indisponible : ✕, Annuler et Échap ferment quand même */ } }
-function coucheOuvrir(nom, fermer) {
-  const c = { nom, fermer, pousse: false };
+function pousserCouche(c) { try { history.pushState({ ...c.donnees, couche: c.nom }, ''); c.pousse = true; } catch (e) { /* historique indisponible : ✕, Annuler et Échap ferment quand même */ } }
+/* donnees : gardées dans l'entrée d'historique (relues après un rechargement) ; reprise : l'entrée de cette couche est déjà là (rechargement), on ne la pousse pas une seconde fois */
+function coucheOuvrir(nom, fermer, donnees = {}, reprise = false) {
+  const c = { nom, fermer, pousse: false, donnees };
   couches.push(c);
-  if (!popIgnore) pousserCouche(c);
+  if (reprise && history.state && history.state.couche === nom) c.pousse = true;
+  else if (!popIgnore) pousserCouche(c);
 }
 function coucheFermer() {
   const c = couches[couches.length - 1];
@@ -1547,8 +1551,16 @@ window.addEventListener('popstate', () => {
   const c = couches.pop();
   if (c) c.fermer();
 });
-/* Une entrée de couche restée d'avant un rechargement ne doit plus rien fermer */
-if (history.state && history.state.couche) { try { history.replaceState(null, ''); } catch (e) { /* ignore */ } }
+/* Rechargement avec une couche ouverte (onglet tué pendant un appel, mise à jour) : Noter revient avec sa note, sur la même entrée
+   d'historique (le retour suivant le ferme, voir reprendreCouche au démarrage). L'entrée d'une autre couche (fiche) ne ferme plus rien. */
+const coucheAuChargement = history.state && history.state.couche ? { ...history.state } : null;
+if (coucheAuChargement && coucheAuChargement.couche !== 'rencontre') { try { history.replaceState(null, ''); } catch (e) { /* ignore */ } }
+function reprendreCouche() {
+  const c = coucheAuChargement;
+  if (!c || c.couche !== 'rencontre' || renc || !history.state || history.state.couche !== 'rencontre') return;
+  const id = typeof c.depuis === 'string' && aVoir(c.depuis) ? c.depuis : null;
+  openContact(id, undefined, { reprise: true });
+}
 
 /* Icônes (traits, couleur du texte) */
 const ICONES = {
@@ -1575,9 +1587,12 @@ function nouvelleRenc(v, p = {}) {
     activite: v ? (v.activite || 'perso') : (APPORT.includes(filtre.activite) ? filtre.activite : 'energie'),
     sujet: p.sujet || '', attente: v ? (v.attente || '') : '', rappel: garder ? v.rappel : rappelDans(3), rappelJ: garder ? 'garder' : '3',
     creneau: 'aucun', crDate: today(), crHeure: '', crSemaine: iso(monday(addDays(new Date(), 7))), crDu: today(), crAu: iso(addMonths(new Date(), 1)),
-    objet: 'Présentation des services', tel: '', lien: v ? (v.lien || '') : '', date: today(), resume: '',
+    objet: 'Présentation des services', tel: '', lien: v ? (v.lien || '') : '', date: today(), resume: '', important: false,
     /* Noter : jetons écartés d'un toucher, dernière lecture, champ « Qui ? », contact d'origine et brouillon repris */
     ignores: [], lecture: null, cleLue: null, qui: false, depuis: v ? v.id : null, brouillonT: 0,
+    /* noteT : moment où la note a été commencée (un brouillon de la veille se relit par rapport à la veille) ;
+       brouillonCle : la place du brouillon repris (s'il venait d'ailleurs, il y est retiré) ; kamiEnCours : « Affiner avec Kami » attend sa réponse */
+    noteT: 0, brouillonCle: null, kamiEnCours: false,
   };
   /* Valeurs de départ des champs que la lecture de la note peut remplir (ce qui vient du formulaire d'accueil compte comme saisi) */
   r.defauts = { ...Object.fromEntries(RENC_LUS.map(k => [k, r[k]])), nom: v ? v.nom : '', entreprise: v ? (v.entreprise || '') : '', sujet: '' };
@@ -1589,21 +1604,26 @@ function versContact(a, v) {
   const r = nouvelleRenc(v);
   const touche = k => a[k] !== (k in a.lu ? a.lu[k] : a.defauts[k]);
   for (const k of RENC_LUS) if (!['nom', 'entreprise', 'tel', 'activite'].includes(k) && rencGroupe(k).some(touche)) r[k] = a[k];
-  Object.assign(r, { note: a.note, ignores: [...a.ignores], depuis: a.depuis, brouillonT: a.brouillonT, retourFocus: a.retourFocus });
+  Object.assign(r, { note: a.note, ignores: [...a.ignores], depuis: a.depuis, brouillonT: a.brouillonT, noteT: a.noteT, date: a.date, brouillonCle: a.brouillonCle, retourFocus: a.retourFocus, ouverture: a.ouverture });
   return r;
 }
-function openContact(id, prefill) {
+/* reprise : Noter rouvert au démarrage après un rechargement, sur l'entrée d'historique qui était déjà là */
+function openContact(id, prefill, { reprise = false } = {}) {
   if (renc) fermerRencontre(); // une autre Rencontre ouverte (toast « Noter la suite »…) : son brouillon est déjà gardé
   fermerModal(); // la fiche est au premier plan : elle cacherait la Rencontre (son entrée d'historique est retirée)
   const v = id ? aVoir(id) || null : null;
   const cid = v ? v.id : null;
   renc = nouvelleRenc(v, prefill);
   renc.retourFocus = document.activeElement;
-  /* Brouillon de moins de 24 h pour cette rencontre : le texte revient (et son rattachement à un contact, s'il avait été choisi) */
+  /* Le toucher qui ouvre Noter (bouton +, « Noter quelqu'un… », « Contacté ») : un second toucher impatient au même endroit est ignoré (voir plus bas) */
+  const clic = clicEnCours;
+  renc.ouverture = clic && clic.isTrusted && clic.detail !== 0 ? { x: clic.clientX, y: clic.clientY, t: performance.now() } : null;
+  /* Brouillon de moins de 24 h pour cette rencontre : le texte revient (et son rattachement à un contact, s'il avait été choisi),
+     daté du moment où la note a été commencée (« demain », écrit hier soir, reste aujourd'hui ; le journal garde le jour de la rencontre) */
   const b = renc.note ? null : lireBrouillon(cid);
   if (b) {
     const c = b.contactId && b.contactId !== cid ? aVoir(b.contactId) : null;
-    renc.note = b.note; renc.brouillonT = b.t;
+    renc.note = b.note; renc.brouillonT = b.t; renc.noteT = b.debut; renc.date = jourLocal(b.debut); renc.brouillonCle = b.cle;
     if (c) { renc.depuis = cid; renc = versContact(renc, c); }
   }
   lireRencontre();
@@ -1611,7 +1631,7 @@ function openContact(id, prefill) {
   rencRender();
   el.hidden = false; document.body.classList.add('no-scroll');
   ['#main', '.sidebar', '#fab'].forEach(s => $(s)?.setAttribute('inert', ''));
-  coucheOuvrir('rencontre', () => fermerRencontre(true));
+  coucheOuvrir('rencontre', () => fermerRencontre(true), { depuis: cid }, reprise);
   suivreClavier(true);
   /* Au téléphone, le clavier ne s'ouvre que sur un geste : l'accueil et le bouton + donnent le focus eux-mêmes, tout de suite */
   if (window.innerWidth > 760) focusNote();
@@ -1622,6 +1642,15 @@ function focusNote() {
   ta.focus({ preventScroll: true });
   try { ta.selectionStart = ta.selectionEnd = ta.value.length; } catch (e) { /* ignore */ }
 }
+/* Double toucher impatient : le second toucher tombe sur Noter qui vient de s'ouvrir (sous le bouton +, la puce « Clore »).
+   Un toucher au même endroit que celui qui a ouvert Noter, dans la demi-seconde, ne fait rien. */
+let clicEnCours = null; // le clic en train d'être traité (Noter ouvert par ce clic, ou par le code : null)
+document.addEventListener('click', e => { clicEnCours = e; setTimeout(() => { if (clicEnCours === e) clicEnCours = null; }, 0); }, true);
+$('#rencontre').addEventListener('click', e => {
+  const o = renc && renc.ouverture;
+  if (!o || !e.isTrusted || e.detail === 0) return;
+  if (performance.now() - o.t < 500 && Math.hypot(e.clientX - o.x, e.clientY - o.y) < 40) { e.preventDefault(); e.stopPropagation(); }
+}, true);
 /* Ferme la Rencontre. depuisHistorique : appelée par le retour (popstate) ; sinon l'entrée d'historique de la couche est retirée */
 function fermerRencontre(depuisHistorique) {
   const el = $('#rencontre');
@@ -1642,51 +1671,107 @@ function quitterRencontre() {
   if (couches.some(c => c.nom === 'rencontre')) coucheFermer();
   else fermerRencontre();
 }
-/* Annuler : la note est effacée (brouillon compris), avec quelques secondes pour la rétablir */
+/* Annuler : la note de cette rencontre est effacée (son brouillon seulement, jamais celui d'une autre), avec quelques secondes pour la rétablir.
+   « Rétablir » n'écrase jamais une note commencée depuis au même endroit : le toast disparaît dès qu'on en écrit une. */
+let noteAnnulee = null;
 function annulerRencontre() {
   const r = renc;
   if (!r) return;
   rencLire();
   const note = (r.note || '').trim(), cid = r.v && aVoir(r.v.id) ? r.v.id : null;
-  effacerBrouillon();
+  const depuis = r.depuis && aVoir(r.depuis) ? r.depuis : null, cle = depuis || '', debut = r.noteT || Date.now();
+  effacerBrouillonDe(r);
   quitterRencontre();
-  if (note) toastAction('Note effacée', 'Rétablir', () => { ecrireBrouillon({ note, contactId: cid, depuis: cid, t: Date.now() }); openContact(cid); if (window.innerWidth <= 760) focusNote(); }, 6000);
+  if (!note) return;
+  const a = noteAnnulee = { cle };
+  toastAction('Note effacée', 'Rétablir', () => {
+    if (noteAnnulee === a) noteAnnulee = null;
+    const enCours = renc && cleRenc(renc) === cle ? renc.note : (lireBrouillons().find(b => cleBrouillon(b) === cle) || {}).note;
+    if (enCours && enCours.trim() && enCours.trim() !== note) { toast('Une autre note est en cours : elle est gardée'); return; }
+    ecrireBrouillon({ note, contactId: cid, depuis, t: Date.now(), debut }); openContact(depuis); if (window.innerWidth <= 760) focusNote();
+  }, 6000);
+  a.bouton = $('#toast .toast-action');
+}
+/* Une nouvelle note commence là où une note vient d'être effacée : « Rétablir » n'est plus proposé */
+function oublierNoteAnnulee(r) {
+  const a = noteAnnulee;
+  if (!a || !r || a.cle !== cleRenc(r) || !(r.note || '').trim()) return;
+  noteAnnulee = null;
+  const t = $('#toast');
+  if (a.bouton && a.bouton.isConnected && t && t.contains(a.bouton)) { clearTimeout(toast.t); t.classList.remove('show'); }
 }
 
-/* ---------- Brouillon : la note n'est jamais perdue (appel qui coupe, retour, rechargement) ---------- */
+/* ---------- Brouillons : la note n'est jamais perdue (appel qui coupe, retour, rechargement) ----------
+   Un brouillon par rencontre, rangé selon l'endroit d'où Noter a été ouvert (la fiche d'un contact : son id ; une nouvelle personne : '').
+   localStorage['kgd-brouillon'] garde le plus récent au premier niveau ({note, contactId, depuis, etape, t, debut}) et ceux des autres
+   rencontres dans .autres : une note commencée ailleurs n'est ni écrasée ni effacée. L'ancien format (un seul brouillon) se relit tel quel. */
 const BROUILLON = 'kgd-brouillon';
-function ecrireBrouillon(b) { try { localStorage.setItem(BROUILLON, JSON.stringify(b)); } catch (e) { /* stockage plein ou bloqué : la note reste à l'écran */ } }
-function effacerBrouillon() { try { localStorage.removeItem(BROUILLON); } catch (e) { /* ignore */ } }
-function lireBrouillonBrut() { try { const b = JSON.parse(localStorage.getItem(BROUILLON) || 'null'); return b && typeof b === 'object' && !Array.isArray(b) ? b : null; } catch (e) { return null; } }
-/* Le brouillon de cette rencontre (même contact, ou nouvelle rencontre : null), s'il a moins de 24 h */
-function lireBrouillon(cid) {
-  const b = lireBrouillonBrut();
-  if (!b || typeof b.note !== 'string' || !b.note.trim()) return null;
+const cleBrouillon = b => String(b.depuis || '');
+const cleRenc = r => String(r.depuis || '');
+/* Un brouillon appartient à cette rencontre : même endroit d'ouverture, ou c'est celui qu'elle a repris */
+const brouillonDe = (b, r) => cleBrouillon(b) === cleRenc(r) || (r.brouillonCle != null && cleBrouillon(b) === r.brouillonCle);
+function brouillonPropre(b) {
+  if (!b || typeof b !== 'object' || Array.isArray(b) || typeof b.note !== 'string' || !b.note.trim()) return null;
   const t = Number(b.t);
-  if (!Number.isFinite(t) || Date.now() - t >= 864e5) return null;
-  const c = typeof b.contactId === 'string' ? b.contactId : null;
-  const d = b.depuis === undefined ? c : (typeof b.depuis === 'string' ? b.depuis : null);
-  if (c !== cid && d !== cid) return null;
-  return { note: b.note, contactId: c, t };
+  if (!Number.isFinite(t) || Date.now() - t >= 864e5) return null; // plus de 24 h : oublié
+  const contactId = typeof b.contactId === 'string' ? b.contactId : null;
+  const depuis = b.depuis === undefined ? contactId : (typeof b.depuis === 'string' ? b.depuis : null);
+  const debut = Number(b.debut);
+  return { note: b.note, contactId, depuis, etape: Number(b.etape) || 0, t, debut: Number.isFinite(debut) && debut > 0 && debut <= t ? debut : t };
+}
+/* Tous les brouillons encore valables, le plus récent d'abord */
+function lireBrouillons() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(BROUILLON) || 'null'); } catch (e) { return []; }
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return [];
+  const autres = s.autres && typeof s.autres === 'object' && !Array.isArray(s.autres) ? Object.values(s.autres) : [];
+  return [s, ...autres].map(brouillonPropre).filter(Boolean).sort((a, b) => b.t - a.t);
+}
+/* Un seul brouillon par endroit (le premier de la liste l'emporte) ; plus aucun : la clé est retirée */
+function ecrireBrouillons(liste) {
+  const vus = new Set(), garde = [];
+  for (const b of liste) { const k = cleBrouillon(b); if (!vus.has(k)) { vus.add(k); garde.push(b); } }
+  try {
+    if (!garde.length) { localStorage.removeItem(BROUILLON); return; }
+    const [tete, ...reste] = garde;
+    const o = { ...tete };
+    if (reste.length) o.autres = Object.fromEntries(reste.map(b => [cleBrouillon(b) || 'nouveau', b]));
+    localStorage.setItem(BROUILLON, JSON.stringify(o));
+  } catch (e) { /* stockage plein ou bloqué : la note reste à l'écran */ }
+}
+function ecrireBrouillon(b) { ecrireBrouillons([b, ...lireBrouillons()]); }
+/* Efface le brouillon de cette rencontre seulement (Annuler, Enregistrer, « Effacer », note vidée) */
+function effacerBrouillonDe(r) { const l = lireBrouillons(); if (l.some(b => brouillonDe(b, r))) ecrireBrouillons(l.filter(b => !brouillonDe(b, r))); }
+/* Le brouillon de cette rencontre (ouverte depuis la fiche cid, ou nouvelle personne : null) : celui de cet endroit,
+   sinon une note commencée ailleurs et déjà rattachée à ce contact */
+function lireBrouillon(cid) {
+  const k = cid || '', l = lireBrouillons();
+  const b = l.find(x => cleBrouillon(x) === k) || (cid ? l.find(x => x.contactId === cid) : null);
+  return b ? { ...b, cle: cleBrouillon(b) } : null;
 }
 function sauverBrouillon() {
   const r = renc;
   if (!r) return;
-  const contactId = r.v ? r.v.id : null;
-  if ((r.note || '').trim()) { ecrireBrouillon({ note: r.note, contactId, etape: r.etape, t: Date.now(), depuis: r.depuis ?? null }); return; }
-  /* Note vidée : on n'efface que le brouillon de cette rencontre, jamais celui d'une autre */
-  const b = lireBrouillonBrut();
-  if (b && (b.contactId === contactId || b.depuis === r.depuis)) effacerBrouillon();
+  const tous = lireBrouillons(), autres = tous.filter(b => !brouillonDe(b, r));
+  if ((r.note || '').trim()) {
+    if (!r.noteT) r.noteT = Date.now();
+    ecrireBrouillons([{ note: r.note, contactId: r.v ? r.v.id : null, depuis: r.depuis ?? null, etape: r.etape, t: Date.now(), debut: r.noteT }, ...autres]);
+    r.brouillonCle = cleRenc(r);
+    return;
+  }
+  /* Note vidée : on n'efface que le brouillon de cette rencontre, jamais celui d'une autre ; la prochaine note repart d'aujourd'hui */
+  if (r.noteT) { r.noteT = 0; r.date = today(); }
+  if (autres.length !== tous.length) ecrireBrouillons(autres);
 }
 const brouillonTexte = t => `Brouillon ${jourLocal(t) === today() ? 'de' : 'd\'hier,'} ${new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} repris`;
 /* « Effacer » du bandeau : on repart d'une note vide (et du contact d'origine si la note avait été rattachée à un autre) */
 function effacerNote() {
   const r = renc;
   if (!r) return;
-  effacerBrouillon();
+  effacerBrouillonDe(r);
   if (r.v && r.v.id !== r.depuis) { renc = nouvelleRenc(r.depuis ? aVoir(r.depuis) || null : null); renc.retourFocus = r.retourFocus; rencRender(); }
   else {
-    r.note = ''; r.brouillonT = 0;
+    r.note = ''; r.brouillonT = 0; r.noteT = 0; r.date = today();
     const ta = $('#r-note'); if (ta) ta.value = '';
     lireRencontre(); majNoter();
   }
@@ -1699,6 +1784,7 @@ function majClavier() {
   if (!vv || el.hidden) return;
   el.style.setProperty('--vvh', vv.height + 'px');
   el.style.setProperty('--vvt', vv.offsetTop + 'px');
+  document.body.style.setProperty('--vvt', vv.offsetTop + 'px'); // le toast suit aussi la partie visible
   const c = vv.height < 560;
   if (c !== el.classList.contains('clavier')) el.classList.toggle('clavier', c);
   compacterJetons();
@@ -1711,7 +1797,7 @@ function suivreClavier(on) {
     majClavier();
   } else {
     if (suivreClavier.f) { vv.removeEventListener('resize', majClavier); vv.removeEventListener('scroll', majClavier); suivreClavier.f = null; }
-    el.style.removeProperty('--vvh'); el.style.removeProperty('--vvt'); el.classList.remove('clavier');
+    el.style.removeProperty('--vvh'); el.style.removeProperty('--vvt'); el.classList.remove('clavier'); document.body.style.removeProperty('--vvt');
   }
 }
 
@@ -1743,10 +1829,13 @@ const connus = () => [
 /* Lecture d'une note (lecteur local ou Kami) appliquée à la prise de contact.
    Un champ changé à la main n'est jamais remplacé (sauf par Kami quand on le lui demande : force) ; un champ vide de la lecture ne remplace rien ;
    ce qu'une lecture précédente avait rempli et que la note ne dit plus revient à sa valeur de départ. */
-const RENC_LUS = ['nom', 'entreprise', 'tel', 'activite', 'attente', 'rappel', 'rappelJ', 'creneau', 'crDate', 'crHeure', 'crSemaine', 'crDu', 'crAu', 'objet', 'sujet'];
+const RENC_LUS = ['nom', 'entreprise', 'tel', 'activite', 'attente', 'rappel', 'rappelJ', 'creneau', 'crDate', 'crHeure', 'crSemaine', 'crDu', 'crAu', 'objet', 'sujet', 'important'];
 function lectureVersRenc(x, j, force) {
   const o = {}, local = Array.isArray(j.jetons); // le lecteur local donne ses jetons, Kami non
-  if (!x.v) { if (j.nom) o.nom = j.nom; if (j.entreprise) o.entreprise = j.entreprise; if (j.tel) o.tel = j.tel; }
+  if (!x.v) { if (j.nom) o.nom = j.nom; if (j.entreprise) o.entreprise = j.entreprise; }
+  /* Le numéro : pour un nouveau contact, ou pour un contact connu qui n'en a pas encore */
+  if (j.tel && telNeuf(x)) o.tel = j.tel;
+  if (j.important) o.important = true;
   /* Contact connu : son service ne change pas sur un mot de la note (l'écran « Qui ? » est sauté), seulement si Kami le dit.
      Nouveau contact : le service d'un contact reconnu (existant) n'est pas repris tant que la note n'est pas ajoutée à sa fiche */
   const secteurLu = !local || j.jetons.some(t => t.cle === 'activite' && !t.ignore) || !(j.existant && j.existant.type === 'c');
@@ -1792,7 +1881,8 @@ function lireRencontre(force) {
   if (!force && cle === r.cleLue) return;
   r.cleLue = cle;
   try {
-    r.lecture = Lire.lireNote(note, new Date(), connus().filter(c => !(r.v && c.type === 'c' && c.id === r.v.id)), r.ignores);
+    /* Les dates relatives (« demain », « jeudi ») se lisent par rapport au moment où la note a été commencée (brouillon de la veille repris) */
+    r.lecture = Lire.lireNote(note, r.noteT ? new Date(r.noteT) : new Date(), connus().filter(c => !(r.v && c.type === 'c' && c.id === r.v.id)), r.ignores);
     appliquerLecture(r, r.lecture);
   } catch (e) { r.lecture = null; r.noteLue = note; console.warn('Lecture locale impossible', e); }
 }
@@ -1809,9 +1899,23 @@ function jetonTexte(j) {
   if (j.cle === 'important') return 'Important';
   return l;
 }
+/* Un contact connu n'a pas de numéro, ou c'est un nouveau contact : le numéro lu sera enregistré */
+const chiffres = t => String(t || '').replace(/\D/g, '');
+function telNeuf(r) { return !r.v || !chiffres(r.v.tel); }
+/* Seuls les jetons qui seront vraiment appliqués à l'enregistrement sont montrés comme compris :
+   contact connu → ni nom, ni entreprise, ni service (sa fiche les garde) ; un numéro seulement s'il n'en a pas (ou le même) ;
+   « Important » seulement avec un créneau (le RDV créé passe en alerte) */
+function jetonApplique(r, j) {
+  if (!CLES_JETONS.includes(j.cle)) return false;
+  if (r.v && ['nom', 'entreprise', 'activite'].includes(j.cle)) return false;
+  if (j.cle === 'tel') return telNeuf(r) || chiffres(r.v.tel) === chiffres(j.valeur);
+  if (j.cle === 'important') return creneauOk(r) && r.creneau !== 'aucun';
+  return true;
+}
 function jetonsHtml(r) {
-  const js = (r.lecture && r.lecture.jetons || []).filter(j => CLES_JETONS.includes(j.cle));
-  if (!js.length) return `<span class="r-jetons-vide">${(r.note || '').trim() ? 'Rien de reconnu pour l\'instant : ta phrase sera gardée telle quelle' : 'Nom, service, dates : lus ici, même hors ligne'}</span>`;
+  const js = (r.lecture && r.lecture.jetons || []).filter(j => jetonApplique(r, j));
+  const reconnu = r.lecture && r.lecture.existant && r.lecture.existant.type === 'c' && !(r.v && r.v.id === r.lecture.existant.id) && aVoir(r.lecture.existant.id);
+  if (!js.length) return `<span class="r-jetons-vide">${!(r.note || '').trim() ? 'Nom, service, dates : lus ici, même hors ligne' : reconnu ? 'Contact reconnu au-dessus : ta phrase sera gardée telle quelle' : 'Rien de reconnu pour l\'instant : ta phrase sera gardée telle quelle'}</span>`;
   return js.map(j => {
     const cl = j.cle === 'rappel' || j.cle === 'creneau' ? 'date' : j.cle === 'activite' && secteurConnu(j.valeur) ? 'secteur' : (j.cle === 'attente' && j.valeur === 'moi') || j.cle === 'important' ? 'rouge' : '';
     const style = cl === 'secteur' ? ` style="--c:var(--${j.valeur})"` : '';
@@ -1852,7 +1956,8 @@ function doublonHtml(r, indice = false) {
   const ex = r.lecture && r.lecture.existant;
   if (!ex) return '';
   const c = ex.type === 'c' && !(r.v && r.v.id === ex.id) ? aVoir(ex.id) : null;
-  if (c) return `<div class="r-bandeau doublon" id="r-doublon"><span><b>${esc(nomDe(c))}</b>${c.entreprise ? ` (${esc(c.entreprise)})` : ''} existe déjà</span><button type="button" onclick="rattacherContact('${esc(c.id)}')">Ajouter à sa fiche</button></div>`;
+  const avecNom = !!String(c && c.nom || '').trim();
+  if (c) return `<div class="r-bandeau doublon" id="r-doublon"><span><b>${esc(libelleContact(c))}</b>${avecNom && c.entreprise ? ` (${esc(c.entreprise)})` : ''} existe déjà</span><button type="button" onclick="rattacherContact('${esc(c.id)}')">Ajouter à sa fiche</button></div>`;
   if (!indice || r.v) return '';
   const d = ex.type === 'd' ? dossier(ex.id) : null, a = ex.type === 'a' ? abonne(ex.id) : null;
   const nom = d ? (d.entreprise || d.contact) : a ? (a.restaurant || a.contact) : '';
@@ -1869,7 +1974,7 @@ function rattacherContact(id) {
   lireRencontre(true);
   renc.etape = etape === 1 ? 2 : etape;
   rencRender(); sauverBrouillon();
-  toast(`La note ira dans la fiche de ${nomDe(v, 'ce contact')}`);
+  toast(`La note ira dans la fiche de ${libelleContact(v, 'ce contact')}`);
 }
 function pucesHtml(r) {
   const garder = r.v && r.v.rappel && r.v.rappel > today();
@@ -1880,6 +1985,8 @@ function pucesHtml(r) {
 const quiHtml = r => `<div class="r-zone-tete"><label class="r-label" for="r-qui">Qui ?</label><span class="r-rappel-txt" id="r-rappel-txt">${esc(rappelTexte(r))}</span></div>
     <input id="r-qui" value="${esc(r.nom)}" placeholder="Prénom, nom" autocomplete="off" autocapitalize="words" enterkeyhint="done" oninput="renc.nom=this.value" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();enregistrerNoter()}">`;
 const kamiDispo = () => !!jarvis.token && navigator.onLine !== false;
+/* « Affiner avec Kami » : désactivé (« Kami lit… ») tant que sa réponse n'est pas arrivée, même si la note change entre-temps */
+const kamiHtml = r => kamiDispo() ? `<button type="button" class="r-affiner" id="r-affiner" onclick="analyserRencontre()"${r.kamiEnCours ? ' disabled' : ''}>${r.kamiEnCours ? 'Kami lit…' : 'Affiner avec Kami'}</button>` : '';
 /* Met à jour l'écran Noter sans toucher au champ de saisie (le curseur et le clavier restent) */
 function majNoter() {
   const r = renc;
@@ -1889,7 +1996,12 @@ function majNoter() {
   const avant = $('#r-jetons')?.innerHTML;
   maj('#r-jetons', jetonsHtml(r));
   if ($('#r-jetons') && $('#r-jetons').innerHTML !== avant) compacterJetons();
-  maj('#r-kami', kamiDispo() ? '<button type="button" class="r-affiner" id="r-affiner" onclick="analyserRencontre()">Affiner avec Kami</button>' : '');
+  maj('#r-kami', kamiHtml(r));
+  /* « Qui ? » affiché, puis le nom écrit dans la phrase : les puces de rappel reviennent (le champ était resté vide) */
+  if (r.qui && r.nom.trim() && r.lu.nom === r.nom && !($('#r-qui')?.value || '').trim() && document.activeElement?.id !== 'r-qui') {
+    r.qui = false;
+    const z = $('#r-zone'); if (z) z.innerHTML = pucesHtml(r);
+  }
   if (r.qui) { const t = $('#r-rappel-txt'); if (t) t.textContent = rappelTexte(r); return; }
   document.querySelectorAll('#r-rappels .chip').forEach(b => b.classList.toggle('on', b.dataset.j === r.rappelJ));
   const t = $('#r-rappel-txt');
@@ -1900,6 +2012,7 @@ function noteSaisie(val) {
   if (!renc) return;
   renc.note = val;
   sauverBrouillon();
+  oublierNoteAnnulee(renc);
   clearTimeout(noteSaisie.t);
   noteSaisie.t = setTimeout(() => { if (!renc || renc.etape !== 0) return; lireRencontre(); majNoter(); }, 120);
 }
@@ -1933,7 +2046,8 @@ function enregistrerNoter() {
 function rencLire() {
   const g = id => $('#r-' + id)?.value;
   const r = renc;
-  if (r.etape === 0) { r.note = g('note') ?? r.note; if (r.qui) r.nom = g('qui') ?? r.nom; }
+  /* « Qui ? » vide ne retire pas le nom lu entre-temps dans la phrase */
+  if (r.etape === 0) { r.note = g('note') ?? r.note; const q = r.qui ? g('qui') : undefined; if (q && q.trim()) r.nom = q; }
   if (r.etape === 1) { r.nom = g('nom') ?? r.nom; r.entreprise = g('entreprise') ?? r.entreprise; }
   if (r.etape === 2) { const d = g('rappel'); if (d !== undefined && d !== r.rappel) { r.rappel = d; r.rappelJ = 'x'; } }
   if (r.etape === 3) { r.crDate = g('crDate') ?? r.crDate; r.crHeure = g('crHeure') ?? r.crHeure; r.crSemaine = g('crSemaine') ?? r.crSemaine; r.crDu = g('crDu') ?? r.crDu; r.crAu = g('crAu') ?? r.crAu; r.objet = g('objet') ?? r.objet; }
@@ -1995,7 +2109,7 @@ function rencRender() {
       <textarea id="r-note" rows="3" enterkeyhint="done" autocomplete="off" autocapitalize="sentences" aria-label="Ta note" placeholder="${r.v ? 'Ex. : il m\'envoie ses factures, rappelle-moi jeudi' : 'Ex. : croisé Karim de Karim SARL pour les CEE, je lui envoie le devis, rappelle-moi jeudi'}" oninput="noteSaisie(this.value)" onkeydown="noteTouche(event)">${esc(r.note)}</textarea>
       ${SR ? `<button type="button" class="r-mic ${recNote ? 'on' : ''}" id="r-mic" onclick="dicteeRencontre()" aria-label="${recNote ? 'Arrêter la dictée' : 'Dicter'}" title="Dicter">${ICONES.micro}</button>` : ''}
     </div>
-    <div class="r-compris"><div class="r-jetons" id="r-jetons" aria-label="Ce qui a été compris">${jetonsHtml(r)}</div><div id="r-kami">${kamiDispo() ? '<button type="button" class="r-affiner" id="r-affiner" onclick="analyserRencontre()">Affiner avec Kami</button>' : ''}</div></div>
+    <div class="r-compris"><div class="r-jetons" id="r-jetons" aria-label="Ce qui a été compris">${jetonsHtml(r)}</div><div id="r-kami">${kamiHtml(r)}</div></div>
     <div class="r-zone" id="r-zone">${r.qui ? quiHtml(r) : pucesHtml(r)}</div>`;
   if (r.etape === 1) corps = `
     ${doublonHtml(r, true)}
@@ -2037,7 +2151,7 @@ function rencRender() {
   $('#rencontre').innerHTML = `
     <div class="r-card">
       <div class="r-head">
-        <div><div class="meta">${r.v ? 'Prise de contact · ' + esc(nomDe(r.v)) : 'Prise de contact'}</div><h2 id="r-titre">${titres[r.etape]}</h2></div>
+        <div><div class="meta">${r.v ? 'Prise de contact · ' + esc(libelleContact(r.v)) : 'Prise de contact'}</div><h2 id="r-titre">${titres[r.etape]}</h2></div>
         <div class="r-dots" aria-hidden="true">${liste.map((e, i) => `<i class="${i <= pos ? 'on' : ''}"></i>`).join('')}</div>
         <button type="button" class="btn icon" onclick="quitterRencontre()" aria-label="Fermer">✕</button>
       </div>
@@ -2077,25 +2191,27 @@ function enregistrerRencontre() {
   if (!clore && !r.rappel && !cr) { toast('Choisis une suite : un rappel, un créneau ou clore'); r.etape = 2; rencRender(); return; }
   const target = v || { id: uid(), createdAt: Date.now(), statut: 'suivi', priorite: 'normale', historique: [], nom: r.nom.trim(), entreprise: r.entreprise.trim(), tel: r.tel.trim(), lien: r.lien };
   target.activite = r.activite;
+  /* Contact connu : le numéro lu dans la note va dans sa fiche s'il n'en avait pas (un numéro déjà connu n'est jamais remplacé ; la note le garde) */
+  if (v && (r.tel || '').trim() && !String(v.tel || '').trim()) v.tel = r.tel.trim();
   if (clore) { target.statut = 'clos'; target.rappel = ''; target.attente = ''; }
   else { target.attente = r.attente; target.rappel = r.rappelJ === 'clos' ? '' : (r.rappel || ''); if (target.statut === 'clos') target.statut = 'suivi'; }
   const sujet = (r.sujet || r.note || '').trim();
   if (!Array.isArray(target.historique)) target.historique = [];
   target.historique.push({ date: r.date || today(), texte: sujet || 'Prise de contact' });
   if (!v) state.aVoir.push(target);
-  const ev = cr ? creneauContact(target, { creneau: r.creneau, crDate: r.crDate, crHeure: r.crHeure, crSemaine: r.crSemaine, crDu: r.crDu, crAu: r.crAu, objet: r.objet }) : null;
+  const ev = cr ? creneauContact(target, { creneau: r.creneau, crDate: r.crDate, crHeure: r.crHeure, crSemaine: r.crSemaine, crDu: r.crDu, crAu: r.crAu, objet: r.objet, important: r.important }) : null;
   /* « RDV planifié » seulement s'il y a vraiment un nouveau RDV daté ; sinon le contact repart en suivi avec sa suite */
   if (target.statut === 'planifie' && !(ev && !estPeriode(ev))) target.statut = 'suivi';
   /* Jamais en cours sans rappel : un créneau à prévoir (semaine, période) sans rappel fait revenir le contact
      le jour ouvré qui suit sa fin, si rien n'a été calé (c'est aussi ce qu'annonce le récapitulatif) */
   if (target.statut === 'suivi' && !target.rappel) target.rappel = ev ? lendemainOuvre(finRdv(ev)) : today();
-  /* Le brouillon n'est effacé que si l'enregistrement a vraiment eu lieu */
-  if (save()) effacerBrouillon();
+  /* Le brouillon de cette rencontre n'est effacé que si l'enregistrement a vraiment eu lieu ; celui d'une autre rencontre reste */
+  if (save()) effacerBrouillonDe(r);
   fermerRencontre(); render(); toast(messageRencontre(target, clore, ev), 4000);
 }
 /* Ce qui a été créé, en une ligne : « Karim · Karim SARL · rappel mar. 13 oct. · RDV jeu. 15 à 14:00 » */
 function messageRencontre(v, clore, ev) {
-  const parts = [nomDe(v), v.entreprise].filter(Boolean);
+  const parts = String(v.nom || '').trim() ? [nomDe(v), v.entreprise].filter(Boolean) : [libelleContact(v)];
   if (clore) parts.push('contact clos');
   else if (v.rappel) parts.push('rappel ' + jourCourt(v.rappel));
   if (ev) {
@@ -2122,6 +2238,7 @@ function majMicNote() { const b = $('#r-mic'); if (b) { b.classList.toggle('on',
 function arreterDictee() { if (recNote) { try { recNote.stop(); } catch (e) { /* ignore */ } recNote = null; majMicNote(); } }
 /* Kami lit la note et remplit toutes les étapes ; on saute au récapitulatif */
 async function analyserRencontre() {
+  if (!renc || renc.kamiEnCours) return; // une seule demande à la fois
   rencLire();
   const texte = (renc.note || '').trim();
   if (!texte) { toast('Écris ou dicte d\'abord une phrase'); return; }
@@ -2129,10 +2246,13 @@ async function analyserRencontre() {
   clearTimeout(noteSaisie.t);
   lireRencontre(); // le lecteur local d'abord : si Kami ne répond pas, ce qu'il a lu reste
   const x = renc;
+  x.kamiEnCours = true;
   const b = $('#r-affiner'); if (b) { b.disabled = true; b.textContent = 'Kami lit…'; }
   try {
-    const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: today() }) });
+    /* Kami lit aussi les dates par rapport au jour où la note a été commencée (brouillon de la veille repris) */
+    const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: x.noteT ? jourLocal(x.noteT) : today() }) });
     const j = await r.json();
+    x.kamiEnCours = false;
     if (!r.ok) throw new Error(j.erreur || `Erreur ${r.status}`);
     if (renc !== x) return; // Rencontre fermée entre-temps
     /* Kami complète : ce qu'il lit remplace, ce qu'il laisse vide ne retire rien au lecteur local */
@@ -2140,6 +2260,7 @@ async function analyserRencontre() {
     x.resume = j.resume || '';
     x.etape = 4; rencRender();
   } catch (e) {
+    x.kamiEnCours = false;
     if (renc !== x) return;
     toast(e.message || 'Analyse impossible'); rencRender();
   }
@@ -2150,7 +2271,8 @@ function creneauContact(v, f) {
   if (k === 'aucun') return null;
   const objet = (f.objet || '').trim() || 'Présentation des services';
   const titre = `${nomDe(v)}${v.entreprise ? ' · ' + v.entreprise : ''} · ${objet}`;
-  const base = { id: uid(), fait: false, titre, activite: v.activite || 'perso', lien: 'c:' + v.id, notes: dernierContact(v)?.texte || '', important: false, mode: 'visio', duree: 30, heure: '' };
+  /* important : « signature ! », « annonce des prix » lus dans la note → RDV en alerte (rouge, à ne pas manquer) */
+  const base = { id: uid(), fait: false, titre, activite: v.activite || 'perso', lien: 'c:' + v.id, notes: dernierContact(v)?.texte || '', important: !!f.important, mode: 'visio', duree: 30, heure: '' };
   let ev;
   if (k === 'date') { if (!f.crDate) return null; ev = { ...base, date: f.crDate, heure: f.crHeure || '', mode: f.crHeure ? 'visio' : 'tache' }; v.statut = 'planifie'; }
   else if (k === 'semaine') { if (!f.crSemaine) return null; const l = monday(parse(f.crSemaine)); ev = { ...base, date: iso(l), fin: iso(addDays(l, 6)), mode: 'tache', duree: 0, aPrevoir: true }; }
@@ -2773,4 +2895,5 @@ function demanderProtection() {
 }
 
 render();
+reprendreCouche();
 demanderProtection();
