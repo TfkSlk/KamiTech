@@ -338,5 +338,5 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
 }
 
 const sw = fs.readFileSync(path.join(RACINE, 'sw.js'), 'utf8');
-verifier('sw.js : VERSION kgd-v8 (index, app, views, style modifiés)', /VERSION = 'kgd-v8'/.test(sw));
+verifier('sw.js : VERSION kgd-v8 ou plus récente (index, app, views, style modifiés)', Number((/VERSION = 'kgd-v(\d+)'/.exec(sw) || [])[1]) >= 8);
 bilan();

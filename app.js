@@ -255,6 +255,8 @@ function assainir(s) {
     if (!connu(SECTEURS, e.activite)) maj(e, 'activite', 'perso');
   });
   s.aVoir.forEach(v => {
+    /* Un contact a toujours un nom texte (vide au pire, affiché « Sans nom ») : jamais « undefined » à l'écran */
+    if (typeof v.nom !== 'string') maj(v, 'nom', texte(v.nom));
     if ('lien' in v) maj(v, 'lien', relier(v.lien));
     if ('eventId' in v) maj(v, 'eventId', refId(v.eventId, 'e'));
     if (!connu(SECTEURS, v.activite)) maj(v, 'activite', 'perso');
@@ -1376,10 +1378,12 @@ function retablir(diff) {
 }
 
 /* ---------- Contacts : prises de contact et rappels ---------- */
+/* Nom affiché d'un contact : « Sans nom » (ou le repli donné) pour une fiche ancienne ou importée sans nom */
+const nomDe = (v, repli = 'Sans nom') => String((v && v.nom) || '').trim() || repli;
 /* Options « Client lié » : le lien actuel reste toujours proposé (même vers un contact clos ou disparu),
    pour qu'un enregistrement sans modification ne le perde jamais ; exclure retire la fiche elle-même. */
 const liensOpts = (courant = '', exclure = '') => {
-  const nomContact = v => `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''}`;
+  const nomContact = v => `${nomDe(v)}${v.entreprise ? ' · ' + v.entreprise : ''}`;
   const o = {
     '': '— Aucun —',
     ...Object.fromEntries(state.abonnes.map(a => ['a:' + a.id, `${a.restaurant} (KamiFood)`])),
@@ -1405,7 +1409,7 @@ function rdvPasse(v) {
 function rappelsContacts() {
   const t = today();
   const ligne = (v, date, sousTitre, extra) => ({ id: 'c-' + v.id, contact: v.id, lien: v.lien || '', date, heure: '', activite: v.activite || 'perso', important: v.attente === 'moi',
-    titre: `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''}${ATTENTES[v.attente] && v.attente ? ' · ' + ATTENTES[v.attente].toLowerCase() : ''}`, sousTitre, ...extra });
+    titre: `${nomDe(v)}${v.entreprise ? ' · ' + v.entreprise : ''}${ATTENTES[v.attente] && v.attente ? ' · ' + ATTENTES[v.attente].toLowerCase() : ''}`, sousTitre, ...extra });
   const dus = state.aVoir.filter(v => v.statut === 'suivi' && v.rappel && v.rappel <= t).map(v => {
     const d = dernierContact(v);
     return ligne(v, v.rappel, d ? `Dernier contact le ${fmtDate(d.date)} : ${d.texte}` : 'À recontacter');
@@ -1778,11 +1782,11 @@ function rattacherContact(id) {
   renc = versContact(renc, v);
   lireRencontre(true);
   rencRender(); sauverBrouillon();
-  toast(`La note ira dans la fiche de ${v.nom}`);
+  toast(`La note ira dans la fiche de ${nomDe(v, 'ce contact')}`);
 }
 function pucesHtml(r) {
   const garder = r.v && r.v.rappel && r.v.rappel > today();
-  return `<div class="r-zone-tete"><span class="r-label">Me le rappeler</span><span class="r-rappel-txt ${r.rappel || r.rappelJ === 'clos' ? '' : 'manque'}" id="r-rappel-txt">${esc(rappelTexte(r))}</span></div>
+  return `<div class="r-zone-tete"><span class="r-label">Me le rappeler</span><span class="r-rappel-txt ${rappelManque(r) ? 'manque' : ''}" id="r-rappel-txt">${esc(rappelTexte(r))}</span></div>
     <div class="chips r-puces" id="r-rappels">${garder ? `<button type="button" class="chip ${r.rappelJ === 'garder' ? 'on' : ''}" data-j="garder" onpointerdown="event.preventDefault()" onclick="rencSet('rappelJ','garder')">Garder</button>` : ''}${RAPPELS.map(([j]) => `<button type="button" class="chip ${j === 'clos' ? 'clore' : ''} ${r.rappelJ === j ? 'on' : ''}" data-j="${j}" onpointerdown="event.preventDefault()" onclick="rencSet('rappelJ','${j}')">${RAPPELS_COURTS[j]}</button>`).join('')}</div>`;
 }
 /* Aucun nom trouvé pour un nouveau contact : « Qui ? » prend la place des puces, dans le même écran */
@@ -1802,7 +1806,7 @@ function majNoter() {
   if (r.qui) { const t = $('#r-rappel-txt'); if (t) t.textContent = rappelTexte(r); return; }
   document.querySelectorAll('#r-rappels .chip').forEach(b => b.classList.toggle('on', b.dataset.j === r.rappelJ));
   const t = $('#r-rappel-txt');
-  if (t) { t.textContent = rappelTexte(r); t.classList.toggle('manque', !r.rappel && r.rappelJ !== 'clos'); }
+  if (t) { t.textContent = rappelTexte(r); t.classList.toggle('manque', rappelManque(r)); }
 }
 /* Frappe dans la note : brouillon tout de suite, lecture 120 ms après la dernière touche */
 function noteSaisie(val) {
@@ -1858,18 +1862,37 @@ function rencSet(k, val) {
 function rencDate(val) {
   renc.rappel = val; renc.rappelJ = 'x';
   document.querySelectorAll('#r-rappels .chip').forEach(b => b.classList.remove('on'));
-  const p = $('#r-rappel-txt'); if (p) { p.textContent = rappelTexte(renc); p.classList.toggle('manque', !renc.rappel); }
+  const p = $('#r-rappel-txt'); if (p) { p.textContent = rappelTexte(renc); p.classList.toggle('manque', rappelManque(renc)); }
 }
-const rappelTexte = r => r.rappelJ === 'clos' ? '→ contact clos, plus de rappel' : r.rappel ? `→ ${jourLong(r.rappel)}` : '→ aucune date : choisis une durée, une date, ou clos le contact';
+/* Le texte sous les puces suit ce qui sera vraiment enregistré : un créneau choisi garde le contact ouvert, même avec « Clore » */
+const rappelTexte = r => {
+  const cr = creneauOk(r);
+  if (r.rappelJ === 'clos') return cr ? '→ pas clos : un créneau est prévu' : '→ contact clos, plus de rappel';
+  if (r.rappel) return `→ ${jourLong(r.rappel)}`;
+  if (cr) return r.creneau === 'date' ? '→ pas de rappel : le RDV suffit' : `→ ${jourLong(rappelFinal(r))}, après le créneau`;
+  return '→ aucune date : choisis une durée, une date, ou clos le contact';
+};
+/* Rien de prévu (ni rappel, ni créneau, ni clôture) : le texte passe en rouge */
+const rappelManque = r => !r.rappel && r.rappelJ !== 'clos' && !creneauOk(r);
 /* Le créneau de l'étape 3 est-il complet ? */
 const creneauOk = r => r.creneau === 'date' ? !!r.crDate : r.creneau === 'semaine' ? !!r.crSemaine : r.creneau === 'periode' ? !!(r.crDu && r.crAu) : false;
-/* La suite de la prise de contact pour le récapitulatif : une ligne par élément ; ok = false si rien n'est prévu */
+/* Dernier jour d'un créneau « à prévoir » (semaine, période) ; '' pour un jour précis ou sans créneau */
+const finCreneau = r => !creneauOk(r) ? '' : r.creneau === 'semaine' ? iso(addDays(monday(parse(r.crSemaine)), 6)) : r.creneau === 'periode' ? (r.crAu < r.crDu ? r.crDu : r.crAu) : '';
+/* Jour ouvré qui suit une date : un contact au créneau « à prévoir » sans rappel revient ce jour-là si rien n'a été calé */
+const lendemainOuvre = d => iso(jourOuvre(addDays(parse(d), 1)));
+/* Le rappel qui sera enregistré : celui choisi ; sinon, avec un créneau à prévoir, le jour ouvré qui suit sa fin */
+const rappelFinal = r => r.rappelJ !== 'clos' && r.rappel ? r.rappel : finCreneau(r) ? lendemainOuvre(finCreneau(r)) : '';
+/* La suite de la prise de contact pour le récapitulatif : une ligne par élément (deux au plus) ; ok = false si rien n'est prévu.
+   Un créneau l'emporte sur « Clore » : le contact reste ouvert, et le récapitulatif le dit. */
 function rencSuite(r) {
   const cr = creneauOk(r);
   const quand = r.creneau === 'date' ? `RDV le ${jourCourt(r.crDate)}${r.crHeure ? ' à ' + r.crHeure : ''}` : r.creneau === 'semaine' ? `à prévoir la semaine du ${fmtDate(iso(monday(parse(r.crSemaine))))}` : r.creneau === 'periode' ? `à prévoir du ${fmtDate(r.crDu)} au ${fmtDate(r.crAu)}` : '';
   const parts = [];
-  if (r.rappelJ !== 'clos' && r.rappel) parts.push(`Rappel ${jourLong(r.rappel)}`);
+  const choisi = r.rappelJ !== 'clos' && r.rappel, apres = !choisi && finCreneau(r) ? rappelFinal(r) : '';
+  if (choisi) parts.push(`Rappel ${jourLong(r.rappel)}`);
   if (cr) parts.push(`${quand} · ${(r.objet || '').trim() || 'Présentation des services'}`);
+  if (apres) parts.push(`${r.rappelJ === 'clos' ? 'Pas clos : rappel' : 'Rappel'} ${jourLong(apres)} si rien n'est calé`);
+  else if (cr && r.rappelJ === 'clos') parts.push('Pas clos : il reste ouvert jusqu\'au RDV');
   if (parts.length) return { ok: true, lignes: parts.map(x => x.replace(/^à/, 'À')) };
   if (r.rappelJ === 'clos') return { ok: true, lignes: ['Contact clos : il sort des rappels'] };
   return { ok: false, lignes: ['Aucune suite : choisis un rappel, un créneau ou clos le contact'] };
@@ -1897,7 +1920,7 @@ function rencRender() {
     <div class="opts">${opt('attente', '', 'Rien en attente')}${opt('attente', 'lui', "J'attends ses informations", 'Il doit me revenir')}${opt('attente', 'moi', 'Je lui dois des informations', 'Je dois lui envoyer quelque chose')}</div>
     <label class="r-label">Me le rappeler</label>
     <div class="chips" id="r-rappels">${r.v && r.v.rappel && r.v.rappel > today() ? `<button type="button" class="chip ${r.rappelJ === 'garder' ? 'on' : ''}" onclick="rencSet('rappelJ','garder')">Garder · ${esc(jourCourt(r.v.rappel))}</button>` : ''}${RAPPELS.map(([j, l]) => `<button type="button" class="chip ${j === 'clos' ? 'clore' : ''} ${r.rappelJ === j ? 'on' : ''}" onclick="rencSet('rappelJ','${j}')">${l}</button>`).join('')}</div>
-    <p class="meta r-rappel-txt ${r.rappel || r.rappelJ === 'clos' ? '' : 'manque'}" id="r-rappel-txt">${esc(rappelTexte(r))}</p>
+    <p class="meta r-rappel-txt ${rappelManque(r) ? 'manque' : ''}" id="r-rappel-txt">${esc(rappelTexte(r))}</p>
     <input id="r-rappel" type="date" value="${esc(r.rappel)}" onchange="rencDate(this.value)" aria-label="Date du rappel">`;
   if (r.etape === 3) corps = `
     <div class="opts quatre">${opt('creneau', 'aucun', 'Rien', 'Juste le rappel')}${opt('creneau', 'date', 'Un jour', 'Date précise')}${opt('creneau', 'semaine', 'Une semaine', 'À caler dedans')}${opt('creneau', 'periode', 'Une période', 'Quelques semaines ou mois')}</div>
@@ -1913,7 +1936,7 @@ function rencRender() {
       <label class="r-label" for="r-sujet">De quoi vous avez parlé</label><input id="r-sujet" value="${esc(r.sujet || r.note)}">
       <ul class="recap-list"><li>${esc(r.rappelJ === 'clos' && !creneauOk(r) ? 'Rien en attente' : ATTENTES[r.attente] || 'Rien en attente')}</li></ul>
       <div class="recap-suite ${suite.ok ? '' : 'manque'}" id="r-suite"><span class="r-label">La suite</span>${suite.lignes.map(l => `<b>${esc(l)}</b>`).join('')}</div>
-      ${r.resume ? `<p class="meta">${esc(r.resume)}</p>` : ''}
+      ${r.resume ? `<p class="meta recap-resume" title="${esc(r.resume)}">${esc(r.resume)}</p>` : ''}
       ${r.v ? '' : `<label class="r-label" for="r-tel">Téléphone (facultatif)</label><input id="r-tel" type="tel" value="${esc(r.tel)}">`}
     </div>`;
   }
@@ -1925,7 +1948,7 @@ function rencRender() {
   $('#rencontre').innerHTML = `
     <div class="r-card">
       <div class="r-head">
-        <div><div class="meta">${r.v ? 'Prise de contact · ' + esc(r.v.nom) : 'Prise de contact'}</div><h2 id="r-titre">${titres[r.etape]}</h2></div>
+        <div><div class="meta">${r.v ? 'Prise de contact · ' + esc(nomDe(r.v)) : 'Prise de contact'}</div><h2 id="r-titre">${titres[r.etape]}</h2></div>
         <div class="r-dots" aria-hidden="true">${liste.map((e, i) => `<i class="${i <= pos ? 'on' : ''}"></i>`).join('')}</div>
         <button type="button" class="btn icon" onclick="quitterRencontre()" aria-label="Fermer">✕</button>
       </div>
@@ -1974,13 +1997,16 @@ function enregistrerRencontre() {
   const ev = cr ? creneauContact(target, { creneau: r.creneau, crDate: r.crDate, crHeure: r.crHeure, crSemaine: r.crSemaine, crDu: r.crDu, crAu: r.crAu, objet: r.objet }) : null;
   /* « RDV planifié » seulement s'il y a vraiment un nouveau RDV daté ; sinon le contact repart en suivi avec sa suite */
   if (target.statut === 'planifie' && !(ev && !estPeriode(ev))) target.statut = 'suivi';
+  /* Jamais en cours sans rappel : un créneau à prévoir (semaine, période) sans rappel fait revenir le contact
+     le jour ouvré qui suit sa fin, si rien n'a été calé (c'est aussi ce qu'annonce le récapitulatif) */
+  if (target.statut === 'suivi' && !target.rappel) target.rappel = ev ? lendemainOuvre(finRdv(ev)) : today();
   /* Le brouillon n'est effacé que si l'enregistrement a vraiment eu lieu */
   if (save()) effacerBrouillon();
   fermerRencontre(); render(); toast(messageRencontre(target, clore, ev), 4000);
 }
 /* Ce qui a été créé, en une ligne : « Karim · Karim SARL · rappel mar. 13 oct. · RDV jeu. 15 à 14:00 » */
 function messageRencontre(v, clore, ev) {
-  const parts = [v.nom, v.entreprise].filter(Boolean);
+  const parts = [nomDe(v), v.entreprise].filter(Boolean);
   if (clore) parts.push('contact clos');
   else if (v.rappel) parts.push('rappel ' + jourCourt(v.rappel));
   if (ev) {
@@ -2034,7 +2060,7 @@ function creneauContact(v, f) {
   const k = f.creneau || 'aucun';
   if (k === 'aucun') return null;
   const objet = (f.objet || '').trim() || 'Présentation des services';
-  const titre = `${v.nom}${v.entreprise ? ' · ' + v.entreprise : ''} · ${objet}`;
+  const titre = `${nomDe(v)}${v.entreprise ? ' · ' + v.entreprise : ''} · ${objet}`;
   const base = { id: uid(), fait: false, titre, activite: v.activite || 'perso', lien: 'c:' + v.id, notes: dernierContact(v)?.texte || '', important: false, mode: 'visio', duree: 30, heure: '' };
   let ev;
   if (k === 'date') { if (!f.crDate) return null; ev = { ...base, date: f.crDate, heure: f.crHeure || '', mode: f.crHeure ? 'visio' : 'tache' }; v.statut = 'planifie'; }
@@ -2153,12 +2179,23 @@ function openAVoir(id) {
       ${field('notes', 'Notes', zoneTexte('notes', v.notes), 'full')}
     </div>`;
   const sous = [v.entreprise, SECTEURS[v.activite]?.label].filter(Boolean).map(esc).join(' · ');
-  showModal(feuille({ titre: esc(v.nom), sous, menu: itemMenu('Supprimer', `supprimerAVoir('${v.id}')`, true),
+  showModal(feuille({ titre: esc(nomDe(v)), sous, menu: itemMenu('Supprimer', `supprimerAVoir('${v.id}')`, true),
     corps: volets([{ titre: 'Fiche', html: `<div id="fiche-vue">${ficheHtml(v)}</div>` }, { titre: 'Coordonnées', html: coord }, { titre: 'Suivi', html: suivi }]), pied: piedFeuille('Fermer') }),
   f => {
-    /* Clore à la main : plus de rappel ni d'attente, le contact sort des alertes. Repris en cours sans date : rappel aujourd'hui (jamais sans suite) */
+    /* Clore à la main : plus de rappel ni d'attente, le contact sort des alertes */
     if (f.statut === 'clos' && v.statut !== 'clos') { f.rappel = ''; f.attente = ''; }
-    if (f.statut === 'suivi' && !f.rappel) f.rappel = today();
+    /* Un contact en cours garde toujours un rappel (même règle que Kami) : vider la date d'un contact en cours est refusé, rien n'est modifié.
+       Repris en cours (clos, RDV planifié) sans date, ou ancien contact resté sans rappel : rappel aujourd'hui, jamais sans suite */
+    if (f.statut === 'suivi' && !f.rappel) {
+      if (v.statut === 'suivi' && v.rappel) {
+        const champ = $('#f-rappel');
+        montrerChamp(champ);
+        if (champ && !coarse()) champ.focus({ preventScroll: true });
+        toast('Un contact en cours garde toujours un rappel : choisis une date ou clos-le', 4000);
+        return;
+      }
+      f.rappel = today();
+    }
     Object.assign(v, f);
     save(); modal().close(); render(); toast('Fiche mise à jour');
   });
@@ -2213,7 +2250,7 @@ function aVoirItem(v, compact) {
   return `<li class="${late || passe ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''}">
     <div class="grow clickable" onclick="openAVoir('${v.id}')">
       <div class="when ${late || passe ? 'late' : ouvert && jours === 0 ? 'du' : ''}">${esc(when)}</div>
-      <div class="title-txt">${alerte ? '<span class="warn-ico" title="À traiter">⚠</span> ' : ''}${esc(v.nom)}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
+      <div class="title-txt">${alerte ? '<span class="warn-ico" title="À traiter">⚠</span> ' : ''}${esc(nomDe(v))}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
       <div class="meta">${d ? `${esc(fmtDate(d.date))} : ${esc(d.texte)}` : 'Aucune prise de contact notée'}</div>
     </div>
     ${ouvert || passe ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
@@ -2256,14 +2293,14 @@ function toggleEvent(id) {
   e.fait = !e.fait;
   const v = e.fait ? libererContact(e) : null;
   save(); render();
-  if (v) toastAction('RDV fait avec ' + v.nom, 'Noter la suite', () => openContact(v.id));
+  if (v) toastAction('RDV fait avec ' + nomDe(v, 'ce contact'), 'Noter la suite', () => openContact(v.id));
 }
 function supprimerEvent(id) {
   if (!state.events.some(e => e.id === id)) return;
   suppression(() => {
     const v = libererContact(state.events.find(e => e.id === id));
     state.events = state.events.filter(e => e.id !== id);
-    return v ? `Supprimé · ${v.nom} revient dans tes rappels` : 'Supprimé';
+    return v ? `Supprimé · ${nomDe(v)} revient dans tes rappels` : 'Supprimé';
   });
 }
 

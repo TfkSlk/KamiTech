@@ -526,7 +526,9 @@ body.no-scroll { overflow: hidden; }
 .recap-list { margin: 0; padding-left: 18px; color: var(--text); line-height: 1.6; }
 .recap-suite { display: flex; flex-direction: column; gap: 3px; padding: 10px 14px 11px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--text); }
 .recap-suite .r-label { margin: 0 0 1px; }
-.recap-suite b { font-size: 15px; font-weight: 700; line-height: 1.35; }
+.recap-suite b { font-size: 15px; font-weight: 700; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Résumé de Kami : deux lignes au plus (texte complet au survol), pour que le récapitulatif tienne sans défiler */
+.recap-resume { margin: 0; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .recap-suite.manque { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); border-left-color: var(--accent); }
 .chip.clore:not(.on) { border-style: dashed; color: var(--text-2); }
 .r-rappel-txt { margin: 0; font-size: 14px; font-weight: 500; color: var(--text-2); }

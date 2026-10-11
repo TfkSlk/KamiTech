@@ -95,6 +95,80 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   verifier(`${ecran} 10. Rencontre (récapitulatif sans suite, retour étape 2) : aucune étape ne défile`, vues5.every(v => v.ok) && await sansDefilement(p, '#rencontre .r-body'), JSON.stringify(vues5));
   await p.evaluate(() => fermerRencontre());
 
+  /* 11. « Clore le contact » + créneau « Une semaine » : le créneau l'emporte, le récapitulatif le dit,
+     et le contact (resté en cours) revient le lundi qui suit la semaine si rien n'a été calé */
+  await p.evaluate(() => openContact(null, { nom: 'Semaine Clos', sujet: 'à caler la semaine prochaine' }));
+  await p.waitForTimeout(60);
+  await jusquAuRecap(p, async t => {
+    if (t === 'Et ensuite ?') { await p.click('#r-rappels .chip.clore'); await p.waitForTimeout(40); }
+    if (t === 'Dans le planning ?') { await p.locator('#rencontre .opt', { hasText: 'Une semaine' }).click(); await p.waitForTimeout(40); }
+  });
+  const recapSem = await p.evaluate(() => ({ lignes: [...document.querySelectorAll('#r-suite b')].map(b => b.textContent.trim()), etape2: rappelTexte(renc) }));
+  await enregistrer(p);
+  const sem = await p.evaluate(() => { const v = state.aVoir.at(-1), e = state.events.find(x => x.id === v.eventId); return { nom: v.nom, statut: v.statut, rappel: v.rappel, ev: e ? [e.date, e.fin, !!e.aPrevoir] : null, toast: document.querySelector('#toast').textContent }; });
+  verifier(`${ecran} 11. Clore + « Une semaine » : récapitulatif « Pas clos : rappel lundi 19 oct. si rien n'est calé »`,
+    recapSem.lignes.length === 2 && /^À prévoir la semaine du 12 oct\./.test(recapSem.lignes[0]) && recapSem.lignes[1] === 'Pas clos : rappel lundi 19 oct. si rien n\'est calé' && recapSem.etape2 === '→ pas clos : un créneau est prévu', JSON.stringify(recapSem));
+  verifier(`${ecran} 11. Clore + « Une semaine » : en cours, créneau 12 → 18 oct., rappel lundi 19 oct.`,
+    sem.nom === 'Semaine Clos' && sem.statut === 'suivi' && sem.rappel === '2026-10-19' && JSON.stringify(sem.ev) === '[\"2026-10-12\",\"2026-10-18\",true]' && /rappel lun\. 19 oct\./.test(sem.toast), JSON.stringify(sem));
+  /* Date de rappel vidée + « Une période » : rappel le jour ouvré qui suit la fin de la période (ven. 26 févr. → lun. 1er mars) */
+  await p.evaluate(() => openContact(null, { nom: 'Periode SansRappel', sujet: 'à revoir début 2027' }));
+  await p.waitForTimeout(60);
+  await jusquAuRecap(p, async t => {
+    if (t === 'Et ensuite ?') { await p.fill('#r-rappel', ''); await p.dispatchEvent('#r-rappel', 'change'); await p.waitForTimeout(40); }
+    if (t === 'Dans le planning ?') { await p.locator('#rencontre .opt', { hasText: 'Une période' }).click(); await p.waitForTimeout(40); await p.fill('#r-crDu', '2027-01-04'); await p.fill('#r-crAu', '2027-02-26'); }
+  });
+  const recapPer = await p.evaluate(() => ({ lignes: [...document.querySelectorAll('#r-suite b')].map(b => b.textContent.trim()), manque: document.querySelector('#r-suite').classList.contains('manque') }));
+  await enregistrer(p);
+  const per = await p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, statut: v.statut, rappel: v.rappel }; });
+  verifier(`${ecran} 11. rappel vidé + période : « Rappel lundi 1 mars si rien n'est calé », enregistré au 2027-03-01`,
+    per.nom === 'Periode SansRappel' && per.statut === 'suivi' && per.rappel === '2027-03-01' && !recapPer.manque && recapPer.lignes[1] === 'Rappel lundi 1 mars si rien n\'est calé', JSON.stringify({ recapPer, per }));
+  /* Plus tard, rien n'a été coché : les deux contacts sont dans les rappels */
+  await p.clock.setSystemTime(new Date('2027-03-02T09:00:00'));
+  const revenus = await p.evaluate(() => ['Semaine Clos', 'Periode SansRappel'].map(n => rappelsContacts().some(r => r.titre.startsWith(n))));
+  await p.clock.setSystemTime(new Date(AUJ + 'T09:00:00'));
+  await p.evaluate(() => render());
+  verifier(`${ecran} 11. une fois le créneau passé, les deux contacts reviennent dans les rappels`, revenus.every(Boolean), JSON.stringify(revenus));
+
+  /* 12. Fiche contact, même règle que Kami : vider le rappel d'un contact en cours est refusé (rien ne change) ;
+     rouvrir un contact clos lui redonne un rappel aujourd'hui */
+  const julienAvant = await p.evaluate(id => JSON.stringify(aVoir(id)), julienId);
+  await p.evaluate(id => openAVoir(id), julienId);
+  await p.waitForTimeout(80);
+  await p.evaluate(() => montrerChamp(document.querySelector('#f-rappel')));
+  await p.fill('#f-rappel', '');
+  await p.click('#modal button[value="ok"]');
+  await p.waitForTimeout(80);
+  const refus = await p.evaluate(id => ({ inchange: JSON.stringify(aVoir(id)), ouvert: modal().open, toast: document.querySelector('#toast').textContent, visible: !document.querySelector('#f-rappel').closest('.pane')?.hidden }), julienId);
+  verifier(`${ecran} 12. fiche : vider le rappel d'un contact en cours est refusé, fiche ouverte sur le champ, contact inchangé`,
+    refus.inchange === julienAvant && refus.ouvert && refus.visible && refus.toast === 'Un contact en cours garde toujours un rappel : choisis une date ou clos-le', JSON.stringify({ ...refus, inchange: refus.inchange === julienAvant }));
+  await p.evaluate(() => modal().close());
+  const paulId = await p.evaluate(() => state.aVoir.find(x => x.nom === 'Paul').id);
+  await p.evaluate(id => openAVoir(id), paulId);
+  await p.waitForTimeout(80);
+  await p.evaluate(() => puce(document.querySelector('#modal [data-puces] [data-v="suivi"]')));
+  await p.click('#modal button[value="ok"]');
+  await p.waitForTimeout(80);
+  const paulRouvert = await p.evaluate(id => ({ statut: aVoir(id).statut, rappel: aVoir(id).rappel, dansRappels: rappelsContacts().some(r => r.contact === id), ouvert: modal().open }), paulId);
+  verifier(`${ecran} 12. fiche : contact clos remis « En cours » → rappel aujourd'hui, dans les rappels du jour`,
+    paulRouvert.statut === 'suivi' && paulRouvert.rappel === AUJ && paulRouvert.dansRappels && !paulRouvert.ouvert, JSON.stringify(paulRouvert));
+
+  /* 13. Récapitulatif extrême (noms longs, rappel + période à l'objet long, résumé de Kami sur 3 lignes, téléphone) : aucun défilement,
+     y compris à l'ordinateur en 1280x720 */
+  const recapExtreme = () => p.evaluate(() => {
+    openContact(null, { nom: 'Jean-Baptiste de la Fontaine-Marchal', sujet: 'On a parlé de la taxe foncière de ses trois entrepôts et de la CFE, il doit m\'envoyer les avis 2024 et 2025' });
+    Object.assign(renc, { entreprise: 'Établissements Marchal & Fils Holding', attente: 'lui', rappel: '2026-10-13', rappelJ: '3', creneau: 'periode', crDu: '2027-01-04', crAu: '2027-02-28', objet: 'Présentation taxe foncière et CFE des entrepôts',
+      resume: 'Karim gère trois entrepôts à Strasbourg, il est intéressé par une revue de sa taxe foncière et de sa CFE ; il envoie ses avis d\'imposition cette semaine.' });
+    renc.etape = 4; rencRender();
+    const b = document.querySelector('#rencontre .r-body'), tel = document.querySelector('#r-tel').getBoundingClientRect();
+    const res = { sh: b.scrollHeight, ch: b.clientHeight, telVisible: tel.bottom <= b.getBoundingClientRect().bottom + 1 };
+    fermerRencontre(); return res;
+  });
+  const tailles = largeur > 760 ? [[1366, 800], [1280, 720]] : [[largeur, hauteur]];
+  const extremes = [];
+  for (const [l, h] of tailles) { await p.setViewportSize({ width: l, height: h }); await p.waitForTimeout(60); extremes.push({ taille: `${l}x${h}`, ...await recapExtreme() }); }
+  await p.setViewportSize({ width: largeur, height: hauteur });
+  verifier(`${ecran} 13. récapitulatif extrême avec résumé de Kami : aucun défilement, téléphone atteignable`, extremes.every(m => m.sh <= m.ch + 1 && m.telVisible), JSON.stringify(extremes));
+
   /* 10. Étape 3 avec chaque créneau ouvert : jamais de défilement */
   await p.evaluate(() => openContact(null, { nom: 'Test', sujet: 'créneaux' }));
   await p.waitForTimeout(60);
@@ -248,5 +322,40 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   verifier('8 bis. drapeau déjà posé : la migration ne rejoue pas', r2 === 'planifie,planifie,planifie,planifie,planifie', r2);
   verifier('8 bis. aucune erreur JS', erreurs.length === 0 && o2.erreurs.length === 0, [...erreurs, ...o2.erreurs].join(' | '));
   await o2.fermer();
+}
+/* 8 ter. Socle : des drapeaux déjà présents (prefs.migrations = {}) n'empêchent pas d'écrire tout de suite une migration qui vient de tourner */
+{
+  const donnees = { nom: 'Kami Groupe', dossiers: [], events: [], abonnes: [], memoire: [], prefs: { periode: 'mois', migrations: {} },
+    aVoir: [{ id: 's1', createdAt: 1, nom: 'Sans Rappel', entreprise: '', activite: 'cee', priorite: 'normale', statut: 'suivi', attente: '', rappel: '', historique: [] }] };
+  const { p, erreurs, fermer } = await ouvrir({ largeur: 390, hauteur: 844, stockage: { 'kami-dashboard-v1': donnees } });
+  const r = await p.evaluate(() => { const s = JSON.parse(localStorage.getItem('kami-dashboard-v1')); return { flag: s.prefs.migrations.rappelsRecuperes, rappel: s.aVoir[0].rappel }; });
+  verifier('8 ter. prefs.migrations déjà présent : drapeau et rappel écrits au chargement', r.flag === true && r.rappel === AUJ, JSON.stringify(r));
+  verifier('8 ter. aucune erreur JS', erreurs.length === 0, erreurs.join(' | '));
+  await fermer();
+}
+/* 14. Contact sans nom (ancienne sauvegarde) : nom texte vide au chargement, « Sans nom » ou « ce contact » affichés, jamais « undefined » */
+{
+  const donnees = { nom: 'Kami Groupe', dossiers: [], abonnes: [], memoire: [], prefs: { periode: 'mois', migrations: { rappelsRecuperes: true } },
+    events: [{ id: 'evsn', date: AUJ, heure: '15:00', duree: 30, mode: 'visio', titre: 'RDV', activite: 'cee', lien: 'c:sn1', fait: false, notes: '' }],
+    aVoir: [{ id: 'sn1', createdAt: 1, entreprise: '', activite: 'cee', priorite: 'normale', statut: 'planifie', attente: '', rappel: '', eventId: 'evsn', historique: [] },
+      { id: 'sn2', createdAt: 1, activite: 'cee', priorite: 'normale', statut: 'suivi', attente: 'moi', rappel: '2026-10-09', historique: [] }] };
+  const { p, erreurs, fermer } = await ouvrir({ largeur: 390, hauteur: 844, stockage: { 'kami-dashboard-v1': donnees } });
+  const r = await p.evaluate(() => {
+    const noms = state.aVoir.map(v => v.nom), stockes = JSON.parse(localStorage.getItem('kami-dashboard-v1')).aVoir.map(v => v.nom);
+    toggleEvent('evsn');
+    const t1 = document.querySelector('#toast').firstChild.textContent;
+    const titres = rappelsContacts().map(x => x.titre);
+    const ecrans = [];
+    for (const h of ['dashboard', 'contacts']) { location.hash = '#' + h; render(); ecrans.push(document.querySelector('#main').innerText); }
+    openContact('sn2'); const tete = document.querySelector('#rencontre .r-head .meta').textContent;
+    renc.etape = 4; rencRender(); enregistrerRencontre();
+    const t2 = document.querySelector('#toast').textContent;
+    return { noms, stockes, t1, titres, tete, t2, undef: ecrans.some(t => /undefined/.test(t)) };
+  });
+  verifier('14. contact sans nom : nom "" en mémoire et dans le stockage', JSON.stringify(r.noms) === '["",""]' && JSON.stringify(r.stockes) === '["",""]', JSON.stringify(r));
+  verifier('14. contact sans nom : « RDV fait avec ce contact », « Sans nom » dans les rappels et la Rencontre, jamais « undefined »',
+    r.t1 === 'RDV fait avec ce contact' && r.titres.length === 2 && r.titres.every(t => t.startsWith('Sans nom')) && r.tete === 'Prise de contact · Sans nom' && /^Sans nom · rappel /.test(r.t2) && !r.undef && ![r.t1, r.t2, r.tete, ...r.titres].some(t => /undefined/.test(t)), JSON.stringify(r));
+  verifier('14. aucune erreur JS', erreurs.length === 0, erreurs.join(' | '));
+  await fermer();
 }
 bilan();
