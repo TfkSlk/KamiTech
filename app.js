@@ -147,8 +147,6 @@ function migrate(s) {
   s.abonnes = s.abonnes || [];
   s.memoire = s.memoire || [];
   s.aVoir = s.aVoir || [];
-  /* Toufek est l'éditeur de KamiFood : sa licence (id 'moi') est permanente et jamais facturée */
-  if (!s.abonnes.some(a => a.id === 'moi')) s.abonnes.push({ id: 'moi', createdAt: Date.now(), interne: true, restaurant: 'Toufek · licence éditeur', contact: 'Toufek', statut: 'actif', prix: 0, engagement: 0, debut: jourLocal(), formule: (s.formules || []).find(f => f.nom === 'Premium')?.id || '', notes: 'Licence éditeur KamiFood : activée en permanence, jamais facturée.' });
   s.stripe = s.stripe || null;
   s.aVoir.forEach(v => {
     if (!Array.isArray(v.historique)) v.historique = [];
@@ -195,31 +193,34 @@ function migrate(s) {
     s.prefs.migrations.resilieSansFin = true;
   }
   /* Licence éditeur en double (case décochée puis recréée au chargement) : un seul 'moi', toujours interne.
-     Une copie de licence (prix nul) est retirée en gardant sa note ; un « moi » devenu vrai restaurant (prix ou Stripe)
-     reçoit un nouvel id (avec ses liens s'il était celui affiché). Rien d'autre n'est touché. */
+     La licence gardée est une vraie licence : sans Stripe, et gratuite (ou déjà cochée « Licence éditeur »).
+     Une autre copie gratuite est retirée en gardant sa note ; un « moi » devenu vrai restaurant (prix ou Stripe)
+     reçoit un nouvel id et reste compté (avec ses liens s'il était celui affiché). S'il n'y avait aucune vraie licence,
+     une licence neuve est créée juste après (plus bas). Rien d'autre n'est touché. */
   if (!s.prefs.migrations.dedoublonMoi) {
     const prixDe = a => Number(String(a.prix ?? '').replace(',', '.')) || 0;
     const mois = s.abonnes.filter(a => a.id === 'moi');
-    const garde = mois.find(a => !prixDe(a) && !a.stripeId) || mois[0];
-    if (garde) {
-      const retires = new Set();
-      mois.forEach((a, i) => {
-        if (a === garde) return;
-        if (prixDe(a) || a.stripeId) {
-          const nv = uid();
-          if (i === 0) [...s.events, ...s.aVoir].forEach(x => { if (x.lien === 'a:moi') x.lien = 'a:' + nv; });
-          a.id = nv;
-        } else {
-          const n = typeof a.notes === 'string' ? a.notes.trim() : '';
-          if (n && !n.startsWith('Licence éditeur KamiFood :') && !String(garde.notes || '').includes(n)) garde.notes = [garde.notes, n].filter(Boolean).join('\n');
-          retires.add(a);
-        }
-      });
-      s.abonnes = s.abonnes.filter(a => !retires.has(a));
-      garde.interne = true;
-    }
+    const garde = mois.find(a => !prixDe(a) && !a.stripeId) || mois.find(a => a.interne === true && !a.stripeId) || null;
+    const retires = new Set();
+    mois.forEach((a, i) => {
+      if (a === garde) return;
+      if (prixDe(a) || a.stripeId) {
+        const nv = uid();
+        if (i === 0) [...s.events, ...s.aVoir].forEach(x => { if (x.lien === 'a:moi') x.lien = 'a:' + nv; });
+        a.id = nv;
+      } else {
+        const n = typeof a.notes === 'string' ? a.notes.trim() : '';
+        if (n && !n.startsWith('Licence éditeur KamiFood :') && !String(garde.notes || '').includes(n)) garde.notes = [garde.notes, n].filter(Boolean).join('\n');
+        retires.add(a);
+      }
+    });
+    s.abonnes = s.abonnes.filter(a => !retires.has(a));
+    if (garde) garde.interne = true;
     s.prefs.migrations.dedoublonMoi = true;
   }
+  /* Toufek est l'éditeur de KamiFood : sa licence (id 'moi') est permanente et jamais facturée. Après dedoublonMoi,
+     qui peut avoir rendu son id à un vrai restaurant. */
+  if (!s.abonnes.some(a => a.id === 'moi')) s.abonnes.push({ id: 'moi', createdAt: Date.now(), interne: true, restaurant: 'Toufek · licence éditeur', contact: 'Toufek', statut: 'actif', prix: 0, engagement: 0, debut: jourLocal(), formule: (s.formules || []).find(f => f.nom === 'Premium')?.id || '', notes: 'Licence éditeur KamiFood : activée en permanence, jamais facturée.' });
   migrate.corrections = assainir(s);
   return s;
 }
@@ -489,10 +490,15 @@ function gainsPeriode(secteur, from, to) {
   if (secteur === 'kamifood') {
     const upTo = to < t ? to : t;
     const total = state.abonnes.reduce((s, a) => s + revenuAbonne(a, from, to), 0);
+    /* Si Stripe est synchronisé, l'encaissé est le vrai : les factures payées sur la période ; sinon l'estimation au prorata.
+       L'attendu est ce qui manque pour atteindre le total de la période : avec Stripe, une facture déjà payée (Stripe facture
+       en début de mois) n'est donc pas attendue une seconde fois. */
+    if (stripeReel()) {
+      const gagne = state.stripe.factures.filter(f => f.date >= from && f.date <= upTo).reduce((s, f) => s + num(f.ht), 0);
+      return { gagne, prevu: Math.max(0, total - gagne) };
+    }
     const estime = state.abonnes.reduce((s, a) => s + revenuAbonne(a, from, upTo), 0);
-    /* Si Stripe est synchronisé, l'encaissé est le vrai : les factures payées sur la période ; sinon l'estimation au prorata */
-    const gagne = stripeReel() ? state.stripe.factures.filter(f => f.date >= from && f.date <= upTo).reduce((s, f) => s + num(f.ht), 0) : estime;
-    return { gagne, prevu: Math.max(0, total - estime) };
+    return { gagne: estime, prevu: Math.max(0, total - estime) };
   }
   const ds = state.dossiers.filter(d => d.activite === secteur);
   const gagne = ds.filter(d => d.datePaiement >= from && d.datePaiement <= to).reduce((s, d) => s + num(d.commRecue), 0);
@@ -1181,7 +1187,8 @@ function openAbonne(id) {
   const ex = id ? abonne(id) : null;
   if (id && !ex) return;
   const a = ex || { statut: 'actif', debut: today(), formule: state.formules[0]?.id, prix: state.formules[0]?.prix || '', engagement: 12 };
-  /* La licence éditeur (id 'moi') reste toujours interne : pas de case à décocher, pas de suppression (elle reviendrait) */
+  /* La licence éditeur (id 'moi') reste toujours interne, active et gratuite, comme Kami l'impose : ni case à décocher,
+     ni statut, ni prix, ni date de résiliation, ni suppression (elle reviendrait) */
   const estMoi = id === 'moi';
   const estimee = a.statut === 'resilie' && !!a.finEstimee;
   const fOpts = Object.fromEntries(state.formules.map(f => [f.id, `${f.nom}${num(f.prix) ? ' · ' + eur(f.prix) : ''}`]));
@@ -1192,17 +1199,18 @@ function openAbonne(id) {
       ${field('contact', 'Contact', inp('contact', a.contact, 'text', 'autocomplete="off"'))}
       ${field('tel', 'Téléphone', inp('tel', a.tel, 'tel'))}
       ${puces('formule', fOpts, a.formule, { label: 'Formule', apres: 'prixFormule(this.value)' })}
-      ${field('prix', 'Prix HT / mois (€)', inp('prix', a.prix, 'number', 'min="0" step="1" inputmode="decimal"'))}
-      ${puces('statut', { essai: 'Essai', actif: 'Actif', resilie: 'Résilié' }, a.statut, { label: 'Statut', seg: true, cls: '' })}
-      ${field('debut', 'Début de facturation', inp('debut', a.debut, 'date', 'required'), a.statut === 'resilie' ? '' : 'full')}
-      ${a.statut === 'resilie' ? fin : ''}
+      ${estMoi ? '<p class="meta full licence-regle">Ta licence éditeur : toujours active, jamais facturée, hors des gains.</p>'
+        : `${field('prix', 'Prix HT / mois (€)', inp('prix', a.prix, 'number', 'min="0" step="1" inputmode="decimal"'))}
+      ${puces('statut', { essai: 'Essai', actif: 'Actif', resilie: 'Résilié' }, a.statut, { label: 'Statut', seg: true, cls: '' })}`}
+      ${field('debut', estMoi ? 'Active depuis' : 'Début de facturation', inp('debut', a.debut, 'date', 'required'), a.statut === 'resilie' && !estMoi ? '' : 'full')}
+      ${a.statut === 'resilie' && !estMoi ? fin : ''}
       ${!id && state.rdvModele.length ? `<label class="check full" title="${esc(state.rdvModele.map(r => r.titre).join(', '))}"><input type="checkbox" name="planifier" checked><span>Planifier les ${state.rdvModele.length} RDV inclus<small>installation, formation, suivis : à partir du début</small></span></label>` : ''}
     </div>`;
   const plus = `<div class="fields">
       ${field('email', 'E-mail', inp('email', a.email, 'email'))}
       ${field('ville', 'Ville', inp('ville', a.ville))}
-      ${field('engagement', 'Engagement (mois)', inp('engagement', a.engagement, 'number', 'min="0" step="1" inputmode="numeric"'), a.statut === 'resilie' ? 'full' : '')}
-      ${a.statut === 'resilie' ? '' : fin}
+      ${field('engagement', 'Engagement (mois)', inp('engagement', a.engagement, 'number', 'min="0" step="1" inputmode="numeric"'), a.statut === 'resilie' || estMoi ? 'full' : '')}
+      ${a.statut === 'resilie' || estMoi ? '' : fin}
       ${field('notes', 'Notes', zoneTexte('notes', a.notes), 'full')}
       ${estMoi ? '' : `<label class="check full"><input type="checkbox" name="interne" ${a.interne ? 'checked' : ''}><span>Licence éditeur (moi)<small>activée en permanence, jamais facturée, hors des gains</small></span></label>`}
       ${a.stripeId ? `<p class="meta full">Synchronisé avec Stripe (${esc(a.stripeStatut || '')}, ${esc(a.formuleNom || '')}) : prix et statut repris à chaque synchronisation.</p>` : ''}
@@ -1212,6 +1220,7 @@ function openAbonne(id) {
   f => {
     const planifier = f.planifier; delete f.planifier;
     f.interne = estMoi || !!f.interne;
+    if (estMoi) Object.assign(f, { statut: 'actif', prix: 0, fin: '' }); // la licence : active et gratuite, même règle que Kami
     /* Résilié sans date : arrêté aujourd'hui (sinon il rapporterait encore) */
     if (f.statut === 'resilie' && !f.fin) f.fin = today();
     /* Une date estimée touchée ou changée devient la vraie date */
@@ -1224,7 +1233,7 @@ function openAbonne(id) {
       if (planifier) planifierInclus(target);
     }
     save(); modal().close(); render();
-    toast(id ? 'Abonné mis à jour' : planifier ? `Abonné créé, ${state.rdvModele.length} RDV planifiés` : 'Abonné créé');
+    toast(estMoi ? 'Licence mise à jour' : id ? 'Abonné mis à jour' : planifier ? `Abonné créé, ${state.rdvModele.length} RDV planifiés` : 'Abonné créé');
   });
 }
 /* Une formule touchée reprend son prix (s'il en a un) */
@@ -2576,6 +2585,12 @@ if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = () => { const
 if (jarvis.mainsLibres && SR) setTimeout(() => demarrerEcoute(), 500);
 
 /* ---------- Exemple ---------- */
+/* Double toucher sur « Voir un exemple » ou « Charger un exemple » : l'exemple s'affiche aussitôt et le second toucher
+   tomberait sur ce qui vient d'apparaître (une fiche, « Retirer l'exemple »). Pendant 1 s, ce second toucher est ignoré
+   et « Retirer l'exemple » ne fait rien. */
+let exempleCharge = 0;
+const exempleJusteCharge = () => Date.now() - exempleCharge < 1000;
+document.addEventListener('click', e => { if (e.detail > 1 && exempleJusteCharge()) { e.preventDefault(); e.stopPropagation(); } }, true);
 async function loadDemo() {
   if (!estVide() && !await confirmer("Ajouter les données d'exemple à tes données actuelles ?", 'Ajouter')) return;
   const d = n => iso(addDays(new Date(), n));
@@ -2614,12 +2629,14 @@ async function loadDemo() {
     { id: uid(), createdAt: Date.now(), demo: true, nom: 'Julien', entreprise: 'Pizzeria Nova', activite: 'kamifood', priorite: 'normale', statut: 'suivi', attente: 'moi', rappel: d(2), historique: [{ date: d(-1), texte: 'Veut une démo KamiFood, je lui envoie le lien' }] },
   );
   save(); render(); toast('Exemple chargé');
+  exempleCharge = Date.now();
 }
 /* Les données d'exemple sont marquées demo:true ; les anciens exemples sont reconnus à leur nom */
 const DEMO_NOMS = ['Le Petit Zinc', 'Brasserie du Port', 'Sushi Kaze', 'Boulangerie Martin', 'Garage Central', 'SCI Les Tilleuls', 'Hôtel du Parc', 'Entrepôt Logistik'];
 const estDemo = x => !!x.demo || DEMO_NOMS.includes(x.restaurant || x.entreprise || '');
 const aDemo = () => [...state.abonnes, ...state.dossiers, ...state.events, ...state.aVoir].some(estDemo);
 async function retirerExemple() {
+  if (exempleJusteCharge()) return; // second toucher d'un double toucher sur « Charger un exemple »
   if (!await confirmer("Retirer les données d'exemple ? Tes vraies données restent.", 'Retirer')) return;
   const ids = new Set([...state.abonnes.filter(estDemo).map(a => 'a:' + a.id), ...state.dossiers.filter(estDemo).map(d => 'd:' + d.id)]);
   const n = state.abonnes.length + state.dossiers.length + state.events.length + state.aVoir.length;

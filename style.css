@@ -482,6 +482,8 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
 .stripe-card .kpi { padding: 0; border: 0; box-shadow: none; background: none; }
 @media (max-width: 900px) { .stripe-card .kpis { grid-template-columns: 1fr 1fr; } }
 .meta.full { grid-column: 1 / -1; }
+/* Fiche de la licence éditeur : la règle à la place du prix et du statut */
+.meta.licence-regle { margin: 0; }
 
 /* prise de contact : une seule ligne de créneau à la fois, ascenseurs discrets */
 .creneau-fields[hidden] { display: none; }

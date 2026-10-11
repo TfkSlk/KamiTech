@@ -1,7 +1,7 @@
 /* C3 — Chiffres justes : KamiFood proratisé, durées réelles, résiliés arrêtés, licence unique, états vides.
    Horloge figée au samedi 2026-10-10 09:00 (Paris). Les critères vus à l'écran sont vérifiés au téléphone (390x844)
    et à l'ordinateur (1366x800) ; api/stripe.js et api/jarvis.js sont vérifiés en Node avec de faux services. */
-import { ouvrir, verifier, bilan } from './outil.mjs';
+import { ouvrir, verifier, bilan, sansDefilement } from './outil.mjs';
 import { lireStripe } from '../../api/stripe.js';
 import { runJarvis } from '../../api/jarvis.js';
 import path from 'node:path';
@@ -88,6 +88,27 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     });
     verifier(`${ecran} 9. Stripe synchronisé : la note parle des factures Stripe, graphique = KPI = factures du mois`, !s.note.includes('estimation') && s.note.includes('factures Stripe') && s.serie === s.kpi && s.kpi === 149, `${s.serie} · ${s.kpi}`);
     verifier(`${ecran} 1-9. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* 1 bis (recette). Stripe synchronisé, factures payées le 1er de chaque mois (comme Stripe facture) : la facture du mois
+     déjà payée n'est pas attendue une seconde fois. Octobre = 149 + 0, année = 1490 + 298, semaine sans facture = 0 + 149×7/31. */
+  {
+    const factures = Array.from({ length: 10 }, (_, i) => ({ id: 'in' + i, client: 'cus_a', abonnement: 'sub_a', date: `2026-${String(i + 1).padStart(2, '0')}-01`, ht: 149, ttc: 178.8 }));
+    const stripeAbonne = { ...abonneActif, stripeId: 'sub_a', stripeClient: 'cus_a', stripeStatut: 'active' };
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, stockage: { [KEY]: etat({ abonnes: [MOI, stripeAbonne], stripe: { sync: '2026-10-09T10:00:00Z', mrr: 149, abonnes: [], factures, filtre: '' } }) } });
+    const r = await p.evaluate(() => ({
+      mois: gains('kamifood', 'mois'), annee: gains('kamifood', 'annee'), semaine: gainsPeriode('kamifood', '2026-10-05', '2026-10-11'),
+      septembre: gainsPeriode('kamifood', '2026-09-01', '2026-09-30'),
+      kpi: [...document.querySelectorAll('.kpis .kpi')].map(x => x.textContent.replace(/\s+/g, ' ').trim()).find(t => /^Gagné/.test(t)) || '',
+    }));
+    verifier(`${ecran} 1 bis. Stripe, factures au 1er : octobre = 149 encaissés + 0 attendu (et non + 101)`, r.mois.gagne === 149 && r.mois.prevu === 0 && /\+ 0 € encore attendu/.test(r.kpi.replace(/\u202f|\u00a0/g, ' ')), JSON.stringify(r.mois) + ' · ' + r.kpi);
+    verifier(`${ecran} 1 bis. Stripe, factures au 1er : année = 1490 + 298 (12 mois, pas 13)`, r.annee.gagne === 1490 && proche(r.annee.prevu, 298), JSON.stringify(r.annee));
+    verifier(`${ecran} 1 bis. Stripe : une semaine sans facture = 0 + 149 × 7 / 31 ; un mois passé payé = 149 + 0`, r.semaine.gagne === 0 && proche(r.semaine.prevu, 149 * 7 / 31) && r.septembre.gagne === 149 && r.septembre.prevu === 0, JSON.stringify([r.semaine, r.septembre]));
+    await p.evaluate(() => { location.hash = '#kamifood'; }); await pause(p);
+    const kf = await p.evaluate(() => [...document.querySelectorAll('.kpis .kpi')].map(x => x.textContent.replace(/\s+/g, ' ').trim()).find(t => /Encaissé cette année/.test(t)) || '');
+    verifier(`${ecran} 1 bis. KamiFood : « + 298 € d'ici décembre »`, /\+ 298 € d'ici décembre/.test(kf.replace(/\u202f|\u00a0/g, ' ')), kf);
+    verifier(`${ecran} 1 bis. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
     await fermer();
   }
 
@@ -180,7 +201,8 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await p.evaluate(() => openAbonne('r1')); await pause(p);
     const lab = await p.evaluate(() => { const l = document.querySelector('label[for="f-fin"]'); const b = l.querySelector('.estimee'); return { txt: l.textContent, couleur: b && getComputedStyle(b).color, h: l.getBoundingClientRect().height }; });
     verifier(`${ecran} 4. la fiche affiche « date de résiliation estimée, à corriger »`, /date de résiliation estimée, à corriger/i.test(lab.txt) && lab.h > 0, JSON.stringify(lab));
-    await p.evaluate(() => document.querySelector('label[for="f-fin"]').scrollIntoView({ block: 'center' }));
+    const vue = await p.evaluate(() => { const r = document.querySelector('label[for="f-fin"]').getBoundingClientRect(), d = document.querySelector('#f-fin').getBoundingClientRect(); return { haut: r.top, bas: d.bottom, h: innerHeight }; });
+    verifier(`${ecran} 4. (recette) la mention « estimée, à corriger » et la date se voient sans défiler, la fiche ne défile pas`, vue.haut >= 0 && vue.bas <= vue.h && await sansDefilement(p, '#modal') && await sansDefilement(p, '#modal .sheet-body'), JSON.stringify(vue));
     await capture(p, `c3-abonne-fin-estimee-${largeur}`);
     await p.fill('#f-fin', '2026-09-15');
     await enregistrer(p);
@@ -230,6 +252,76 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     });
     verifier(`${ecran} 7. doublon 'moi' facturé : gardé sous un nouvel id avec son RDV, la licence reste seule en 'moi'`, r.n === 1 && r.licence === 'Toufek · licence éditeur' && r.interne === true && r.reelId && r.reelId !== 'moi' && r.reelPrix === 149 && r.lien === 'a:' + r.reelId, JSON.stringify(r));
     verifier(`${ecran} 7. (bis) aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* 7 ter (recette). Le seul « moi » est devenu un vrai restaurant facturé (la licence était portée par une autre fiche cochée) :
+     il garde son revenu sous un nouvel id avec ses liens, et une licence 'moi' neuve est créée. Stable au rechargement. */
+  {
+    const moiFacture = { id: 'moi', createdAt: 1, interne: false, prix: 99, statut: 'actif', debut: '2026-01-01', restaurant: 'Mon resto', formule: 'f4', notes: '' };
+    const autreLicence = { id: 'x9', createdAt: 2, interne: true, prix: 0, statut: 'actif', debut: '2026-01-01', restaurant: 'Toufek · ma licence', notes: '' };
+    const ev = evenement('evr', { lien: 'a:moi', activite: 'kamifood' });
+    const contact = { id: 'c1', createdAt: 1, nom: 'Paul', activite: 'kamifood', statut: 'suivi', attente: '', rappel: '2026-10-12', lien: 'a:moi', historique: [] };
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, vue: 'kamifood', stockage: { [KEY]: etat({ abonnes: [moiFacture, autreLicence], events: [ev], aVoir: [contact] }) } });
+    const lire = () => p.evaluate(() => {
+      const resto = state.abonnes.find(a => a.restaurant === 'Mon resto'), moi = state.abonnes.filter(a => a.id === 'moi');
+      const g = gains('kamifood', 'mois'), stocke = JSON.parse(localStorage.getItem('kami-dashboard-v1'));
+      return { restoId: resto?.id, interne: resto?.interne, prix: resto?.prix, mois: g.gagne + g.prevu, mrr: mrr(), nMoi: moi.length, licence: moi[0] && { interne: moi[0].interne, prix: moi[0].prix, statut: moi[0].statut },
+        lienRdv: state.events.find(e => e.id === 'evr').lien, lienContact: state.aVoir.find(v => v.id === 'c1').lien, stockeMoi: stocke.abonnes.filter(a => a.id === 'moi').length, stockeResto: stocke.abonnes.find(a => a.restaurant === 'Mon resto')?.id };
+    });
+    const r1 = await lire();
+    verifier(`${ecran} 7 ter. « moi » unique facturé : nouvel id, pas interne, 99 € ce mois, MRR 99`, r1.restoId && r1.restoId !== 'moi' && r1.interne === false && r1.prix === 99 && proche(r1.mois, 99) && r1.mrr === 99, JSON.stringify(r1));
+    verifier(`${ecran} 7 ter. ses RDV et contacts le suivent ; une licence 'moi' neuve (interne, gratuite, active), écrite tout de suite`, r1.lienRdv === 'a:' + r1.restoId && r1.lienContact === 'a:' + r1.restoId && r1.nMoi === 1 && JSON.stringify(r1.licence) === '{"interne":true,"prix":0,"statut":"actif"}' && r1.stockeMoi === 1 && r1.stockeResto === r1.restoId, JSON.stringify(r1));
+    await p.reload({ waitUntil: 'domcontentloaded' }); await pause(p, 300);
+    const r2 = await lire();
+    verifier(`${ecran} 7 ter. après rechargement, rien ne bouge (même id, une seule licence)`, JSON.stringify(r2) === JSON.stringify(r1), JSON.stringify(r2));
+    await p.evaluate(id => openAbonne(id), r1.restoId); await pause(p);
+    const fiche = await p.evaluate(() => ({ caseInterne: !!document.querySelector('#modal-form input[name="interne"]'), supprimer: [...document.querySelectorAll('#modal .sheet-menu button')].some(b => b.textContent === 'Supprimer'), prix: document.querySelector('#f-prix')?.value }));
+    verifier(`${ecran} 7 ter. sa fiche reste corrigeable : case Licence éditeur, prix, Supprimer`, fiche.caseInterne && fiche.supprimer && fiche.prix === '99', JSON.stringify(fiche));
+    await p.evaluate(() => document.querySelector('#modal').close());
+    verifier(`${ecran} 7 ter. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+  /* 7 quater (recette). Fiche de la licence : ni statut, ni prix, ni date de résiliation ; Enregistrer la remet active et gratuite,
+     comme Kami l'impose (même une ancienne licence résiliée avec un prix). Une licence cochée avec un prix reste la licence. */
+  {
+    const licenceAbimee = { ...MOI, statut: 'resilie', prix: 249, fin: '2026-09-01', finEstimee: true };
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, vue: 'kamifood', stockage: { [KEY]: etat({ abonnes: [licenceAbimee] }) } });
+    const avant = await p.evaluate(() => ({ n: state.abonnes.length, ids: state.abonnes.map(a => a.id) }));
+    verifier(`${ecran} 7 quater. une licence cochée « éditeur » avec un prix reste la licence 'moi' (pas de seconde licence)`, avant.n === 1 && avant.ids[0] === 'moi', JSON.stringify(avant));
+    await p.evaluate(() => openAbonne('moi')); await pause(p);
+    const fiche = await p.evaluate(() => ({ statut: !!document.querySelector('#modal [aria-labelledby="lab-statut"]'), prix: !!document.querySelector('#f-prix'), fin: !!document.querySelector('#f-fin'),
+      regle: document.querySelector('#modal .licence-regle')?.textContent || '', visible: (() => { const r = document.querySelector('#modal .licence-regle')?.getBoundingClientRect(); return !!r && r.height > 0 && r.bottom <= innerHeight; })() }));
+    verifier(`${ecran} 7 quater. fiche de la licence : pas de Statut, pas de Prix, pas de date de résiliation ; la règle est écrite`, !fiche.statut && !fiche.prix && !fiche.fin && /toujours active, jamais facturée/.test(fiche.regle) && fiche.visible, JSON.stringify(fiche));
+    verifier(`${ecran} 7 quater. fiche de la licence sans défilement`, await sansDefilement(p, '#modal') && await sansDefilement(p, '#modal .sheet-body'));
+    await capture(p, `c3-fiche-licence-${largeur}`);
+    await enregistrer(p);
+    const apres = await p.evaluate(() => { const a = state.abonnes.find(x => x.id === 'moi'); return { statut: a.statut, prix: a.prix, fin: a.fin, estimee: 'finEstimee' in a, interne: a.interne, mois: gains('kamifood', 'mois').gagne }; });
+    verifier(`${ecran} 7 quater. Enregistrer : licence active, gratuite, sans fin, interne, hors des gains`, apres.statut === 'actif' && apres.prix === 0 && apres.fin === '' && !apres.estimee && apres.interne === true && apres.mois === 0, JSON.stringify(apres));
+    const carte = await p.evaluate(() => document.querySelector('.vide-licence')?.textContent || '');
+    verifier(`${ecran} 7 quater. la carte KamiFood dit toujours « active »`, /Ta licence éditeur : active/.test(carte), carte);
+    verifier(`${ecran} 7 quater. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* 8 bis (recette). Double toucher sur « Voir un exemple » (accueil) ou « Charger un exemple » (Réglages) : l'exemple se charge,
+     le second toucher ne tombe sur rien (ni fiche, ni « Retirer l'exemple ») ; « Retirer » n'agit qu'après 1 s */
+  for (const [vue, bouton] of [['dashboard', '.vide-accueil .lien-btn'], ['parametres', 'button:has-text("Charger un exemple")']]) {
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, vue });
+    const b = p.locator(bouton).first();
+    await b.scrollIntoViewIfNeeded();
+    const box = await b.boundingBox();
+    await p.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+    const tout = await p.evaluate(() => { retirerExemple(); return new Promise(ok => setTimeout(() => ok(document.querySelector('#confirm').open), 60)); });
+    await pause(p, 300);
+    const r = await p.evaluate(() => ({ confirm: document.querySelector('#confirm').open, fiche: document.querySelector('#modal').open, demo: aDemo(), abonnes: state.abonnes.length }));
+    verifier(`${ecran} 8 bis. ${vue} : double toucher sur « ${vue === 'dashboard' ? 'Voir' : 'Charger'} un exemple » : chargé, ni fenêtre « Retirer ? » ni fiche ouverte`, !r.confirm && !r.fiche && r.demo && r.abonnes > 1 && !tout, JSON.stringify({ ...r, tout }));
+    await pause(p, 900);
+    await p.evaluate(() => { retirerExemple(); }); await pause(p, 200);
+    const plusTard = await p.evaluate(() => document.querySelector('#confirm').open);
+    verifier(`${ecran} 8 bis. ${vue} : une seconde plus tard, « Retirer l'exemple » demande bien confirmation`, plusTard === true);
+    await p.evaluate(() => document.querySelector('#confirm').close('cancel')); await pause(p, 100);
+    verifier(`${ecran} 8 bis. ${vue} : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
     await fermer();
   }
 
