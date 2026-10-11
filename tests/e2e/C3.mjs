@@ -26,6 +26,10 @@ const abonneActif = { id: 'a1', createdAt: 1, restaurant: 'Brasserie Test', cont
 const evenement = (id, extra = {}) => ({ id, titre: 'RDV ' + id, date: '2026-10-07', heure: '10:00', duree: 60, mode: 'visio', activite: 'cee', lien: '', fait: false, notes: '', important: false, ...extra });
 /* Enregistre la fenêtre ouverte (bouton « Enregistrer ») */
 const enregistrer = async p => { await p.click('#modal-form button[value="ok"]'); await pause(p, 200); };
+/* Depuis F1 : volets (Essentiel / Plus d'options), date en puces (« Autre… » montre le champ), secteur en puces */
+const volet = async (p, i) => { await p.click(`#modal #volet-${i}`); await pause(p, 60); };
+const dateAutre = async (p, val) => { await p.click('#modal #f-date-autre'); await p.fill('#f-date', val); };
+const secteur = async (p, k) => { await p.click(`#modal [aria-labelledby="lab-activite"] [data-v="${k}"]`); };
 
 for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   const ecran = `${largeur}px`;
@@ -116,9 +120,10 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     /* Saisie à l'écran : « Voir Karim », du lundi 5 oct. au 15 nov. (6 semaines), sans heure, à prévoir, CEE */
     await p.evaluate(() => openEvent()); await pause(p);
     await p.fill('#f-titre', 'Voir Karim');
-    await p.fill('#f-date', '2026-10-05');
+    await dateAutre(p, '2026-10-05');
+    await secteur(p, 'cee');
+    await volet(p, 1);
     await p.fill('#f-fin', '2026-11-15');
-    await p.selectOption('#f-activite', 'cee');
     await p.check('#modal-form input[name="aPrevoir"]');
     await enregistrer(p);
     const lire = () => p.evaluate(() => { const e = state.events.find(x => x.titre === 'Voir Karim'); return e ? { duree: e.duree, aPrevoir: e.aPrevoir, fin: e.fin } : null; });
@@ -145,9 +150,10 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     /* 6. Jusqu'au = même date et « à prévoir » coché : ce n'est pas une période, donc pas « à prévoir » */
     await p.evaluate(() => openEvent()); await pause(p);
     await p.fill('#f-titre', 'Signature');
-    await p.fill('#f-date', '2026-10-12');
-    await p.fill('#f-fin', '2026-10-12');
+    await dateAutre(p, '2026-10-12');
     await p.fill('#f-heure', '11:00');
+    await volet(p, 1);
+    await p.fill('#f-fin', '2026-10-12');
     await p.check('#modal-form input[name="aPrevoir"]');
     await enregistrer(p);
     const sig = await p.evaluate(() => { const e = state.events.find(x => x.titre === 'Signature'); return e && { aPrevoir: e.aPrevoir, fin: e.fin, duree: e.duree }; });
@@ -182,7 +188,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     verifier(`${ecran} 4. une date corrigée n'est plus « estimée » et arrête le revenu à cette date`, corr.fin === '2026-09-15' && !corr.estimee && corr.octobre === 0, JSON.stringify(corr));
     /* Résilier dans la fiche sans donner de date : fin = aujourd'hui */
     await p.evaluate(() => openAbonne('a2')); await pause(p);
-    await p.selectOption('#f-statut', 'resilie');
+    await p.click('#modal [aria-labelledby="lab-statut"] [data-v="resilie"]');
     await enregistrer(p);
     const a2 = await p.evaluate(() => { const a = state.abonnes.find(x => x.id === 'a2'); return { statut: a.statut, fin: a.fin, novembre: revenuAbonne(a, '2026-11-01', '2026-11-30') }; });
     verifier(`${ecran} 4. résilié dans la fiche sans date : fin = aujourd'hui, plus rien ensuite`, a2.statut === 'resilie' && a2.fin === '2026-10-10' && a2.novembre === 0, JSON.stringify(a2));

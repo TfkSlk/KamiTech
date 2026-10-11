@@ -118,7 +118,8 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   });
   await p.evaluate(id => openEvent(id), ids6.e);
   await p.waitForTimeout(80);
-  await p.click('#modal .btn.danger');
+  await p.click('#modal .sheet-plus'); // depuis F1, Supprimer est dans le menu ⋯ de la fiche
+  await p.click('#modal .sheet-menu .danger');
   await p.waitForTimeout(80);
   const hugo = await p.evaluate(id => { const v = aVoir(id); const r = rappelsContacts().find(x => x.contact === id); return { statut: v.statut, eventId: v.eventId, rappel: v.rappel, dansRappels: !!r, date: r?.date }; }, ids6.v);
   verifier(`${ecran} 6. RDV supprimé : contact repassé en suivi et dans rappelsContacts() aujourd'hui`,
@@ -173,9 +174,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   await p.evaluate(() => document.querySelector('#modal').close());
   verifier(`${ecran} 7. fiche contact : le select Client lié ne contient pas le contact lui-même`, !optionsJulien.includes('c:' + julienId) && optionsJulien.includes(''), optionsJulien.join(','));
   /* Supprimer un contact libère les RDV qui le citaient */
-  await p.evaluate(() => { supprimerAVoir('clos1'); });
-  await p.waitForTimeout(60);
-  await p.click('#confirm-ok');
+  await p.evaluate(() => { supprimerAVoir('clos1'); }); // depuis F1 : sans confirmation, avec « Annuler » dans le toast
   await p.waitForTimeout(80);
   const lienOrphelin = await p.evaluate(() => state.events.find(e => e.id === 'evclos1').lien);
   verifier(`${ecran} supprimer un contact remet à vide le lien des RDV qui le citaient`, lienOrphelin === '', lienOrphelin);

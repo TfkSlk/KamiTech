@@ -384,17 +384,17 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     const pd = await p.evaluate(() => planDate);
     await p.click('#fab'); await pause(p, 120);
     const rdv = await p.evaluate(() => ({ open: $('#modal').open, h2: $('#modal h2')?.textContent, date: $('#f-date')?.value, aria: $('#fab').getAttribute('aria-label') }));
-    await p.evaluate(() => modal().close());
+    await p.evaluate(() => modal().close()); await pause(p, 150); // depuis F1, la fiche retire son entrée d'historique (history.back, asynchrone)
     verifier(`${ecran} 4. #fab sur #planning : « Nouveau RDV » à planDate (${pd})`, rdv.open && /Nouveau RDV/.test(rdv.h2) && rdv.date === pd && pd === '2026-10-17' && rdv.aria === 'Nouveau RDV', JSON.stringify(rdv));
     await p.evaluate(() => { location.hash = '#dossiers'; }); await pause(p, 120);
     await p.click('#fab'); await pause(p, 120);
     const dos = await p.evaluate(() => ({ open: $('#modal').open, h2: $('#modal h2')?.textContent }));
-    await p.evaluate(() => modal().close());
+    await p.evaluate(() => modal().close()); await pause(p, 150); // depuis F1, la fiche retire son entrée d'historique (history.back, asynchrone)
     verifier(`${ecran} 4. #fab sur #dossiers : le formulaire dossier`, dos.open && dos.h2 === "Nouveau dossier d'apport", JSON.stringify(dos));
     await p.evaluate(() => { location.hash = '#kamifood'; }); await pause(p, 120);
     await p.click('#fab'); await pause(p, 120);
     const ab = await p.evaluate(() => ({ open: $('#modal').open, h2: $('#modal h2')?.textContent }));
-    await p.evaluate(() => modal().close());
+    await p.evaluate(() => modal().close()); await pause(p, 150); // depuis F1, la fiche retire son entrée d'historique (history.back, asynchrone)
     verifier(`${ecran} 4. #fab sur #kamifood : le formulaire abonné`, ab.open && ab.h2 === 'Nouvel abonné KamiFood', JSON.stringify(ab));
     /* Appui long de 600 ms : le menu de 4 actions */
     await p.evaluate(() => { location.hash = '#dashboard'; }); await pause(p, 120);
@@ -410,7 +410,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     verifier(`${ecran} 4. menu ouvert sans défilement horizontal`, await sansScrollHorizontal(p));
     await p.click('#menu-plus [data-action="dossier"]'); await pause(p, 120);
     const choix = await p.evaluate(() => ({ menu: !$('#menu-plus').hidden, h2: $('#modal').open && $('#modal h2').textContent }));
-    await p.evaluate(() => modal().close());
+    await p.evaluate(() => modal().close()); await pause(p, 150); // depuis F1, la fiche retire son entrée d'historique (history.back, asynchrone)
     verifier(`${ecran} 4. menu : « Nouveau dossier » ouvre le formulaire dossier et ferme le menu`, !choix.menu && choix.h2 === "Nouveau dossier d'apport", JSON.stringify(choix));
     /* Menu refermé par un toucher ailleurs ou Échap */
     await p.mouse.move(box.x, box.y); await p.mouse.down(); await pause(p, 600); await p.mouse.up(); await pause(p, 60);

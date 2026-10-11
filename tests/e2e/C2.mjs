@@ -201,6 +201,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await b.evaluate(() => openEvent(null, '2026-10-12'));
     await pause(b, 80);
     await b.fill('#f-titre', 'RDV fenêtre B');
+    await b.click('#modal [aria-labelledby="lab-activite"] [data-v="cee"]'); // depuis F1, pas de secteur par défaut
     await b.click('#modal .modal-actions .btn.primary'); await pause(b, 200);
     await pause(p, 300);
     const stock = await p.evaluate(K => { const o = JSON.parse(localStorage.getItem(K)); return { contact: o.aVoir.some(v => v.nom === 'Inès Onglet'), rdv: o.events.some(e => e.titre === 'RDV fenêtre B'), rdvDansA: state.events.some(e => e.titre === 'RDV fenêtre B') }; }, KEY);
@@ -212,6 +213,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await pause(b, 300);
     const enAttente = await b.evaluate(() => ({ ouvert: document.querySelector('#modal').open, aRecharger }));
     await b.fill('#f-titre', 'RDV perdu B');
+    await b.click('#modal [aria-labelledby="lab-activite"] [data-v="cee"]');
     await b.click('#modal .modal-actions .btn.primary'); await pause(b, 300);
     const conflit = await b.evaluate(K => { const o = JSON.parse(localStorage.getItem(K)); return { a: o.aVoir.some(v => v.id === 'conflitA'), etatB: state.aVoir.some(v => v.id === 'conflitA'), perdu: o.events.some(e => e.titre === 'RDV perdu B'), toast: document.querySelector('#toast').textContent }; }, KEY);
     verifier(`${ecran} 5. saisie ouverte dans B pendant une écriture de A : rien d'A n'est écrasé, B recharge et prévient`,

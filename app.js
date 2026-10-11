@@ -243,7 +243,7 @@ function assainir(s) {
   const DATES = ['date', 'fin', 'rappel', 'debut', 'dateRelance', 'dateSignature', 'datePaiement'];
   const jour = v => typeof v === 'string' && JOUR.test(v) ? v : typeof v === 'string' && JOUR.test(v.slice(0, 10)) && /^T|^ /.test(v.slice(10)) ? v.slice(0, 10) : '';
   /* Textes : un nombre devient du texte, un objet son JSON (rien n'est jeté) */
-  const TEXTES = ['titre', 'nom', 'entreprise', 'restaurant', 'contact', 'notes', 'heure', 'tel', 'email', 'ville', 'partenaire'];
+  const TEXTES = ['titre', 'nom', 'entreprise', 'restaurant', 'contact', 'notes', 'heure', 'tel', 'email', 'ville', 'partenaire', 'lieu'];
   const texte = v => v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
   const nettoyer = x => {
     DATES.forEach(k => { if (k in x && x[k] !== '' && x[k] !== undefined) maj(x, k, jour(x[k])); });
@@ -280,6 +280,7 @@ function assainir(s) {
   if (!connu(PERIODES, s.prefs.periode)) maj(s.prefs, 'periode', 'mois');
   if (!['jour', 'semaine', 'mois'].includes(s.prefs.planVue)) maj(s.prefs, 'planVue', 'semaine');
   if (!['light', 'dark'].includes(s.prefs.theme)) maj(s.prefs, 'theme', 'light');
+  if ('dernierSecteur' in s.prefs && s.prefs.dernierSecteur !== '' && !connu(SECTEURS, s.prefs.dernierSecteur)) maj(s.prefs, 'dernierSecteur', '');
   if (typeof s.nom !== 'string' || !s.nom.trim()) maj(s, 'nom', s.nom == null || typeof s.nom === 'object' ? 'Kami Groupe' : String(s.nom).trim() || 'Kami Groupe');
   if (s.stripe != null && (typeof s.stripe !== 'object' || Array.isArray(s.stripe))) { s.stripe = null; n++; }
   if (s.stripe) ['factures', 'abonnes'].forEach(k => {
@@ -399,6 +400,7 @@ function confirmer(msg, label = 'Confirmer') {
   });
 }
 function toast(msg, ms = 2400) {
+  placerToast();
   const t = $('#toast');
   t.textContent = msg;
   t.classList.add('show');
@@ -407,6 +409,7 @@ function toast(msg, ms = 2400) {
 }
 /* Toast avec un bouton d'action (ex. « Noter la suite ») : reste affiché plus longtemps, seul le bouton est cliquable */
 function toastAction(msg, label, fn, ms = 8000) {
+  placerToast();
   const t = $('#toast');
   t.textContent = msg;
   const b = document.createElement('button');
@@ -572,7 +575,7 @@ function itemList(items, showDate) {
     const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.contact ? (e.rdvPasse ? (e.rdvDate ? `RDV du ${fmtDate(e.rdvDate)}` : 'RDV retiré') : e.date < t ? `Rappel du ${fmtDate(e.date)}` : 'Rappel') : e.relance ? 'Relance' : 'Dans la journée'));
     const click = e.contact ? `openAVoir('${e.contact}')` : e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
     const client = lienNom(e.lien);
-    const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? [e.aPrevoir ? 'Date à prévoir dans la période' : 'Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client].filter(Boolean).map(esc).join(' · ');
+    const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? [e.aPrevoir ? 'Date à prévoir dans la période' : 'Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client, e.lieu && e.lieu !== client ? e.lieu : ''].filter(Boolean).map(esc).join(' · ');
     return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''}">
       ${e.contact ? `<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
       <div class="grow clickable" onclick="${click}">
@@ -931,49 +934,160 @@ function protegerDonnees() {
   } catch (e) { /* API absente */ }
 }
 
-/* ---------- Formulaires ---------- */
+/* ---------- Feuilles (#modal) : RDV, dossier, abonné, contact ----------
+   Au téléphone, une feuille plein écran ; à l'ordinateur, une fenêtre. Jamais d'ascenseur : l'essentiel dans le premier volet,
+   le reste dans « Plus d'options ». Les volets sont dans le même <form> : FormData lit tous les champs. */
 const modal = () => $('#modal');
-const field = (name, label, input, full) => `<div class="field ${full ? 'full' : ''}"><label for="f-${name}">${label}</label>${input}</div>`;
+const coarse = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+/* cls : true ou 'full' (toute la largeur), '' (une colonne sur deux), ou d'autres classes */
+const field = (name, label, input, cls = '') => `<div class="field ${cls === true ? 'full' : cls}"><label for="f-${name}">${label}</label>${input}</div>`;
 const inp = (name, val, type = 'text', extra = '') => `<input id="f-${name}" name="${name}" type="${type}" value="${esc(val ?? '')}" ${extra}>`;
 const sel = (name, opts, val) => `<select id="f-${name}" name="${name}">${Object.entries(opts).map(([k, o]) => `<option value="${esc(k)}" ${k === val ? 'selected' : ''}>${esc(typeof o === 'string' ? o : o.long)}</option>`).join('')}</select>`;
+/* Une zone de texte fait au plus 3 lignes (au-delà, elle défile en elle-même, jamais la feuille) */
+const zoneTexte = (name, val) => `<textarea id="f-${name}" name="${name}" rows="3">${esc(val || '')}</textarea>`;
+/* Puces à choix unique : un input caché (name) porte la valeur ; seg = segment plein largeur, couleur = pastille du secteur */
+function puces(name, opts, val, { label = '', cls = 'full', seg = false, couleur = false, apres = '' } = {}) {
+  const v = val == null ? '' : String(val);
+  const items = Object.entries(opts).map(([k, l]) => `<button type="button" class="${seg ? '' : 'chip'} ${k === v ? 'on' : ''}" role="radio" aria-checked="${k === v}" data-v="${esc(k)}" onclick="puce(this)">${couleur ? `<i style="background:var(--${secteurConnu(k) ? k : 'perso'})"></i>` : ''}${esc(l)}</button>`).join('');
+  return `<div class="field ${cls}"><span class="lab" id="lab-${name}">${label}</span><div class="${seg ? 'seg plein' : 'puces'}" role="radiogroup" aria-labelledby="lab-${name}" data-puces><input type="hidden" id="f-${name}" name="${name}" value="${esc(v)}"${apres ? ` onchange="${apres}"` : ''}>${items}</div></div>`;
+}
+function puce(b) {
+  const g = b && b.closest('[data-puces]');
+  if (!g) return;
+  g.querySelectorAll('[data-v]').forEach(x => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-checked', String(on)); });
+  b.closest('.field')?.classList.remove('manque');
+  const h = g.querySelector('input[type="hidden"]');
+  if (h) { h.value = b.dataset.v; h.dispatchEvent(new Event('change')); }
+}
+/* Choix fait par le code (client lié → secteur) */
+function choisirPuce(name, v) {
+  const g = $('#f-' + name)?.closest('[data-puces]');
+  const b = g && [...g.querySelectorAll('[data-v]')].find(x => x.dataset.v === v);
+  if (b) puce(b);
+}
+/* Volets : un segment d'onglets en tête, une <section class="pane"> par volet, un seul visible à la fois */
+function volets(liste) {
+  return `<div class="seg plein volets" role="tablist">${liste.map((v, i) => `<button type="button" role="tab" id="volet-${i}" aria-controls="pane-${i}" aria-selected="${!i}" class="${i ? '' : 'on'}" onclick="voletAller(${i})">${esc(v.titre)}</button>`).join('')}</div>
+    <div class="panes">${liste.map((v, i) => `<section class="pane" id="pane-${i}" role="tabpanel" aria-labelledby="volet-${i}"${i ? ' hidden' : ''}>${v.html}</section>`).join('')}</div>`;
+}
+function voletAller(i) {
+  document.querySelectorAll('#modal .volets [role="tab"]').forEach((b, k) => { b.classList.toggle('on', k === i); b.setAttribute('aria-selected', String(k === i)); });
+  document.querySelectorAll('#modal .pane').forEach((p, k) => { p.hidden = k !== i; });
+  fermerMenuFeuille();
+  verifierSansAscenseur();
+}
+/* Un champ à montrer (invalide, manquant) : son volet passe devant */
+function montrerChamp(el) {
+  const p = el && el.closest('.pane');
+  if (p && p.hidden) voletAller([...document.querySelectorAll('#modal .pane')].indexOf(p));
+  if (el && el.id === 'f-date') $('#f-dates')?.classList.add('autre'); // date vidée : le champ revient à la place des puces
+}
+/* En-tête (titre, menu ⋯, ✕), corps sans ascenseur, actions collées en bas */
+function feuille({ titre, sous = '', menu = '', corps, pied }) {
+  return `<header class="sheet-head">
+      <div class="sheet-titre"><h2 id="modal-titre">${titre}</h2>${sous ? `<div class="meta">${sous}</div>` : ''}</div>
+      ${menu ? `<button type="button" class="btn icon sheet-plus" aria-label="Plus d'actions" aria-haspopup="menu" aria-expanded="false" onclick="menuFeuille()">⋯</button><div class="sheet-menu" role="menu" hidden>${menu}</div>` : ''}
+      <button type="button" class="btn icon sheet-fermer" aria-label="Fermer" onclick="modal().close()">✕</button>
+    </header>
+    <div class="sheet-body">${corps}</div>
+    ${pied || piedFeuille()}`;
+}
+const piedFeuille = (annuler = 'Annuler') => `<div class="modal-actions"><button type="button" class="btn" onclick="modal().close()">${annuler}</button><button class="btn primary" value="ok">Enregistrer</button></div>`;
+const itemMenu = (label, action, danger) => `<button type="button" role="menuitem" class="${danger ? 'danger' : ''}" onclick="fermerMenuFeuille();${action}">${label}</button>`;
+function menuFeuille(ouvrir) {
+  const m = $('#modal .sheet-menu'), b = $('#modal .sheet-plus');
+  if (!m) return;
+  const on = ouvrir ?? m.hidden;
+  m.hidden = !on; b?.setAttribute('aria-expanded', String(on));
+  if (on) m.querySelector('button')?.focus({ preventScroll: true });
+}
+function fermerMenuFeuille() { const m = $('#modal .sheet-menu'); if (!m || m.hidden) return false; menuFeuille(false); return true; }
+
 function showModal(html, onSubmit) {
   if (modal().open) modal().close();
-  $('#modal-form').innerHTML = html;
-  $('#modal-form').onsubmit = e => { e.preventDefault(); onSubmit(Object.fromEntries(new FormData(e.target))); };
+  modalQuitte(); // la fiche précédente (fermée par le code) rend son entrée d'historique
+  const form = $('#modal-form');
+  form.innerHTML = html;
+  form.noValidate = true; // validation faite ici : un champ requis dans un volet caché passe d'abord devant
+  form.onsubmit = e => {
+    e.preventDefault();
+    const bad = form.querySelector('input:invalid, select:invalid, textarea:invalid');
+    if (bad) { montrerChamp(bad); bad.reportValidity(); return; }
+    onSubmit(Object.fromEntries(new FormData(form)));
+  };
   modal().showModal();
+  /* Au téléphone, pas de clavier (ni de zoom) à l'ouverture : on lit d'abord, on touche le champ voulu ensuite.
+     À l'ordinateur, le premier champ d'une nouvelle fiche a le focus (autofocus) ; sinon la fiche elle-même (pas le menu ⋯) */
+  if (coarse()) document.activeElement?.blur?.();
+  else if (!form.querySelector('[autofocus]')) modal().focus({ preventScroll: true });
+  coucheOuvrir('modal', () => modal().close());
+  placerToast();
+  verifierSansAscenseur();
 }
-const actions = (delBtn, extra = '') => `<div class="modal-actions">
-  <div>${delBtn || ''}</div>
-  <div class="btn-row">${extra}<button type="button" class="btn" onclick="modal().close()">Annuler</button><button class="btn primary" value="ok">Enregistrer</button></div>
-</div>`;
+/* La fiche se ferme (✕, Annuler, Échap, enregistrement) : son entrée d'historique est retirée */
+function modalQuitte() { if (couches.some(c => c.nom === 'modal')) coucheQuittee('modal'); }
+function fermerModal() { if (modal().open) modal().close(); modalQuitte(); }
+/* Un toast pendant qu'une fiche est ouverte est affiché dans la fiche (sinon il resterait sous la fenêtre, invisible) */
+function placerToast() {
+  const t = $('#toast'), dest = modal().open ? modal() : document.body;
+  if (t && t.parentElement !== dest) dest.appendChild(t);
+}
+/* Outil de contrôle (localStorage['kgd-debug'] = '1') : rien ne doit défiler dans une feuille ni dans la Rencontre.
+   En cas d'échec : console.warn et contour rouge. */
+function verifierSansAscenseur() {
+  if (lireCle('kgd-debug') !== '1') return true;
+  const cibles = [];
+  if (modal().open) cibles.push(['#modal', modal()], ['.sheet-body', $('#modal .sheet-body')]);
+  if (!$('#rencontre').hidden) cibles.push(['#rencontre .r-body', $('#rencontre .r-body')]);
+  let ok = true;
+  for (const [nom, el] of cibles) {
+    if (!el) continue;
+    const trop = el.scrollHeight > el.clientHeight + 1;
+    el.style.outline = trop ? '3px solid red' : '';
+    el.style.outlineOffset = trop ? '-3px' : '';
+    if (trop) { ok = false; console.warn(`verifierSansAscenseur : ${nom} défile (${el.scrollHeight} > ${el.clientHeight})`); }
+  }
+  return ok;
+}
 
+/* Libellés courts pour les puces */
+const SECTEURS_PUCES = () => Object.fromEntries(Object.entries(SECTEURS).map(([k, s]) => [k, s.label]));
+const MODES_COURTS = { place: 'Sur place', visio: 'Visio', tel: 'Tél.', tache: 'Tâche' };
+const DUREES = { 30: '30 min', 60: '1 h', 90: '1 h 30', 120: '2 h' };
+
+/* ---------- Abonné KamiFood ---------- */
 function openAbonne(id) {
-  const a = id ? abonne(id) : { statut: 'actif', debut: today(), formule: state.formules[0]?.id, prix: state.formules[0]?.prix || '', engagement: 12 };
+  const ex = id ? abonne(id) : null;
+  if (id && !ex) return;
+  const a = ex || { statut: 'actif', debut: today(), formule: state.formules[0]?.id, prix: state.formules[0]?.prix || '', engagement: 12 };
   /* La licence éditeur (id 'moi') reste toujours interne : pas de case à décocher, pas de suppression (elle reviendrait) */
   const estMoi = id === 'moi';
   const estimee = a.statut === 'resilie' && !!a.finEstimee;
-  const fOpts = Object.fromEntries(state.formules.map(f => [f.id, `${f.nom}${num(f.prix) ? ' — ' + eur(f.prix) + ' / mois' : ''}`]));
-  showModal(`
-    <h2>${id ? "Modifier l'abonné" : 'Nouvel abonné KamiFood'}</h2>
-    <div class="fields">
-      ${field('restaurant', 'Restaurant *', inp('restaurant', a.restaurant, 'text', 'required'), true)}
-      ${field('contact', 'Contact', inp('contact', a.contact))}
+  const fOpts = Object.fromEntries(state.formules.map(f => [f.id, `${f.nom}${num(f.prix) ? ' · ' + eur(f.prix) : ''}`]));
+  /* Un résilié : sa date de résiliation est essentielle (à côté du début) ; sinon elle attend dans « Plus d'options » */
+  const fin = field('fin', estimee ? 'Date de résiliation <b class="estimee">estimée, à corriger</b>' : 'Date de résiliation', inp('fin', a.fin, 'date', estimee ? 'oninput="this.dataset.touche=1"' : ''));
+  const essentiel = `<div class="fields">
+      ${field('restaurant', 'Restaurant *', inp('restaurant', a.restaurant, 'text', `required autocomplete="off"${id ? '' : ' autofocus'}`), 'full')}
+      ${field('contact', 'Contact', inp('contact', a.contact, 'text', 'autocomplete="off"'))}
       ${field('tel', 'Téléphone', inp('tel', a.tel, 'tel'))}
+      ${puces('formule', fOpts, a.formule, { label: 'Formule', apres: 'prixFormule(this.value)' })}
+      ${field('prix', 'Prix HT / mois (€)', inp('prix', a.prix, 'number', 'min="0" step="1" inputmode="decimal"'))}
+      ${puces('statut', { essai: 'Essai', actif: 'Actif', resilie: 'Résilié' }, a.statut, { label: 'Statut', seg: true, cls: '' })}
+      ${field('debut', 'Début de facturation', inp('debut', a.debut, 'date', 'required'), a.statut === 'resilie' ? '' : 'full')}
+      ${a.statut === 'resilie' ? fin : ''}
+      ${!id && state.rdvModele.length ? `<label class="check full" title="${esc(state.rdvModele.map(r => r.titre).join(', '))}"><input type="checkbox" name="planifier" checked><span>Planifier les ${state.rdvModele.length} RDV inclus<small>installation, formation, suivis : à partir du début</small></span></label>` : ''}
+    </div>`;
+  const plus = `<div class="fields">
       ${field('email', 'E-mail', inp('email', a.email, 'email'))}
       ${field('ville', 'Ville', inp('ville', a.ville))}
-      ${field('formule', 'Formule', sel('formule', fOpts, a.formule).replace('<select', `<select onchange="const f=state.formules.find(x=>x.id===this.value);if(f&&num(f.prix))$('#f-prix').value=f.prix"`))}
-      ${field('prix', 'Prix HT / mois (€)', inp('prix', a.prix, 'number', 'min="0" step="1" inputmode="decimal"'))}
-      ${field('statut', 'Statut', sel('statut', STATUTS_AB, a.statut))}
-      ${field('debut', 'Début de facturation', inp('debut', a.debut, 'date', 'required'))}
-      ${field('engagement', 'Engagement (mois)', inp('engagement', a.engagement, 'number', 'min="0" step="1"'))}
-      ${field('fin', estimee ? 'Date de résiliation <b class="estimee">estimée, à corriger</b>' : 'Date de résiliation', inp('fin', a.fin, 'date', estimee ? 'oninput="this.dataset.touche=1"' : ''))}
-      ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(a.notes || '')}</textarea>`, true)}
-      ${estMoi ? '' : `<label class="check full"><input type="checkbox" name="interne" ${a.interne ? 'checked' : ''}> Licence éditeur (moi) : activée en permanence, jamais facturée, hors des gains</label>`}
-      ${a.stripeId ? `<p class="meta full">Synchronisé avec Stripe (${esc(a.stripeStatut || '')}, ${esc(a.formuleNom || '')}). Le prix et le statut sont repris de Stripe à chaque synchronisation.</p>` : ''}
-      ${!id && state.rdvModele.length ? `<label class="check full"><input type="checkbox" name="planifier" checked> Planifier les ${state.rdvModele.length} RDV inclus dans la souscription (${state.rdvModele.map(r => esc(r.titre)).join(', ')})</label>` : ''}
-    </div>
-    ${actions(id && !estMoi ? `<button type="button" class="btn danger" onclick="supprimerAbonne('${id}')">Supprimer</button>` : '',
-      id ? `<button type="button" class="btn" onclick="openEvent(null,null,'a:${id}')">+ RDV</button>` : '')}`,
+      ${field('engagement', 'Engagement (mois)', inp('engagement', a.engagement, 'number', 'min="0" step="1" inputmode="numeric"'), a.statut === 'resilie' ? 'full' : '')}
+      ${a.statut === 'resilie' ? '' : fin}
+      ${field('notes', 'Notes', zoneTexte('notes', a.notes), 'full')}
+      ${estMoi ? '' : `<label class="check full"><input type="checkbox" name="interne" ${a.interne ? 'checked' : ''}><span>Licence éditeur (moi)<small>activée en permanence, jamais facturée, hors des gains</small></span></label>`}
+      ${a.stripeId ? `<p class="meta full">Synchronisé avec Stripe (${esc(a.stripeStatut || '')}, ${esc(a.formuleNom || '')}) : prix et statut repris à chaque synchronisation.</p>` : ''}
+    </div>`;
+  const menu = id ? itemMenu('Planifier un RDV', `openEvent(null,null,'a:${id}')`) + (estMoi ? '' : itemMenu('Supprimer', `supprimerAbonne('${id}')`, true)) : '';
+  showModal(feuille({ titre: id ? esc(a.restaurant || 'Abonné') : 'Nouvel abonné KamiFood', sous: id ? esc([a.contact, a.ville].filter(Boolean).join(' · ') || 'KamiFood') : '', menu, corps: volets([{ titre: 'Essentiel', html: essentiel }, { titre: 'Plus d\'options', html: plus }]) }),
   f => {
     const planifier = f.planifier; delete f.planifier;
     f.interne = estMoi || !!f.interne;
@@ -992,6 +1106,8 @@ function openAbonne(id) {
     toast(id ? 'Abonné mis à jour' : planifier ? `Abonné créé, ${state.rdvModele.length} RDV planifiés` : 'Abonné créé');
   });
 }
+/* Une formule touchée reprend son prix (s'il en a un) */
+function prixFormule(fid) { const f = state.formules.find(x => x.id === fid); const p = $('#f-prix'); if (f && num(f.prix) && p) p.value = f.prix; }
 function planifierInclus(a) {
   const start = parse(a.debut || today());
   state.rdvModele.forEach(r => {
@@ -999,38 +1115,46 @@ function planifierInclus(a) {
     state.events.push({ id: uid(), date: iso(d), heure: '10:00', duree: num(r.duree) || 60, mode: r.mode, titre: r.titre, activite: 'kamifood', lien: 'a:' + a.id, fait: false, notes: '' });
   });
 }
-async function supprimerAbonne(id) {
-  modal().close();
-  const n = state.events.filter(e => e.lien === 'a:' + id && !e.fait).length;
-  if (!await confirmer(`Supprimer cet abonné${n ? ` et ses ${n} RDV à venir` : ''} ?`, 'Supprimer')) return;
-  state.abonnes = state.abonnes.filter(a => a.id !== id);
-  state.events = state.events.filter(e => !(e.lien === 'a:' + id && !e.fait));
-  state.events.forEach(e => { if (e.lien === 'a:' + id) e.lien = ''; });
-  save(); render(); toast('Abonné supprimé');
+/* Abonné supprimé : ses RDV à venir non faits partent avec lui ; ses RDV passés ou faits restent (sans lien) */
+function supprimerAbonne(id) {
+  if (id === 'moi' || !abonne(id)) return;
+  suppression(() => {
+    const t = today(), aVenir = e => e.lien === 'a:' + id && !e.fait && e.date >= t;
+    const n = state.events.filter(aVenir).length;
+    state.abonnes = state.abonnes.filter(a => a.id !== id);
+    state.events = state.events.filter(e => !aVenir(e));
+    state.events.forEach(e => { if (e.lien === 'a:' + id) e.lien = ''; });
+    state.aVoir.forEach(v => { if (v.lien === 'a:' + id) v.lien = ''; });
+    return n ? `Supprimé avec ${n} RDV à venir` : 'Supprimé';
+  });
 }
 
-function openDossier(id) {
-  const d = id ? dossier(id) : { activite: APPORT.includes(filtre.activite) ? filtre.activite : 'cee', statut: 'prospect' };
-  showModal(`
-    <h2>${id ? 'Modifier le dossier' : "Nouveau dossier d'apport"}</h2>
-    <div class="fields">
-      ${field('entreprise', 'Entreprise *', inp('entreprise', d.entreprise, 'text', 'required'), true)}
-      ${field('activite', 'Secteur', sel('activite', apportOpts, d.activite))}
-      ${field('statut', 'Statut', sel('statut', STATUTS, d.statut))}
-      ${field('contact', 'Contact', inp('contact', d.contact))}
-      ${field('tel', 'Téléphone', inp('tel', d.tel, 'tel'))}
+/* ---------- Dossier d'apport ---------- */
+function openDossier(id, prefill) {
+  const ex = id ? dossier(id) : null;
+  if (id && !ex) return;
+  const d = ex || { activite: APPORT.includes(filtre.activite) ? filtre.activite : 'cee', statut: 'prospect', ...(prefill || {}) };
+  const nombre = 'min="0" step="1" inputmode="decimal"';
+  const essentiel = `<div class="fields">
+      ${field('entreprise', 'Entreprise *', inp('entreprise', d.entreprise, 'text', `required autocomplete="off"${id ? '' : ' autofocus'}`), 'full')}
+      ${puces('activite', Object.fromEntries(APPORT.map(k => [k, SECTEURS[k].label])), d.activite, { label: 'Secteur', couleur: true })}
+      ${puces('statut', STATUTS, d.statut, { label: 'Statut' })}
+      ${field('contact', 'Contact', inp('contact', d.contact, 'text', 'autocomplete="off"'), 'half')}
+      ${field('tel', 'Téléphone', inp('tel', d.tel, 'tel'), 'half')}
+      ${field('commEstimee', 'Commission prévue (€)', inp('commEstimee', d.commEstimee, 'number', nombre), 'half')}
+      ${field('dateRelance', 'Prochaine relance', inp('dateRelance', d.dateRelance, 'date'), 'half')}
+    </div>`;
+  const plus = `<div class="fields">
       ${field('email', 'E-mail', inp('email', d.email, 'email'))}
       ${field('ville', 'Ville', inp('ville', d.ville))}
-      ${field('partenaire', 'Partenaire (fournisseur, délégataire, cabinet)', inp('partenaire', d.partenaire), true)}
-      ${field('commEstimee', 'Commission prévue (€)', inp('commEstimee', d.commEstimee, 'number', 'min="0" step="1" inputmode="decimal"'))}
-      ${field('commRecue', 'Commission reçue (€)', inp('commRecue', d.commRecue, 'number', 'min="0" step="1" inputmode="decimal"'))}
-      ${field('dateRelance', 'Prochaine relance', inp('dateRelance', d.dateRelance, 'date'))}
-      ${field('dateSignature', 'Date de signature', inp('dateSignature', d.dateSignature, 'date'))}
-      ${field('datePaiement', 'Date de paiement', inp('datePaiement', d.datePaiement, 'date'))}
-      ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(d.notes || '')}</textarea>`, true)}
-    </div>
-    ${actions(id ? `<button type="button" class="btn danger" onclick="supprimerDossier('${id}')">Supprimer</button>` : '',
-      id ? `<button type="button" class="btn" onclick="openEvent(null,null,'d:${id}')">+ RDV / visio</button>` : '')}`,
+      ${field('partenaire', 'Partenaire (fournisseur, délégataire, cabinet)', inp('partenaire', d.partenaire), 'full')}
+      ${field('commRecue', 'Commission reçue (€)', inp('commRecue', d.commRecue, 'number', nombre), 'full')}
+      ${field('dateSignature', 'Signé le', inp('dateSignature', d.dateSignature, 'date'))}
+      ${field('datePaiement', 'Payé le', inp('datePaiement', d.datePaiement, 'date'))}
+      ${field('notes', 'Notes', zoneTexte('notes', d.notes), 'full')}
+    </div>`;
+  const menu = id ? itemMenu('Planifier un RDV / visio', `openEvent(null,null,'d:${id}')`) + itemMenu('Supprimer', `supprimerDossier('${id}')`, true) : '';
+  showModal(feuille({ titre: id ? esc(d.entreprise || 'Dossier') : "Nouveau dossier d'apport", sous: id ? esc([SECTEURS[d.activite]?.label, d.contact].filter(Boolean).join(' · ')) : '', menu, corps: volets([{ titre: 'Essentiel', html: essentiel }, { titre: 'Plus d\'options', html: plus }]) }),
   f => {
     const target = id ? d : { id: uid(), createdAt: Date.now() };
     Object.assign(target, f);
@@ -1044,47 +1168,146 @@ function openDossier(id) {
     save(); modal().close(); render(); toast(id ? 'Dossier mis à jour' : 'Dossier créé');
   });
 }
-async function supprimerDossier(id) {
-  modal().close();
-  if (!await confirmer('Supprimer ce dossier ?', 'Supprimer')) return;
-  state.dossiers = state.dossiers.filter(d => d.id !== id);
-  state.events.forEach(e => { if (e.lien === 'd:' + id) e.lien = ''; });
-  save(); render(); toast('Dossier supprimé');
+function supprimerDossier(id) {
+  if (!dossier(id)) return;
+  suppression(() => {
+    state.dossiers = state.dossiers.filter(d => d.id !== id);
+    state.events.forEach(e => { if (e.lien === 'd:' + id) e.lien = ''; });
+    state.aVoir.forEach(v => { if (v.lien === 'd:' + id) v.lien = ''; });
+    return 'Supprimé';
+  });
 }
 
+/* ---------- RDV et tâches ---------- */
 const secteurDe = l => l ? (l[0] === 'a' ? 'kamifood' : l[0] === 'c' ? aVoir(l.slice(2))?.activite : dossier(l.slice(2))?.activite) : null;
+/* Ville du client lié (abonné, dossier ou contact) : le lieu proposé pour un RDV */
+const villeDe = l => {
+  if (!l || l[1] !== ':') return '';
+  const id = l.slice(2), x = l[0] === 'a' ? abonne(id) : l[0] === 'd' ? dossier(id) : l[0] === 'c' ? aVoir(id) : null;
+  return x && typeof x.ville === 'string' ? x.ville : '';
+};
+/* Puces de date : Aujourd'hui · Demain · J+2 · le lundi d'après · Autre… (Autre montre le champ date à la place des puces) */
+function datesRdv(val) {
+  const t = new Date(), j2 = addDays(t, 2);
+  let lun = addDays(j2, 1);
+  while (lun.getDay() !== 1) lun = addDays(lun, 1);
+  const court = d => cap(d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }));
+  const liste = [[today(), 'Aujourd\'hui'], [iso(addDays(t, 1)), 'Demain'], [iso(j2), court(j2)], [iso(lun), court(lun)]];
+  const connue = liste.some(([d]) => d === val);
+  return `<div class="field full"><span class="lab" id="lab-date">Date</span>
+    <div class="dates ${connue ? '' : 'autre'}" id="f-dates" role="group" aria-labelledby="lab-date">
+      <div class="puces">${liste.map(([d, l]) => `<button type="button" class="chip ${d === val ? 'on' : ''}" data-v="${d}" aria-pressed="${d === val}" onclick="choisirDate('${d}')">${esc(l)}</button>`).join('')}<button type="button" class="chip" id="f-date-autre" onclick="dateAutre(true)">Autre…</button></div>
+      <div class="date-autre"><input id="f-date" name="date" type="date" value="${esc(val)}" required onchange="choisirDate(this.value, true)"><button type="button" class="chip" onclick="dateAutre(false)">Raccourcis</button></div>
+    </div></div>`;
+}
+/* Une puce touchée (ou le champ changé) : la date et les puces suivent */
+function choisirDate(d, depuisChamp) {
+  const i = $('#f-date'), box = $('#f-dates');
+  if (!i || !box) return;
+  if (!depuisChamp) { i.value = d; box.classList.remove('autre'); }
+  let trouvee = false;
+  box.querySelectorAll('.puces [data-v]').forEach(b => { const on = b.dataset.v === i.value; trouvee = trouvee || on; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+  /* Une date hors des raccourcis s'affiche sur la puce « Autre » */
+  const autre = $('#f-date-autre');
+  if (autre) { autre.textContent = trouvee || !i.value ? 'Autre…' : fmtDate(i.value); autre.classList.toggle('on', !trouvee && !!i.value); }
+}
+function dateAutre(on) {
+  const box = $('#f-dates'), i = $('#f-date');
+  if (!box || !i) return;
+  box.classList.toggle('autre', on);
+  if (on) {
+    if (!coarse()) i.focus();
+    else { try { i.showPicker?.(); } catch (e) { /* sélecteur indisponible : le champ reste là */ } }
+  } else choisirDate(i.value, true);
+  verifierSansAscenseur();
+}
+/* Client lié changé : son secteur et sa ville (si le lieu n'a pas été tapé à la main) */
+function lienChange(l) {
+  const s = secteurDe(l);
+  if (secteurConnu(s)) choisirPuce('activite', s);
+  const lieu = $('#f-lieu');
+  if (!lieu) return;
+  if (!lieu.value.trim() || lieu.value === lieu.dataset.auto) lieu.value = villeDe(l);
+  lieu.dataset.auto = villeDe(l);
+}
 function openEvent(id, date, lien, heure, apres, prefill) {
-  const e = id ? state.events.find(x => x.id === id)
-    : { date: date || today(), heure: heure || '', duree: 60, mode: 'visio', activite: secteurDe(lien) || (planFiltre !== 'all' ? planFiltre : 'perso'), lien: lien || '', titre: lien ? `RDV ${lienNom(lien)}` : '', ...(prefill || {}) };
-  const opts = liensOpts(e.lien);
-  showModal(`
-    <h2>${id ? 'Modifier le RDV' : 'Nouveau RDV / tâche'}</h2>
-    <div class="fields">
-      ${field('titre', 'Titre *', inp('titre', e.titre, 'text', 'required'), true)}
-      ${field('date', 'Date', inp('date', e.date, 'date', 'required'))}
-      ${field('fin', 'Jusqu\'au (pour une période)', inp('fin', e.fin, 'date'))}
-      ${field('heure', 'Heure', inp('heure', e.heure, 'time'))}
-      ${field('mode', 'Type', sel('mode', MODES, e.mode))}
-      ${field('duree', 'Durée (minutes)', inp('duree', e.duree, 'number', 'min="0" step="5"'))}
-      ${field('lien', 'Client lié', sel('lien', opts, e.lien || '').replace('<select', `<select onchange="const s=secteurDe(this.value);if(s)$('#f-activite').value=s"`))}
-      ${field('activite', 'Secteur', sel('activite', SECTEURS, e.activite))}
-      ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(e.notes || '')}</textarea>`, true)}
-      <label class="check full"><input type="checkbox" name="important" ${e.important ? 'checked' : ''}> ⚠ Alerte : à ne pas manquer (affichée en rouge, ex. « signature requise le jour de l'annonce des prix »)</label>
-      <label class="check full"><input type="checkbox" name="aPrevoir" ${e.aPrevoir ? 'checked' : ''}> Date à prévoir dans cette période (créneau pas encore calé, affiché en pointillé)</label>
-    </div>
-    ${actions(id ? `<button type="button" class="btn danger" onclick="supprimerEvent('${id}')">Supprimer</button>` : '')}`,
+  const ex = id ? state.events.find(x => x.id === id) : null;
+  if (id && !ex) return;
+  const l = lien || '';
+  /* Secteur proposé : celui du client lié, du filtre du planning, ou le dernier choisi ; sinon aucun (Toufek choisit) */
+  const propose = [secteurDe(l), planFiltre, state.prefs.dernierSecteur].find(secteurConnu) || '';
+  const e = ex || { date: date || today(), heure: heure || '', duree: 60, mode: 'visio', activite: propose, lien: l, lieu: villeDe(l), titre: l ? `RDV ${lienNom(l)}` : '', ...(prefill || {}) };
+  const d = num(e.duree), durees = { ...DUREES, ...(d && !DUREES[d] ? { [d]: hrs(d) } : {}) };
+  const essentiel = `<div class="fields">
+      ${field('titre', 'Titre *', inp('titre', e.titre, 'text', `required autocomplete="off"${id ? '' : ' autofocus'}`), 'full')}
+      ${puces('activite', SECTEURS_PUCES(), e.activite || '', { label: 'Secteur', couleur: true })}
+      ${datesRdv(e.date || today())}
+      <div class="rang full">
+        ${field('heure', 'Heure', inp('heure', e.heure, 'time'), 'heure')}
+        ${puces('duree', durees, String(d), { label: 'Durée', cls: 'duree' })}
+      </div>
+      ${puces('mode', MODES_COURTS, e.mode, { label: 'Type', seg: true })}
+      <label class="chip bascule alerte"><input type="checkbox" name="important" ${e.important ? 'checked' : ''}><span>⚠ Alerte : à ne pas manquer</span></label>
+    </div>`;
+  const plus = `<div class="fields">
+      ${field('fin', 'Jusqu\'au (période)', inp('fin', e.fin, 'date'))}
+      <label class="check prevoir"><input type="checkbox" name="aPrevoir" ${e.aPrevoir ? 'checked' : ''}><span>Date à prévoir<small>dans la période, en pointillé</small></span></label>
+      ${field('lien', 'Client lié', sel('lien', liensOpts(e.lien), e.lien || '').replace('<select', '<select onchange="lienChange(this.value)"'), 'full')}
+      ${field('lieu', 'Lieu', inp('lieu', e.lieu, 'text', `autocomplete="off" placeholder="Adresse ou ville" data-auto="${esc(villeDe(e.lien))}"`), 'full')}
+      ${field('notes', 'Notes', zoneTexte('notes', e.notes), 'full')}
+    </div>`;
+  showModal(feuille({ titre: id ? 'Modifier le RDV' : 'Nouveau RDV / tâche', sous: id ? esc(jourLong(e.date) + (e.heure ? ' · ' + e.heure : '')) : '', menu: id ? itemMenu('Supprimer', `supprimerEvent('${id}')`, true) : '', corps: volets([{ titre: 'Essentiel', html: essentiel }, { titre: 'Plus d\'options', html: plus }]) }),
   f => {
+    /* Pas de secteur par défaut : sans choix, rien n'est créé */
+    if (!secteurConnu(f.activite)) { voletAller(0); $('#f-activite')?.closest('.field')?.classList.add('manque'); toast('Choisis le secteur'); return; }
     f.duree = num(f.duree);
     f.important = !!f.important;
+    f.lieu = String(f.lieu || '').trim();
     if (f.fin && f.fin <= f.date) f.fin = '';
     f.aPrevoir = !!f.aPrevoir && !!f.fin;
     if (f.fin && !f.heure) { f.mode = 'tache'; f.duree = 0; }
+    state.prefs.dernierSecteur = f.activite;
     let ev = e;
     if (id) Object.assign(e, f);
     else { ev = { id: uid(), fait: false, ...f }; state.events.push(ev); }
     if (apres) apres(ev);
     save(); modal().close(); render(); toast(id ? 'RDV mis à jour' : 'Ajouté au planning');
   });
+}
+
+/* ---------- Suppressions : tout de suite, sans « Êtes-vous sûr ? », avec « Annuler » ----------
+   Ce qui est retiré ou changé par la suppression est noté ; « Annuler » le remet à sa place, sans défaire ce qui a été fait entre-temps. */
+function suppression(muter) {
+  fermerModal();
+  const avant = JSON.parse(JSON.stringify(state));
+  const msg = muter();
+  const diff = COLLECTIONS_KAMI.map(col => {
+    const apres = new Map(state[col].map(x => [x.id, x]));
+    const retires = [], modifies = [];
+    avant[col].forEach((x, i) => {
+      const y = apres.get(x.id);
+      if (!y) retires.push({ i, x });
+      else { const b = JSON.stringify(y); if (JSON.stringify(x) !== b) modifies.push({ id: x.id, avant: x, apres: JSON.parse(b) }); }
+    });
+    return { col, retires, modifies };
+  });
+  if (!save()) { render(); return; } // conflit avec une autre fenêtre (rechargée) ou stockage plein : save() a prévenu
+  render();
+  toastAction(msg, 'Annuler', () => retablir(diff));
+}
+function retablir(diff) {
+  diff.forEach(({ col, retires, modifies }) => {
+    retires.forEach(({ i, x }) => { if (!state[col].some(y => y.id === x.id)) state[col].splice(Math.min(i, state[col].length), 0, x); });
+    modifies.forEach(({ id, avant, apres }) => {
+      const y = state[col].find(z => z.id === id);
+      if (!y) return;
+      new Set([...Object.keys(avant), ...Object.keys(apres)]).forEach(k => {
+        const b = JSON.stringify(apres[k]);
+        if (JSON.stringify(avant[k]) !== b && JSON.stringify(y[k]) === b) { if (k in avant) y[k] = avant[k]; else delete y[k]; }
+      });
+    });
+  });
+  if (save()) { render(); toast('Rétabli'); }
 }
 
 /* ---------- Contacts : prises de contact et rappels ---------- */
@@ -1174,6 +1397,8 @@ const ICONES = {
   dossier: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></svg>',
   abonne: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v7a3 3 0 0 0 6 0V3M7 3v18"/><path d="M17 3c-2 2-3 5-3 8h3v10"/></svg>',
   micro: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>',
+  tel: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.5h2.6l1.4 4-2 1.3a12 12 0 0 0 6.6 6.6l1.3-2 4 1.4v2.6a2 2 0 0 1-2.2 2A17 17 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z"/></svg>',
+  bulle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.4 8.4 0 0 1-12.4 7.4L3.5 20.5l1.5-4.4a8.4 8.4 0 1 1 15.5-4.5z"/><path d="M9 9.5c.3 2 2.5 4.3 4.8 4.8"/></svg>',
 };
 
 /* Bouton rapide : une prise de contact (nouvelle personne, ou nouvelle entrée pour une personne connue) */
@@ -1208,7 +1433,7 @@ function versContact(a, v) {
 }
 function openContact(id, prefill) {
   if (renc) fermerRencontre(); // une autre Rencontre ouverte (toast « Noter la suite »…) : son brouillon est déjà gardé
-  if (modal().open) modal().close(); // la fenêtre est au premier plan : elle cacherait la Rencontre
+  fermerModal(); // la fiche est au premier plan : elle cacherait la Rencontre (son entrée d'historique est retirée)
   const v = id ? aVoir(id) || null : null;
   const cid = v ? v.id : null;
   renc = nouvelleRenc(v, prefill);
@@ -1615,6 +1840,7 @@ function rencRender() {
     </div>`;
   if (r.etape === 0) compacterJetons();
   sauverBrouillon();
+  verifierSansAscenseur();
 }
 /* Ctrl ou Cmd + Entrée : Enregistrer (Noter ou récapitulatif) ; Échap ferme la Rencontre, le brouillon reste */
 document.addEventListener('keydown', e => {
@@ -1724,54 +1950,142 @@ function creneauContact(v, f) {
   v.eventId = ev.id;
   return ev;
 }
-/* Fiche complète : coordonnées, journal, statut */
+/* Fiche contact : s'ouvre en lecture (« où on en est », appeler, noter), puis Coordonnées et Suivi à modifier */
+let ficheId = null;
+const estElle = v => /^(mme|madame|mlle|mademoiselle)\b/i.test(String(v.nom || '').trim());
+const telHref = t => { const s = String(t || '').trim().replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''); return s.replace(/\D/g, '').length >= 4 ? s : ''; };
+/* WhatsApp attend le numéro international sans + : 06 12 34 56 78 → 33612345678 */
+const waNumero = t => { let d = String(t || '').replace(/\D/g, ''); if (d.startsWith('00')) d = d.slice(2); else if (/^0\d{9}$/.test(d)) d = '33' + d.slice(1); return d.length >= 8 ? d : ''; };
+const ilYa = ds => { if (!ds) return ''; const n = Math.round((parse(today()) - parse(ds)) / 864e5); return n <= 0 ? 'aujourd\'hui' : n === 1 ? 'hier' : `il y a ${n} j`; };
+/* Ce qui est attendu, repris d'un des derniers échanges par le lecteur local (« je lui envoie le devis » → « le devis ») ; sinon '' */
+function ceQuiEstDu(v) {
+  if (!window.Lire || !v.attente) return '';
+  const h = v.historique || [];
+  for (let i = h.length - 1; i >= Math.max(0, h.length - 3); i--) {
+    const txt = String(h[i].texte || '');
+    try {
+      const j = (Lire.lireNote(txt, today(), [], []).jetons || []).find(x => x.cle === 'attente' && x.valeur === v.attente);
+      if (!j) continue;
+      const art = /\b(?:une|un|ma|mon|mes|le|la|les|des|notre|nos)\s*$/i.exec(txt.slice(j.debut, j.fin)); // « il attend une réponse » → « une réponse »
+      let reste = txt.slice(art ? j.fin - art[0].length : j.fin).split(/[,.;:!?\n]|\set\s|\srappel/i)[0].trim();
+      /* « elle doit m'envoyer ses avis » → « ses avis » : pronom et verbe d'envoi retirés */
+      reste = reste.replace(/^(?:(?:lui|leur|me|nous|vous)\s+|[mt]['’]\s*)/i, '').replace(/^(?:envoyer|renvoyer|transmettre|faire parvenir|faire|donner|passer|confirmer|pr[ée]parer|proposer|redire|dire)\s+/i, '').trim();
+      if (reste.length >= 3) return reste.length > 60 ? reste.slice(0, 59).trim() + '…' : reste;
+    } catch (e) { return ''; }
+  }
+  return '';
+}
+/* Résumé en 3 lignes, sans IA : la rencontre et le dernier échange, la prochaine étape, qui doit quoi */
+function ficheResume(v) {
+  const h = (v.historique || []).filter(x => x && (x.texte || x.date)), n = h.length, t = today();
+  const premier = h.map(x => x.date).filter(Boolean).sort()[0] || (v.createdAt ? jourLocal(v.createdAt) : '');
+  const der = h[n - 1];
+  const l1 = n ? `${estElle(v) ? 'Rencontrée' : 'Rencontré'} le ${fmtDate(premier) || '?'} · ${n} échange${n > 1 ? 's' : ''}${der.date ? ` · dernier ${ilYa(der.date)}` : ''} : ${der.texte || '…'}` : 'Aucun échange noté pour l\'instant';
+  const ev = v.eventId && state.events.find(e => e.id === v.eventId);
+  let l2, retard = false;
+  if (v.statut === 'clos') l2 = 'Contact clos : plus de rappel';
+  else if (rdvPasse(v)) { l2 = 'RDV passé : quelle suite ?'; retard = true; }
+  else if (v.statut === 'planifie' && ev) l2 = `RDV ${jourCourt(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`;
+  else if (v.rappel) {
+    retard = v.rappel < t;
+    l2 = (v.rappel === t ? 'rappel aujourd\'hui' : `rappel ${jourCourt(v.rappel)}${retard ? ', en retard' : ''}`)
+      + (ev && estPeriode(ev) && !ev.fait ? ` · à prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}` : '');
+  } else l2 = 'Aucune suite';
+  const quoi = ceQuiEstDu(v) || 'des informations';
+  const l3 = v.attente === 'moi' ? `Tu lui dois : ${quoi}` : v.attente === 'lui' ? `${estElle(v) ? 'Elle' : 'Il'} te doit : ${quoi}` : 'Rien en attente';
+  return `<div class="fiche-resume" id="fiche-resume">
+      <p class="r1">${esc(l1)}</p>
+      <p class="r2 ${retard ? 'late' : ''}"><span class="meta">Prochaine étape :</span> ${esc(l2)}</p>
+      <p class="r3 ${v.attente === 'moi' ? 'doit' : ''}">${esc(l3)}</p>
+    </div>`;
+}
+/* Une ligne du journal : 2 lignes de texte ; un toucher l'ouvre en entier (une seule à la fois) */
+const ligneJournal = x => `<li onclick="ouvrirLigne(this)"><span class="when">${esc(fmtDate(x.date)) || '—'}</span><div class="grow">${esc(x.texte)}</div></li>`;
+function ouvrirLigne(li) {
+  const ouvert = li.classList.contains('ouvert');
+  li.parentElement.querySelectorAll('li.ouvert').forEach(x => x.classList.remove('ouvert'));
+  if (!ouvert) li.classList.add('ouvert');
+  verifierSansAscenseur();
+}
+function ficheHtml(v) {
+  const tel = telHref(v.tel), wa = waNumero(v.tel), h = v.historique || [], n = h.length;
+  return `${ficheResume(v)}
+    <div class="fiche-actions">
+      ${tel ? `<a class="btn" href="tel:${esc(tel)}">${ICONES.tel}<span>Appeler</span></a>` : ''}
+      ${wa ? `<a class="btn" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">${ICONES.bulle}<span>WhatsApp</span></a>` : ''}
+      <button type="button" class="btn" onclick="openContact('${v.id}')">${ICONES.noter}<span>+ Prise de contact</span></button>
+      <button type="button" class="btn" onclick="planifierAVoir('${v.id}')">${ICONES.rdv}<span>Planifier un RDV</span></button>
+    </div>
+    <div class="fiche-journal">
+      <span class="lab">Journal</span>
+      <ul class="list journal">${n ? [...h].reverse().slice(0, 5).map(ligneJournal).join('') : '<li class="meta">Aucune prise de contact notée.</li>'}</ul>
+      ${n > 5 ? `<button type="button" class="lien-btn" onclick="journalPage(0)">Tout le journal (${n})</button>` : ''}
+    </div>`;
+}
+/* « Tout le journal » : remplace la fiche par le journal complet, 8 échanges par page (‹ plus récents · plus anciens ›) */
+function journalPage(p) {
+  const v = aVoir(ficheId), box = $('#fiche-vue');
+  if (!v || !box) return;
+  const h = [...(v.historique || [])].reverse(), pages = Math.max(1, Math.ceil(h.length / 8));
+  p = Math.min(Math.max(0, p), pages - 1);
+  box.innerHTML = `<div class="journal-tete">
+      <button type="button" class="btn small" onclick="ficheVue()">‹ Fiche</button>
+      <span class="meta">${h.length} échange${h.length > 1 ? 's' : ''}</span>
+      <div class="pager"><button type="button" class="btn small" ${p ? '' : 'disabled'} onclick="journalPage(${p - 1})" aria-label="Plus récents">‹</button><span>${p + 1} / ${pages}</span><button type="button" class="btn small" ${p < pages - 1 ? '' : 'disabled'} onclick="journalPage(${p + 1})" aria-label="Plus anciens">›</button></div>
+    </div>
+    <ul class="list journal complet">${h.slice(p * 8, p * 8 + 8).map(ligneJournal).join('')}</ul>`;
+  verifierSansAscenseur();
+}
+function ficheVue() { const v = aVoir(ficheId), box = $('#fiche-vue'); if (v && box) { box.innerHTML = ficheHtml(v); verifierSansAscenseur(); } }
 function openAVoir(id) {
   const v = id ? aVoir(id) : null;
   if (!v) return openContact();
-  const journal = [...v.historique].reverse().map(h => `<li><span class="when">${esc(fmtDate(h.date))}</span><div class="grow">${esc(h.texte)}</div></li>`).join('');
-  showModal(`
-    <h2>${esc(v.nom)}</h2>
-    <div class="fields">
-      ${field('nom', 'Personne *', inp('nom', v.nom, 'text', 'required'))}
-      ${field('entreprise', 'Entreprise', inp('entreprise', v.entreprise))}
-      ${field('activite', 'Service à présenter', sel('activite', SECTEURS, v.activite))}
-      ${field('priorite', 'Priorité', sel('priorite', PRIORITES, v.priorite || 'normale'))}
-      ${field('attente', 'En attente', sel('attente', ATTENTES, v.attente || ''))}
-      ${field('rappel', 'Prochain rappel', inp('rappel', v.rappel, 'date'))}
-      ${field('statut', 'Statut', sel('statut', STATUTS_AV, v.statut))}
+  ficheId = v.id;
+  const coord = `<div class="fields">
+      ${field('nom', 'Personne *', inp('nom', v.nom, 'text', 'required autocomplete="off"'), 'full')}
+      ${field('entreprise', 'Entreprise', inp('entreprise', v.entreprise, 'text', 'autocomplete="off"'), 'full')}
       ${field('tel', 'Téléphone', inp('tel', v.tel, 'tel'))}
       ${field('email', 'E-mail', inp('email', v.email, 'email'))}
-      ${field('ville', 'Ville', inp('ville', v.ville))}
-      ${field('lien', 'Client lié (facultatif)', sel('lien', liensOpts(v.lien, 'c:' + v.id), v.lien || ''))}
-      ${field('notes', 'Notes', `<textarea id="f-notes" name="notes">${esc(v.notes || '')}</textarea>`, true)}
-      <div class="field full"><label>Journal des contacts</label><ul class="list journal">${journal || '<li class="meta">Aucune prise de contact notée.</li>'}</ul></div>
-    </div>
-    ${actions(`<button type="button" class="btn danger" onclick="supprimerAVoir('${id}')">Supprimer</button>`,
-      `<button type="button" class="btn" onclick="openContact('${id}')">+ Prise de contact</button><button type="button" class="btn" onclick="planifierAVoir('${id}')">Planifier un RDV</button>`)}`,
+      ${field('ville', 'Ville', inp('ville', v.ville), 'full')}
+      ${puces('activite', SECTEURS_PUCES(), v.activite || 'perso', { label: 'Service à présenter', couleur: true })}
+    </div>`;
+  const suivi = `<div class="fields">
+      ${puces('attente', { '': 'Rien', lui: 'J\'attends', moi: 'Je lui dois' }, v.attente || '', { label: 'En attente', seg: true })}
+      ${field('rappel', 'Prochain rappel', inp('rappel', v.rappel, 'date'), 'full')}
+      ${puces('statut', STATUTS_AV, v.statut, { label: 'Statut', seg: true })}
+      ${puces('priorite', PRIORITES, v.priorite || 'normale', { label: 'Priorité', seg: true })}
+      ${field('lien', 'Client lié', sel('lien', liensOpts(v.lien, 'c:' + v.id), v.lien || ''), 'full')}
+      ${field('notes', 'Notes', zoneTexte('notes', v.notes), 'full')}
+    </div>`;
+  const sous = [v.entreprise, SECTEURS[v.activite]?.label].filter(Boolean).map(esc).join(' · ');
+  showModal(feuille({ titre: esc(v.nom), sous, menu: itemMenu('Supprimer', `supprimerAVoir('${v.id}')`, true),
+    corps: volets([{ titre: 'Fiche', html: `<div id="fiche-vue">${ficheHtml(v)}</div>` }, { titre: 'Coordonnées', html: coord }, { titre: 'Suivi', html: suivi }]), pied: piedFeuille('Fermer') }),
   f => {
-    /* Clore à la main : plus de rappel ni d'attente, le contact sort des alertes */
+    /* Clore à la main : plus de rappel ni d'attente, le contact sort des alertes. Repris en cours sans date : rappel aujourd'hui (jamais sans suite) */
     if (f.statut === 'clos' && v.statut !== 'clos') { f.rappel = ''; f.attente = ''; }
+    if (f.statut === 'suivi' && !f.rappel) f.rappel = today();
     Object.assign(v, f);
     save(); modal().close(); render(); toast('Fiche mise à jour');
   });
 }
-async function supprimerAVoir(id) {
-  modal().close();
-  if (!await confirmer('Supprimer ce contact et son journal ?', 'Supprimer')) return;
-  state.aVoir = state.aVoir.filter(v => v.id !== id);
-  /* Plus de lien orphelin vers ce contact (RDV du planning, autres fiches) */
-  state.events.forEach(e => { if (e.lien === 'c:' + id) e.lien = ''; });
-  state.aVoir.forEach(x => { if (x.lien === 'c:' + id) x.lien = ''; });
-  save(); render(); toast('Supprimé');
+function supprimerAVoir(id) {
+  if (!aVoir(id)) return;
+  suppression(() => {
+    state.aVoir = state.aVoir.filter(v => v.id !== id);
+    /* Plus de lien orphelin vers ce contact (RDV du planning, autres fiches) */
+    state.events.forEach(e => { if (e.lien === 'c:' + id) e.lien = ''; });
+    state.aVoir.forEach(x => { if (x.lien === 'c:' + id) x.lien = ''; });
+    return 'Supprimé';
+  });
 }
 /* Ouvre le formulaire de RDV pré-rempli ; à l'enregistrement le contact passe en « RDV planifié » */
 function planifierAVoir(id) {
   const v = aVoir(id); if (!v) return;
   const d = dernierContact(v);
   const qui = [v.nom, v.entreprise].filter(Boolean).join(' · ');
-  modal().close();
+  fermerModal();
   openEvent(null, today(), v.lien || '', '', ev => { v.statut = 'planifie'; v.eventId = ev.id; },
-    { titre: `RDV ${qui}`, activite: v.activite || 'perso', notes: d ? d.texte : '' });
+    { titre: `RDV ${qui}`, activite: v.activite || 'perso', notes: d ? d.texte : '', lieu: villeDe(v.lien) || v.ville || '' });
 }
 function aVoirTri(a, b) {
   const t = today();
@@ -1846,9 +2160,12 @@ function toggleEvent(id) {
   if (v) toastAction('RDV fait avec ' + v.nom, 'Noter la suite', () => openContact(v.id));
 }
 function supprimerEvent(id) {
-  const v = libererContact(state.events.find(e => e.id === id));
-  state.events = state.events.filter(e => e.id !== id);
-  save(); modal().close(); render(); toast(v ? `Supprimé · ${v.nom} revient dans tes rappels` : 'Supprimé');
+  if (!state.events.some(e => e.id === id)) return;
+  suppression(() => {
+    const v = libererContact(state.events.find(e => e.id === id));
+    state.events = state.events.filter(e => e.id !== id);
+    return v ? `Supprimé · ${v.nom} revient dans tes rappels` : 'Supprimé';
+  });
 }
 
 /* ---------- Jarvis : le cerveau (API) + la voix (navigateur) ---------- */
@@ -2194,8 +2511,17 @@ function choixPlus(k) {
   window.addEventListener('hashchange', fermerMenuPlus);
 })();
 
-/* Une saisie fermée (fenêtre ou Rencontre) applique le rechargement mis de côté */
-$('#modal').addEventListener('close', () => setTimeout(rechargementDiffere, 0));
+/* Une fiche fermée (✕, Annuler, Échap, enregistrement, geste retour) : menu ⋯ refermé, entrée d'historique retirée,
+   toast rendu à la page, puis le rechargement mis de côté s'applique */
+$('#modal').addEventListener('close', () => {
+  if (modal().open) return; // une autre fiche s'est ouverte entre-temps
+  fermerMenuFeuille(); modalQuitte(); placerToast();
+  setTimeout(rechargementDiffere, 0);
+});
+/* Menu ⋯ : refermé par un toucher ailleurs dans la fiche, ou par Échap (sans fermer la fiche) */
+$('#modal').addEventListener('pointerdown', e => { if (!e.target.closest('.sheet-menu, .sheet-plus')) fermerMenuFeuille(); });
+$('#modal').addEventListener('keydown', e => { if (e.key === 'Escape' && fermerMenuFeuille()) { e.preventDefault(); e.stopPropagation(); } });
+$('#modal').addEventListener('cancel', e => { if (fermerMenuFeuille()) e.preventDefault(); });
 /* Premier lancement : on demande au navigateur de protéger les données (il ne les videra pas pour faire de la place) */
 function demanderProtection() {
   if (donneesIllisibles || state.prefs.persistDemande) return;
