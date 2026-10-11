@@ -237,7 +237,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   {
     const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur });
     const accueil = await p.evaluate(() => {
-      const n = [...document.querySelectorAll('.notice')].find(x => x.textContent.includes('Ton tableau de bord est vide'));
+      const n = [...document.querySelectorAll('.vide-accueil, .notice')].find(x => x.textContent.includes('Ton tableau de bord est vide')); // carte .vide-accueil depuis A1
       const r = n && n.getBoundingClientRect();
       return { ids: state.abonnes.map(a => a.id), visible: !!r && r.height > 0 && r.width > 0, vide: estVide() };
     });

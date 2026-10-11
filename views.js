@@ -141,72 +141,124 @@ function periodeSwitch() {
 }
 
 /* ---------- Accueil ---------- */
+/* Ordre, identique au téléphone et à l'ordinateur : en-tête, « Noter quelqu'un… », Alertes, Aujourd'hui et À rappeler,
+   chiffres, graphiques, 7 prochains jours, secteurs. Le rouge est réservé aux retards et aux alertes. */
+/* Listes repliées (« +N autres ») : dépliées à la demande, le temps de la visite */
+const accueilDeplie = { alertes: false, jour: false };
+function deplier(k) { accueilDeplie[k] = !accueilDeplie[k]; render(); }
+const pluriel = (n, un, plusieurs = un + 's') => `${n} ${n > 1 ? plusieurs : un}`;
+const salutDuMoment = (h = new Date().getHours()) => h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+const plusAutres = (reste, ouvert, k) => reste > 0
+  ? `<button type="button" class="lien-btn plus-autres" onclick="deplier('${k}')" aria-expanded="${ouvert}">${ouvert ? 'Réduire' : `+${reste} ${reste > 1 ? 'autres' : 'autre'}`}</button>` : '';
+
+/* Bandeau Alertes : 3 lignes au plus, « +N autres » déplie la liste ; masqué s'il n'y a rien */
+function alertesHtml(liste) {
+  if (!liste.length) return '';
+  const tout = accueilDeplie.alertes, vis = tout ? liste : liste.slice(0, 3);
+  return `<section class="card alertes ${liste.some(a => a.niveau === 'fort') ? 'fort' : ''}" aria-labelledby="alertes-titre">
+    <div class="alertes-tete"><h2 id="alertes-titre">Alertes</h2><span class="meta">${liste.length > 1 ? `${liste.length} à ne pas rater` : 'À ne pas rater'}</span></div>
+    <ul class="alertes-liste">${vis.map(a => `<li class="alerte-ligne ${a.niveau}"><button type="button" onclick="${esc(a.action)}">
+      <span class="compte">${esc(a.compte)}</span>
+      <span class="a-txt"><span class="a-titre">${esc(a.titre)}</span><span class="a-sous">${esc(a.sous)}</span></span>
+      <span class="a-chevron" aria-hidden="true">›</span></button></li>`).join('')}</ul>
+    ${plusAutres(liste.length - 3, tout, 'alertes')}
+  </section>`;
+}
+
+/* Premier lancement : trois gestes guidés plutôt qu'une page de zéros */
+function videAccueil() {
+  const action = (ico, titre, aide, js) => `<button type="button" class="vide-action" onclick="${js}"><span class="va-ico">${ICONES[ico]}</span><span class="va-txt"><b>${titre}</b><small>${aide}</small></span></button>`;
+  return `<section class="card vide-accueil" aria-labelledby="vide-titre">
+    <div><h2 id="vide-titre">Ton tableau de bord est vide</h2><p class="meta">Commence par l'un de ces trois gestes : les rappels, les heures et les gains se calculent ensuite tout seuls.</p></div>
+    <div class="vide-actions">
+      ${action('noter', 'Noter quelqu\'un', 'Une rencontre, une phrase, un rappel', 'openContact();focusNote()')}
+      ${action('rdv', 'Ajouter un RDV', 'Ta semaine, secteur par secteur', 'openEvent(null,today())')}
+      ${action('dossier', 'Ajouter un dossier', 'Un apport d\'affaires et sa commission', 'openDossier()')}
+    </div>
+    <button type="button" class="lien-btn" onclick="loadDemo()">Voir un exemple</button>
+  </section>`;
+}
+
 function dashboard() {
   tipInit();
-  const t = today(), p = state.prefs.periode;
-  const b = bilan(p), annee = bilan('annee'), semaine = bilan('semaine');
-  const lundi = monday(new Date());
-  const todayEv = state.events.filter(e => surJour(e, t));
-  const todayItems = [...rappelsContacts().filter(r => r.date === t), ...todayEv, ...relances().filter(r => r.date === t)].sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-  const retard = [...rappelsContacts().filter(r => r.date < t), ...relances().filter(r => r.date < t), ...state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t))].sort((a, c) => a.date.localeCompare(c.date));
-  const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
+  const t = today(), p = state.prefs.periode, per = PERIODES[p].toLowerCase();
   const empty = !donneesIllisibles && estVide(); // la licence éditeur seule ne compte pas comme une donnée
-  /* En cours, plus les « RDV planifié » dont le RDV est passé : ils attendent une suite */
-  const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi' || rdvPasse(v)).sort(aVoirTri);
-  const contactsDus = rappelsContacts().length;
-  const serie = serieMois(6), spark = serie.map(m => m.parts.reduce((s, x) => s + x.value, 0));
-  const minJour = todayEv.filter(e => !e.fait && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
-  const h = new Date().getHours();
-  const salut = h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+  const rappels = rappelsContacts();
+  const todayEv = state.events.filter(e => surJour(e, t));
+  const todayItems = [...rappels.filter(r => r.date === t), ...todayEv, ...relances().filter(r => r.date === t)].sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
+  const retard = [...rappels.filter(r => r.date < t), ...relances().filter(r => r.date < t), ...state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t))].sort((a, c) => a.date.localeCompare(c.date));
+  const rdvJour = todayEv.filter(e => !estPeriode(e) && !e.fait);
+  const minJour = rdvJour.reduce((s, e) => s + num(e.duree), 0);
+  const contactsDus = rappels.length, contactsRetard = rappels.filter(r => r.date < t).length;
+  const b = bilan(p);
+  /* Phrase résumé : retards, RDV du jour, contacts à rappeler, gains */
   const resume = [
-    `${todayEv.filter(e => !estPeriode(e)).length ? `${todayEv.filter(e => !estPeriode(e)).length} RDV aujourd'hui (${hrs(minJour)})` : 'Rien de prévu aujourd\'hui'}`,
     retard.length ? `${retard.length} en retard` : 'tout est à jour',
-    `${eur(b.tot.gagne)} gagnés ${PERIODES[p].toLowerCase().replace('cette ', 'cette ').replace('ce ', 'ce ')}`,
-  ].join(' · ');
+    rdvJour.length ? `${rdvJour.length} RDV aujourd'hui (${hrs(minJour)})` : todayEv.some(e => !estPeriode(e)) ? 'RDV du jour faits' : 'aucun RDV aujourd\'hui',
+    contactsDus ? `${pluriel(contactsDus, 'contact')} à rappeler` : '',
+    `${eur(b.tot.gagne)} gagnés ${per}`,
+  ].filter(Boolean).join(' · ');
+  const jourTxt = cap(new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }));
 
-  const donutParts = b.rows.map(r => ({ k: r.k, label: SECTEURS[r.k].label, value: r.gagne }));
-  const charge = serieSemaine(lundi);
-
-  return `
-  <div class="page-head">
-    <div><h1>${salut}, Toufek</h1><p>${esc(cap(fmtLong(new Date())))} · ${esc(resume)}</p></div>
-    <div class="btn-row hide-sm">
-      <button class="btn" onclick="openEvent()">+ RDV</button>
-      <button class="btn" onclick="openAbonne()">+ Abonné</button>
-      <button class="btn" onclick="openDossier()">+ Dossier</button>
+  const tete = `
+  <div class="page-head accueil-tete">
+    <div><h1>${salutDuMoment()}, Toufek</h1><p><span class="tete-jour">${esc(jourTxt)}</span> · ${esc(resume)}</p></div>
+    <div class="tete-actions hide-sm">
+      <button type="button" class="btn" id="btn-ajout" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-ajout" onclick="menuAjout()">+ Ajouter <span class="caret" aria-hidden="true">▾</span></button>
+      <div class="menu-ajout" id="menu-ajout" role="menu" aria-label="Ajouter" hidden>
+        ${[['rdv', 'Nouveau RDV', 'rdv'], ['dossier', 'Nouveau dossier', 'dossier'], ['abonne', 'Nouvel abonné', 'abonne']].map(([k, l, i]) => `<button type="button" role="menuitem" onclick="choixAjout('${k}')"><span class="mp-ico">${ICONES[i]}</span>${l}</button>`).join('')}
+      </div>
     </div>
   </div>
   <button type="button" class="noter-bar" onclick="openContact();focusNote()" aria-label="Noter quelqu'un que tu viens de croiser">
     <span class="noter-ico">${ICONES.noter}</span><span class="noter-txt">Noter quelqu'un…</span><span class="noter-aide">Une phrase : nom, service, rappel</span>
   </button>
-  ${empty ? `<div class="card notice"><div><h2>Ton tableau de bord est vide</h2><p class="empty">Ajoute un abonné, un dossier ou un RDV, ou charge un exemple pour voir comment tout se calcule.</p></div><button class="btn" onclick="loadDemo()">Charger un exemple</button></div>` : ''}
-  ${!empty && aDemo() ? `<div class="card notice"><div><h2>Des données d'exemple sont affichées</h2><p class="empty">Elles se mélangent à tes vraies données. Retire-les d'un clic : tes RDV, dossiers et abonnés réels restent.</p></div><button class="btn primary" onclick="retirerExemple()">Retirer l'exemple</button></div>` : ''}
+  ${!empty && aDemo() ? `<div class="notice mini"><span>Données d'exemple affichées</span> <span aria-hidden="true">·</span> <button type="button" onclick="retirerExemple()">Retirer</button></div>` : ''}
+  ${alertesHtml(alertes())}`;
+  if (empty) return tete + videAccueil();
+
+  /* Aujourd'hui : les retards d'abord, puis la journée ; 5 lignes, le reste se déplie */
+  const jourListe = [...retard.map(e => ({ ...e, retard: true })), ...todayItems];
+  const jourVis = accueilDeplie.jour ? jourListe : jourListe.slice(0, 5);
+  /* À rappeler : en cours, plus les « RDV planifié » dont le RDV est passé (ils attendent une suite) */
+  const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi' || rdvPasse(v)).sort(aVoirTri);
+  const annee = bilan('annee'), semaine = bilan('semaine');
+  const spark = serieMois(6).map(m => m.parts.reduce((s, x) => s + x.value, 0));
+  const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
+  const donutParts = b.rows.map(r => ({ k: r.k, label: SECTEURS[r.k].label, value: r.gagne }));
+  /* KGD Pro (lancement 2027) : pas de carte tant qu'il n'a ni gains ni temps */
+  const secteurs = b.rows.filter(r => r.k !== 'kgdpro' || r.gagne || r.prevu || r.total);
+
+  return tete + `
+  <div class="grid cols-2 agenda-row">
+    <div class="card jour-card"><div class="card-head"><div><h2>Aujourd'hui</h2><p class="meta">${retard.length ? `${retard.length} en retard à traiter d'abord` : (rdvJour.length ? `${pluriel(rdvJour.length, 'RDV', 'RDV')} · ${esc(hrs(minJour))}` : 'Journée libre')}</p></div><a class="link" href="#planning" onclick="event.preventDefault();allerAuJour(today());location.hash='#planning'">Journée →</a></div>
+      ${itemList(jourVis, false) || '<div class="empty">Rien de prévu aujourd\'hui, et rien en retard.</div>'}
+      ${plusAutres(jourListe.length - 5, accueilDeplie.jour, 'jour')}</div>
+    <div class="card rappel-card"><div class="card-head"><div><h2>À rappeler</h2><p class="meta">${contactsDus ? `${pluriel(contactsDus, 'contact')} à rappeler aujourd'hui` : contactsSuivis.length ? `${contactsSuivis.length} en cours, personne à rappeler aujourd'hui` : 'Personne en suivi'}</p></div><a class="link" href="#contacts" onclick="avFiltre='suivi'">Tous →</a></div>
+      ${contactsSuivis.length ? `<ul class="list">${contactsSuivis.slice(0, 5).map(v => aVoirItem(v, true)).join('')}</ul>${contactsSuivis.length > 5 ? `<a class="lien-btn plus-autres" href="#contacts" onclick="avFiltre='suivi'">+${contactsSuivis.length - 5} ${contactsSuivis.length > 6 ? 'autres' : 'autre'} →</a>` : ''}`
+        : '<div class="empty">Tu croises quelqu\'un, vous parlez d\'un service : note-le en 10 secondes, avec un rappel.</div>'}</div>
+  </div>
+  <div class="rang-tete"><h2>Tes chiffres</h2>${periodeSwitch()}</div>
   <div class="grid kpis">
-    <div class="card kpi"><div class="label">Gagné · ${PERIODES[p].toLowerCase()}</div><div class="value">${esc(eur(b.tot.gagne))}</div><div class="sub">+ ${esc(eur(b.tot.prevu))} encore attendu</div></div>
+    <div class="card kpi"><div class="label">Gagné · ${per}</div><div class="value">${esc(eur(b.tot.gagne))}</div><div class="sub">+ ${esc(eur(b.tot.prevu))} encore attendu</div></div>
     <div class="card kpi"><div class="label">Gagné · année</div><div class="value">${esc(eur(annee.tot.gagne))}</div><div class="sub spark-row">${sparkline(spark)}<span>6 derniers mois</span></div></div>
-    <div class="card kpi"><div class="label">KamiFood · par mois</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length} abonné(s) actif(s)</div></div>
-    <div class="card kpi"><div class="label">Planifié · semaine</div><div class="value">${esc(hrs(semaine.tot.total + semaine.perso.total))}</div><div class="sub">${semaine.tot.rdv} RDV · ${esc(hrs(semaine.tot.fait + semaine.perso.fait))} réalisées</div></div>
+    <div class="card kpi"><div class="label">KamiFood · par mois</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${pluriel(state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length, 'abonné actif', 'abonnés actifs')}</div></div>
+    <a class="card kpi kpi-lien" href="#contacts" onclick="avFiltre='suivi'" aria-label="À rappeler : ${contactsDus}"><div class="label">À rappeler</div><div class="value">${contactsDus}</div><div class="sub">${contactsRetard ? `<span class="late">dont ${contactsRetard} en retard</span>` : contactsDus ? 'aujourd\'hui · voir →' : 'personne aujourd\'hui'}</div></a>
   </div>
   <div class="grid cols-2 charts-row">
     <div class="card">
-      <div class="card-head"><div><h2>Gains par secteur</h2><p class="meta">Encaissé · ${PERIODES[p].toLowerCase()}</p></div>${periodeSwitch()}</div>
-      ${donut(donutParts, eur, `Encaissé · ${PERIODES[p].toLowerCase()}`)}
+      <div class="card-head"><div><h2>Gains par secteur</h2><p class="meta">Encaissé · ${per}</p></div></div>
+      ${donut(donutParts, eur, `Encaissé · ${per}`)}
     </div>
     <div class="card">
       <div class="card-head"><div><h2>Charge de la semaine</h2><p class="meta">Heures planifiées par jour · ${esc(hrs(semaine.tot.total + semaine.perso.total))} au total</p></div><a class="link" href="#planning">Planning →</a></div>
-      ${colonnes(charge, { fmt: hrs, fmtTick: v => v ? hrs(v) : '0', pas: pasTemps, vide: 'Aucun RDV cette semaine.', aria: 'Heures par jour' })}
+      ${colonnes(serieSemaine(monday(new Date())), { fmt: hrs, fmtTick: v => v ? hrs(v) : '0', pas: pasTemps, vide: 'Aucun RDV cette semaine.', aria: 'Heures par jour' })}
     </div>
   </div>
-  <div class="grid cols-2 agenda-row">
-    <div class="card"><div class="card-head"><div><h2>Aujourd'hui</h2><p class="meta">${retard.length ? `${retard.length} en retard à traiter d'abord` : (todayEv.length ? `${todayEv.length} RDV · ${esc(hrs(minJour))}` : 'Journée libre')}</p></div><a class="link" href="#planning">Planning →</a></div>
-      ${itemList([...retard.map(e => ({ ...e, retard: true })), ...todayItems], false) || '<div class="empty">Rien de prévu aujourd\'hui, et rien en retard.</div>'}</div>
-    <div class="card"><div class="card-head"><div><h2>7 prochains jours</h2><p class="meta">${next7.length} RDV · ${esc(hrs(next7.filter(compteHeures).reduce((s, e) => s + num(e.duree), 0)))}</p></div></div>
-      ${itemList(next7, true) || '<div class="empty">Aucun RDV planifié.</div>'}</div>
-  </div>
-  <div class="card avoir-card"><div class="card-head"><div><h2>Contacts</h2><p class="meta">${contactsDus ? `${contactsDus} à rappeler` : contactsSuivis.length ? `${contactsSuivis.length} en cours, rien à rappeler aujourd'hui` : 'Personne en suivi'}</p></div><div class="btn-row"><button class="btn small" onclick="openContact()">+ Prise de contact</button><a class="link" href="#contacts">Tous →</a></div></div>
-    ${contactsSuivis.length ? `<ul class="list">${contactsSuivis.slice(0, 5).map(v => aVoirItem(v, true)).join('')}</ul>` : '<div class="empty">Tu croises quelqu\'un, vous parlez d\'un service : note-le en 10 secondes, avec un rappel.</div>'}</div>
-  <div class="grid cols-4 sect-row">${b.rows.map(r => `<a class="card act-card" style="--c:var(--${r.k})" href="#${r.k === 'kamifood' ? 'kamifood' : r.k === 'kgdpro' ? 'gains' : 'dossiers'}" onclick="filtre.activite='${APPORT.includes(r.k) ? r.k : 'all'}'">
-      <div class="title"><span>${esc(SECTEURS[r.k].label)}</span><span class="meta">${PERIODES[p].toLowerCase()}</span></div>
+  <div class="card sept-jours"><div class="card-head"><div><h2>7 prochains jours</h2><p class="meta">${pluriel(next7.length, 'RDV', 'RDV')} · ${esc(hrs(next7.filter(compteHeures).reduce((s, e) => s + num(e.duree), 0)))}</p></div><a class="link" href="#planning">Planning →</a></div>
+    ${next7.length >= 4 ? `<div class="sept-cols">${itemList(next7.slice(0, Math.ceil(next7.length / 2)), true)}${itemList(next7.slice(Math.ceil(next7.length / 2)), true)}</div>` : itemList(next7, true) || '<div class="empty">Aucun RDV planifié.</div>'}</div>
+  <div class="grid cols-4 sect-row">${secteurs.map(r => `<a class="card act-card" style="--c:var(--${r.k})" href="#${r.k === 'kamifood' ? 'kamifood' : r.k === 'kgdpro' ? 'gains' : 'dossiers'}" onclick="filtre.activite='${APPORT.includes(r.k) ? r.k : 'all'}'">
+      <div class="title"><span>${esc(SECTEURS[r.k].label)}</span><span class="meta">${per}</span></div>
       <div class="big">${esc(eur(r.gagne))}</div>
       <dl><dt>Attendu</dt><dd>${esc(eur(r.prevu))}</dd><dt>Planifié</dt><dd>${esc(hrs(r.total))}</dd><dt>€ / heure</dt><dd>${esc(parHeure(r.gagne, r.total))}</dd>
       ${r.k === 'kamifood' ? `<dt>Abonnés actifs</dt><dd>${state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length}</dd>` : r.k === 'kgdpro' ? '<dt>Lancement</dt><dd>2027</dd>' : `<dt>Dossiers en cours</dt><dd>${state.dossiers.filter(d => d.activite === r.k && ACTIFS.includes(d.statut)).length}</dd>`}</dl>

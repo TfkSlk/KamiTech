@@ -141,7 +141,9 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   const ids6c = await p.evaluate(() => {
     const v = { id: 'plan3', createdAt: Date.now(), nom: 'Léa', entreprise: 'Hôtel Rhin', activite: 'kamifood', priorite: 'normale', statut: 'planifie', attente: '', rappel: '', historique: [] };
     const e = { id: 'evplan3', date: '2026-10-10', heure: '15:00', duree: 30, mode: 'visio', titre: 'Léa · démo KamiFood', activite: 'kamifood', lien: 'c:plan3', fait: false, notes: '' };
-    v.eventId = e.id; state.aVoir.push(v); state.events.push(e); save(); location.hash = '#dashboard'; render(); return { v: v.id, e: e.id };
+    v.eventId = e.id; state.aVoir.push(v); state.events.push(e); save(); location.hash = '#dashboard';
+    accueilDeplie.jour = true; // depuis A1, « Aujourd'hui » montre 5 lignes : on déplie la liste pour atteindre le RDV de 15:00
+    render(); return { v: v.id, e: e.id };
   });
   await p.waitForTimeout(80);
   await p.locator('li', { hasText: 'Léa · démo KamiFood' }).first().locator('input[type="checkbox"]').check();

@@ -487,7 +487,8 @@ function bilan(p) {
     { gagne: 0, prevu: 0, total: 0, fait: 0, rdv: 0 });
   return { rows, tot, perso };
 }
-const parHeure = (g, min) => min ? eur(g / (min / 60)) : '—';
+/* Gain par heure : « — » tant que rien n'est encaissé ou planifié (jamais « 0 € / h ») */
+const parHeure = (g, min) => min && g ? eur(g / (min / 60)) : '—';
 /* Premier lancement : rien de saisi, à part la licence éditeur (et les autres licences internes) */
 const estVide = () => !state.dossiers.length && !state.events.length && !state.aVoir.length && !state.abonnes.some(a => !a.interne);
 
@@ -529,8 +530,72 @@ function render() {
       <div class="btn-row">${view !== 'dashboard' ? '<a class="btn" href="#dashboard">Retour à l\'accueil</a>' : ''}<button class="btn primary" onclick="exporter()">Exporter (.json)</button></div></div>`;
   }
   $('#main').innerHTML = (donneesIllisibles ? carteIllisible() : '') + html;
+  dernierRendu = { jour: today(), t: Date.now() };
+  majPastille();
 }
 window.addEventListener('hashchange', render);
+
+/* ---------- Toujours à jour : l'appli reprise au matin (gardée en mémoire, onglet en arrière-plan) se redessine seule ----------
+   Au retour au premier plan, au retour arrière du navigateur (pageshow persisted) et chaque minute : si le jour a changé ou si
+   le dernier affichage a plus de 5 min, on redessine. Jamais pendant une saisie (fiche, Noter, menu, champ modifié non enregistré). */
+let dernierRendu = { jour: '', t: 0 };
+/* Un champ de la page a été modifié sans être enregistré (recherche, réglages, message à Kami…) */
+function saisieEnCours() {
+  return [...document.querySelectorAll('#main input, #main textarea, #main select')].some(el => {
+    if (el.tagName === 'SELECT') { const d = [...el.options].findIndex(o => o.defaultSelected); return el.selectedIndex !== (d < 0 ? 0 : d); }
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked !== el.defaultChecked;
+    return el.type !== 'file' && el.value !== el.defaultValue;
+  });
+}
+const menuOuvert = () => !!($('#menu-plus') && !$('#menu-plus').hidden) || !!($('#menu-ajout') && !$('#menu-ajout').hidden);
+function rafraichir() {
+  if (document.visibilityState !== 'visible') return;
+  const jour = today(), nouveauJour = jour !== dernierRendu.jour;
+  if (!nouveauJour && Date.now() - dernierRendu.t <= 5 * 60e3) return;
+  /* La conversation avec Kami ne dépend pas de l'heure : seul un nouveau jour la redessine, jamais pendant une réponse */
+  if (!nouveauJour && location.hash === '#jarvis') return;
+  if (occupe() || couches.length || $('#confirm').open || menuOuvert() || saisieEnCours() || jarvisOccupe) return;
+  if (nouveauJour) {
+    /* Le planning affichait « aujourd'hui » : il suit le nouveau jour ; les listes de l'accueil se replient */
+    if (typeof planDate === 'string' && planDate === dernierRendu.jour) planDate = jour;
+    accueilDeplie.alertes = accueilDeplie.jour = false;
+  }
+  render();
+}
+document.addEventListener('visibilitychange', rafraichir);
+window.addEventListener('pageshow', e => { if (e.persisted) rafraichir(); });
+setInterval(rafraichir, 60e3);
+
+/* Pastille de l'icône (appli installée) : contacts à rappeler, relances en retard et alertes de demain ou du jour */
+function pastille() {
+  const t = today();
+  return rappelsContacts().length + relances().filter(r => r.date < t).length + alertes().filter(a => a.niveau === 'fort').length;
+}
+function majPastille() {
+  try {
+    const n = pastille();
+    const r = n ? navigator.setAppBadge?.(n) : navigator.clearAppBadge?.();
+    if (r && typeof r.catch === 'function') r.catch(() => { /* refusée (appli non installée) : sans conséquence */ });
+  } catch (e) { /* API absente : rien à afficher */ }
+}
+
+/* Accueil à l'ordinateur : « + Ajouter ▾ » (RDV, dossier, abonné) */
+function menuAjout(ouvrir) {
+  const m = $('#menu-ajout'), b = $('#btn-ajout');
+  if (!m) return false;
+  const on = ouvrir ?? m.hidden;
+  m.hidden = !on; b?.setAttribute('aria-expanded', String(on));
+  if (on) m.querySelector('button')?.focus({ preventScroll: true });
+  return true;
+}
+function fermerMenuAjout() { const m = $('#menu-ajout'); if (!m || m.hidden) return false; menuAjout(false); return true; }
+function choixAjout(k) {
+  fermerMenuAjout();
+  if (k === 'rdv') openEvent(null, today());
+  else if (k === 'dossier') openDossier();
+  else if (k === 'abonne') openAbonne();
+}
+document.addEventListener('pointerdown', e => { if (!e.target.closest || !e.target.closest('#menu-ajout, #btn-ajout')) fermerMenuAjout(); }, true);
 
 /* Carte rouge en tête quand les données stockées sont illisibles : rien n'est écrit tant qu'aucun choix n'est fait */
 function carteIllisible() {
@@ -579,7 +644,7 @@ function itemList(items, showDate) {
     return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''}">
       ${e.contact ? `<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
       <div class="grow clickable" onclick="${click}">
-        <div class="when ${late ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
+        <div class="when ${late || (e.contact && e.retard) ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
         <div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
       </div>
       <i class="dot" style="background:var(--${e.activite})" data-tip="${esc(SECTEURS[e.activite]?.label || '')}" aria-label="${esc(SECTEURS[e.activite]?.label || '')}"></i>
@@ -1352,6 +1417,35 @@ function rappelsContacts() {
   });
   return [...dus, ...passes];
 }
+/* Alertes de l'accueil, triées par date, avec un compte à rebours (Aujourd'hui, Demain, J-N) :
+   - un RDV important non fait dans les 30 jours (une période importante déjà commencée compte jusqu'à sa fin) ;
+   - une période « à prévoir » non faite qui finit dans 7 jours ou moins, sans aucun RDV (hors période) du même client dedans.
+   niveau 'fort' à J-1 ou moins, 'clair' sinon. action : le code à lancer au toucher (ids assainis). G1 y ajoutera l'argent en retard. */
+function alertes() {
+  const t = today(), j30 = iso(addDays(parse(t), 30));
+  const dans = d => Math.round((parse(d) - parse(t)) / 864e5);
+  const ligne = (e, date, sous) => {
+    const n = dans(date);
+    return { date, heure: date === e.date ? e.heure || '' : '', jours: n, compte: n <= 0 ? 'Aujourd\'hui' : n === 1 ? 'Demain' : `J-${n}`,
+      titre: e.titre || 'Sans titre', sous, niveau: n <= 1 ? 'fort' : 'clair', id: e.id, action: `openEvent('${e.id}')` };
+  };
+  const out = [];
+  state.events.forEach(e => {
+    if (e.fait || !e.date) return;
+    const fin = finRdv(e);
+    const cale = () => !!e.lien && state.events.some(x => !estPeriode(x) && x.lien === e.lien && x.date >= e.date && x.date <= fin);
+    if (e.aPrevoir && estPeriode(e) && fin >= t && dans(fin) <= 7 && !cale()) {
+      const n = dans(fin);
+      out.push(ligne(e, fin, `Créneau toujours pas calé, ${n <= 0 ? 'c\'est le dernier jour' : `il reste ${n} j`}`));
+    } else if (e.important) {
+      const d = estPeriode(e) && e.date < t ? fin : e.date;
+      if (d < t || d > j30) return;
+      const quand = d === e.date ? jourLong(d) + (e.heure ? ' à ' + e.heure : '') : `en cours jusqu'au ${jourLong(fin)}`;
+      out.push(ligne(e, d, [quand.charAt(0).toUpperCase() + quand.slice(1), lienNom(e.lien) || e.lieu || ''].filter(Boolean).join(' · ')));
+    }
+  });
+  return out.sort((a, b) => a.date.localeCompare(b.date) || (a.heure || '99').localeCompare(b.heure || '99'));
+}
 /* Dates lisibles : « mardi 13 oct. » et « jeu. 15 oct. » */
 const jourLong = s => s ? parse(s).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' }) : '';
 const jourCourt = s => s ? parse(s).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
@@ -1845,6 +1939,7 @@ function rencRender() {
 /* Ctrl ou Cmd + Entrée : Enregistrer (Noter ou récapitulatif) ; Échap ferme la Rencontre, le brouillon reste */
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && fermerMenuPlus()) { e.preventDefault(); return; }
+  if (e.key === 'Escape' && fermerMenuAjout()) { e.preventDefault(); $('#btn-ajout')?.focus({ preventScroll: true }); return; }
   if (!renc || $('#rencontre').hidden || document.querySelector('dialog[open]')) return;
   if (e.key === 'Escape') { e.preventDefault(); quitterRencontre(); }
   else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) {
@@ -2110,11 +2205,15 @@ function aVoirItem(v, compact) {
     : jours < 0 ? `Rappel dépassé de ${-jours} j`
     : jours === 0 ? 'Rappel aujourd\'hui'
     : jours === 1 ? 'Rappel demain' : `Rappel dans ${jours} j`;
-  const attente = v.attente ? `<span class="status ${v.attente === 'lui' ? 'signe' : 'perdu'}">${ATTENTES[v.attente]}</span>` : '';
-  return `<li class="${late || passe || (ouvert && jours === 0) ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${ouvert && v.attente ? 'alerte' : ''}">
+  /* Le rouge est réservé à l'urgent : un rappel dépassé, ou une information que je dois et dont le rappel est arrivé.
+     Qui attend quoi reste visible, en gris argent (neutre). */
+  const alerte = ouvert && jours !== null && (jours < 0 || (v.attente === 'moi' && jours <= 0));
+  const attente = v.attente === 'lui' ? `<span class="status att-lui" title="${esc(ATTENTES.lui)}">↩ ${estElle(v) ? 'Elle' : 'Il'} te doit</span>`
+    : v.attente === 'moi' ? `<span class="status att-moi" title="${esc(ATTENTES.moi)}">↪ Tu lui dois</span>` : '';
+  return `<li class="${late || passe ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''}">
     <div class="grow clickable" onclick="openAVoir('${v.id}')">
-      <div class="when ${late || passe ? 'late' : ''}">${esc(when)}</div>
-      <div class="title-txt">${ouvert && v.attente ? '<span class="warn-ico" title="En attente">⚠</span> ' : ''}${esc(v.nom)}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
+      <div class="when ${late || passe ? 'late' : ouvert && jours === 0 ? 'du' : ''}">${esc(when)}</div>
+      <div class="title-txt">${alerte ? '<span class="warn-ico" title="À traiter">⚠</span> ' : ''}${esc(v.nom)}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
       <div class="meta">${d ? `${esc(fmtDate(d.date))} : ${esc(d.texte)}` : 'Aucune prise de contact notée'}</div>
     </div>
     ${ouvert || passe ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
@@ -2193,6 +2292,7 @@ function projection() {
       kamifoodGains: stripeReel() ? 'factures Stripe payées' : 'estimation au prorata des jours d\'abonnement',
       dossiersEnCours: state.dossiers.filter(d => ACTIFS.includes(d.statut)).length,
       contactsARappeler: rappelsContacts().length, contactsEnAttente: state.aVoir.filter(v => v.statut === 'suivi' && v.attente).length,
+      alertes: alertes().map(({ date, compte, titre, sous, niveau }) => ({ date, compte, titre, sous, niveau })),
       enRetard: relances().filter(r => r.date < t).length + state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t)).length + rappelsContacts().filter(r => r.date < t).length,
     },
     formules: state.formules, rdvModele: state.rdvModele, memoire: state.memoire,

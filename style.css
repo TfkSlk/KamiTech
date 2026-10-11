@@ -153,6 +153,8 @@ main { padding: 30px 34px 70px; max-width: 1240px; width: 100%; min-width: 0; }
 .status.signe { color: var(--energie); }
 .status.paye { color: var(--ok); }
 .status.perdu { color: var(--danger); }
+/* Qui attend quoi : neutre, en gris argent (le rouge est réservé aux retards et aux alertes) */
+.status.att-lui, .status.att-moi { padding: 1px 8px; border: 1px solid var(--argent-bord); background: linear-gradient(180deg, var(--argent-1), var(--argent-2)); color: var(--argent-texte); }
 
 /* ---------- Listes ---------- */
 .list { list-style: none; margin: 0; padding: 0; }
@@ -162,7 +164,8 @@ main { padding: 30px 34px 70px; max-width: 1240px; width: 100%; min-width: 0; }
 .list .title-txt { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .list .when { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-bottom: 1px; }
 .list li.retard { border-left: 3px solid var(--danger); padding-left: 10px; margin-left: -12px; background: linear-gradient(to right, color-mix(in srgb, var(--danger) 6%, transparent), transparent 60%); }
-.list .late { color: var(--danger); font-weight: 600; }
+.list .late, .kpi .late { color: var(--danger); font-weight: 600; }
+.list .when.du { color: var(--text); font-weight: 600; } /* rappel du jour : à faire, pas en retard */
 .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
 .clickable { cursor: pointer; }
 .clickable:hover .title-txt { color: var(--accent); }
@@ -392,12 +395,8 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
   .spark { width: 100%; height: 28px; }
   main { display: flex; flex-direction: column; }
   main > * { width: 100%; }
-  .page-head { order: -2; }
-  .notice { order: -1; }
-  .alerte-donnees { order: -3; }
   .alerte-donnees .btn-row { width: 100%; }
   .alerte-donnees .btn-row .btn { flex: 1 1 auto; justify-content: center; text-align: center; }
-  .agenda-row { order: -1; }
   .chart .tick { font-size: 13px; }
   .chart .val { font-size: 14px; }
   .chart-card .chart { max-height: none; }
@@ -406,7 +405,6 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
   .plan-tools .primary { display: none; }
   #fab { display: grid; place-items: center; position: fixed; right: 16px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 56px; height: 56px; border-radius: 50%; font-size: 28px; line-height: 1; padding: 0; z-index: 6; -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
   #fab svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
-  .noter-bar { order: -2; }
   .noter-aide { display: none; }
   #toast { bottom: calc(142px + env(safe-area-inset-bottom, 0px)); } /* au-dessus du bouton + flottant */
   input[type="checkbox"] { width: 22px; height: 22px; }
@@ -428,7 +426,6 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
 }
 
 /* À voir */
-.avoir-card { margin-top: 16px; }
 .list li .btn.small { flex-shrink: 0; }
 .list li .title-txt .meta { font-weight: 400; }
 .rappels { margin-bottom: 8px; }
@@ -618,7 +615,6 @@ body.no-scroll { overflow: hidden; }
 .vide-licence:hover { color: var(--text); }
 .vide-licence .status { flex: none; }
 .vide-licence span:last-child { min-width: 0; }
-@media (max-width: 760px) { .vide-kf { order: -1; } }
 /* Date de résiliation posée automatiquement : à corriger */
 .field label .estimee { color: var(--accent); font-weight: 600; font-size: 11.5px; white-space: nowrap; }
 
@@ -749,4 +745,78 @@ body.no-scroll { overflow: hidden; }
   .puces .chip { padding: 0 11px; font-size: 14px; }
   .rang { gap: 10px; }
   .rang .field.heure { flex-basis: 118px; }
+}
+
+/* ---------- Accueil du matin : l'ordre du DOM est l'ordre affiché, au téléphone comme à l'ordinateur ---------- */
+.accueil-tete .tete-jour { color: var(--text-2); font-weight: 500; }
+.tete-actions { position: relative; flex: none; }
+.tete-actions .caret { margin-left: 2px; font-size: 11px; color: var(--muted); }
+#btn-ajout[aria-expanded="true"] { border-color: var(--text-2); background: var(--surface-2); }
+.menu-ajout { position: absolute; top: calc(100% + 6px); right: 0; z-index: 8; min-width: 230px; padding: 6px; display: grid; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-lg); transform-origin: top right; animation: menu-plus .14s ease-out; }
+.menu-ajout[hidden] { display: none; }
+.menu-ajout button { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 14px 0 6px; border: 0; border-radius: 10px; background: none; color: var(--text); font: inherit; font-size: 15px; font-weight: 500; text-align: left; cursor: pointer; }
+.menu-ajout button:hover, .menu-ajout button:focus-visible { background: var(--surface-2); }
+.menu-ajout .mp-ico svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Une ligne discrète quand l'exemple est chargé */
+.notice.mini { display: flex; flex-wrap: nowrap; justify-content: flex-start; align-items: center; gap: 8px; margin: -6px 0 12px; padding: 0 4px; font-size: 13px; color: var(--muted); }
+.notice.mini::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--argent-bord); }
+.notice.mini button { border: 0; background: none; padding: 6px 2px; min-height: 32px; color: var(--text); font: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; cursor: pointer; }
+
+/* Bandeau Alertes : compte à rebours ; pastille rouge à J-1 ou moins, argent sinon */
+.alertes { margin-bottom: 16px; padding: 14px 16px 8px 18px; border-left: 3px solid var(--text); }
+.alertes.fort { border-left-color: var(--accent); }
+.alertes-tete { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0 0 4px; }
+.alertes-tete h2, .rang-tete h2 { margin: 0; font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); }
+.alertes-liste { list-style: none; margin: 0; padding: 0; }
+.alerte-ligne + .alerte-ligne { border-top: 1px solid var(--border); }
+.alerte-ligne button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 54px; padding: 8px 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.alerte-ligne .compte { flex: none; display: inline-grid; place-items: center; width: 100px; height: 30px; padding: 0 6px; border-radius: 99px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+  border: 1px solid var(--argent-bord); background: linear-gradient(180deg, var(--argent-1), var(--argent-2)); color: var(--argent-texte); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 1px 1px rgba(20, 22, 30, .06); }
+.alerte-ligne.fort .compte { border-color: var(--accent); background: var(--accent); color: var(--accent-contrast); box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 28%, transparent); }
+.a-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.a-titre { font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.a-sous { color: var(--muted); font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.a-chevron { flex: none; color: var(--muted); font-size: 22px; line-height: 1; padding-right: 2px; }
+.alerte-ligne button:hover .a-titre { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+.plus-autres { display: inline-flex; align-items: center; padding: 6px 0 0; font-size: 13.5px; text-decoration: none; }
+.plus-autres:hover { text-decoration: underline; }
+
+/* Aujourd'hui et À rappeler : côte à côte à l'ordinateur, mêmes hauteurs */
+.agenda-row > .card { display: flex; flex-direction: column; }
+.agenda-row .plus-autres { margin-top: 2px; }
+
+/* En-tête de la rangée des chiffres : la période se choisit ici */
+.rang-tete { display: flex; align-items: center; justify-content: space-between; gap: 10px 14px; flex-wrap: wrap; margin: 6px 2px 12px; }
+a.kpi-lien { display: block; color: inherit; text-decoration: none; transition: border-color .15s, box-shadow .15s; }
+a.kpi-lien:hover { border-color: var(--border-strong); box-shadow: var(--shadow-lg); }
+
+.sept-jours { margin-bottom: 16px; }
+/* Deux colonnes à l'ordinateur (dans l'ordre des jours), une seule liste continue au téléphone */
+.sept-cols > .list + .list { border-top: 1px solid var(--border); }
+@media (min-width: 901px) {
+  .sept-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 44px; }
+  .sept-cols > .list + .list { border-top: 0; }
+}
+
+/* Premier lancement : trois gestes guidés et un exemple */
+.vide-accueil { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; border-left: 3px solid var(--text); }
+.vide-accueil h2 { margin: 0 0 4px; font-size: 17px; }
+.vide-accueil .meta { margin: 0; max-width: 62ch; font-size: 14px; }
+.vide-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.vide-action { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 14px 10px 10px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.vide-action:hover { border-color: var(--text-2); box-shadow: var(--shadow-lg); }
+.va-ico { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--argent-bord); background: linear-gradient(180deg, var(--argent-1), var(--argent-2)); color: var(--argent-texte); }
+.va-ico svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.va-txt { display: flex; flex-direction: column; min-width: 0; }
+.va-txt b { font-size: 15px; font-weight: 600; }
+.va-txt small { color: var(--muted); font-size: 12.5px; line-height: 1.35; }
+.vide-accueil .lien-btn { padding-top: 0; }
+@media (max-width: 760px) {
+  .vide-actions { grid-template-columns: 1fr; }
+  .alertes { padding: 12px 14px 6px 16px; }
+  .alerte-ligne .compte { width: 90px; padding: 0 4px; font-size: 12px; }
+  .alerte-ligne button { gap: 11px; }
+  .rang-tete .seg button { padding: 5px 10px; }
 }
