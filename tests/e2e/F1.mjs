@@ -19,10 +19,22 @@ const ok = m => m.modal && m.corps && m.bas;
 const volet = async (p, i) => { await p.click(`#modal #volet-${i}`); await pause(p, 60); };
 const fermerFiche = async p => { await p.evaluate(() => { if (document.querySelector('#modal').open) document.querySelector('#modal').close(); }); await pause(p, 150); };
 const toastTexte = p => p.evaluate(() => { const t = document.querySelector('#toast'); return { show: t.classList.contains('show'), msg: t.firstChild ? t.firstChild.textContent : '', action: t.querySelector('.toast-action')?.textContent || '' }; });
+/* Un vrai geste : glisser du doigt (événements tactiles) au téléphone, molette à l'ordinateur */
+async function glisser(p, x, y, dy, tactile) {
+  if (!tactile) { await p.mouse.move(x, y); await p.mouse.wheel(0, dy); return; }
+  const c = await p.context().newCDPSession(p), pas = 12;
+  await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  for (let k = 1; k <= pas; k++) await c.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y - (dy * k) / pas }] });
+  await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await c.detach();
+}
 const visible = (p, sel) => p.evaluate(s => { const e = document.querySelector(s); if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; }, sel);
 
 const NOTES300 = ('Signature du contrat de fourniture : apporter le mandat, les deux dernières factures, le RIB et le Kbis. '
   + 'Le gérant veut comparer avec l\'offre de son fournisseur actuel avant de signer ; prévoir le tableau comparatif imprimé. ').repeat(2).slice(0, 300);
+/* Un échange de 479 caractères (la fin compte : le code du portail) et un échange de plus de 3 000 caractères, sur plusieurs paragraphes */
+const TEXTE479 = 'Rendez-vous au salon de l\'habitat avec le gérant et son associé : ils ont trois sites (Strasbourg, Colmar, Mulhouse), des contrats d\'électricité qui se terminent en mars, une chaudière fioul à remplacer dans l\'entrepôt de Colmar, et la taxe foncière de Mulhouse a doublé en deux ans. Il m\'envoie les factures des trois sites, le dernier avis de taxe foncière et le devis de son chauffagiste. Point important : le code du portail est 4521 et il ne faut appeler que le mardi matin.';
+const TRES_LONG = Array.from({ length: 7 }, (_, i) => `${i + 1}. ${TEXTE479}`).join('\n\n');
 
 /* Données de test : un RDV aux notes longues, un contact au journal de 20 entrées, Mme Roth avec un téléphone, un abonné avec des RDV passés et à venir */
 const preparer = p => p.evaluate(notes => {
@@ -87,10 +99,14 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
       }
       verifier(`${ecran} 1. fiche contact : les 5 dernières lignes puis « Tout le journal (20) »`, cinq === 5 && lien.includes('Tout le journal (20)'), JSON.stringify({ cinq, lien }));
       verifier(`${ecran} 1. journal complet paginé par 8 (8, 8, 4 ; 1/3 → 3/3) : aucune page ne défile`, pages.map(x => x.n).join(',') === '8,8,4' && pages[2].page === '3 / 3' && pages.every(ok), JSON.stringify(pages.map(x => ({ n: x.n, page: x.page, h: x.h }))));
-      /* Un toucher sur une ligne l'ouvre en entier, sans faire défiler la fiche */
+      /* Un toucher sur une ligne ouvre l'échange en entier à la place du bloc, sans faire défiler la fiche ; « ‹ Journal » ramène à sa page */
       await p.click('#fiche-vue .journal li:nth-child(2)'); await pause(p, 60);
-      const ouverte = await p.evaluate(() => ({ cl: document.querySelector('#fiche-vue .journal li:nth-child(2)').className }));
-      verifier(`${ecran} 1. une ligne du journal touchée s'ouvre en entier, la fiche ne défile toujours pas`, /ouvert/.test(ouverte.cl) && ok(await mesure(p)), JSON.stringify(ouverte));
+      const ouverte = await p.evaluate(() => { const e = document.querySelector('#echange'); return { texte: e && e.textContent, attendu: [...aVoir('c20').historique].reverse()[17].texte, entier: !!e && e.scrollHeight <= e.clientHeight + 1, retour: document.querySelector('#fiche-vue .journal-tete .btn')?.textContent.trim(), rang: document.querySelector('#fiche-vue .pager span')?.textContent }; });
+      const okOuverte = ok(await mesure(p));
+      await p.click('#fiche-vue .journal-tete .btn:has-text("Journal")'); await pause(p, 60);
+      const page3 = await p.evaluate(() => document.querySelector('#fiche-vue .pager span')?.textContent);
+      verifier(`${ecran} 1. une ligne du journal touchée s'ouvre en entier (18 / 20), la fiche ne défile pas ; « ‹ Journal » ramène à la page 3`,
+        ouverte.texte === ouverte.attendu && ouverte.entier && ouverte.retour === '‹ Journal' && ouverte.rang === '18 / 20' && okOuverte && page3 === '3 / 3', JSON.stringify({ ...ouverte, okOuverte, page3 }));
     }
     /* Le menu ⋯ ouvert ne fait rien déborder */
     if (await p.$('#modal .sheet-plus')) {
@@ -103,6 +119,51 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   if (telephone) {
     const petites = tailles.filter(t => parseFloat(t.split(':').pop()) < 16);
     verifier(`${ecran} 2. aucun input, select ou textarea de #modal sous 16px (${tailles.length} champs, toutes fiches et volets)`, tailles.length > 40 && !petites.length, petites.join(', '));
+  }
+
+  /* ---------- 1 bis. Journal aux échanges longs (20 échanges de 300 caractères et plus) : un échange ouvert se lit en entier,
+     la fiche ne déborde jamais et « Tout le journal » reste visible ---------- */
+  {
+    await p.evaluate(({ t, long }) => {
+      const h = [];
+      for (let i = 0; i < 20; i++) h.push({ date: `2026-09-${String(i + 1).padStart(2, '0')}`, texte: i === 19 ? t : i === 18 ? long : (t + ' ' + t).slice(0, 300 + i * 20) });
+      state.aVoir.push({ id: 'cLong20', createdAt: 1, nom: 'Gérant trois sites', entreprise: 'Transports Weber', activite: 'energie', priorite: 'normale', statut: 'suivi', attente: 'lui', rappel: '2026-10-12', tel: '06 11 22 33 44', historique: h });
+      save();
+    }, { t: TEXTE479, long: TRES_LONG });
+    await p.evaluate(() => openAVoir('cLong20')); await pause(p, 250);
+    const lienVisible = () => p.evaluate(() => { const l = [...document.querySelectorAll('#modal .lien-btn')].find(b => /Tout le journal/.test(b.textContent)), b = document.querySelector('#modal .sheet-body'); if (!l) return false; const r = l.getBoundingClientRect(), br = b.getBoundingClientRect(); return r.height > 0 && r.bottom <= br.bottom + 1 && r.top >= br.top - 1; });
+    const fiche0 = { ...await mesure(p), lien: await lienVisible() };
+    /* La ligne la plus récente (479 caractères) : tout le texte, rien de coupé */
+    await p.click('#fiche-vue .journal li:nth-child(1)'); await pause(p, 80);
+    const e1 = await p.evaluate(() => { const e = document.querySelector('#echange'), cs = e && getComputedStyle(e); return e && { n: e.textContent.length, egal: e.textContent === aVoir('cLong20').historique[19].texte, entier: e.scrollHeight <= e.clientHeight + 1, clamp: cs.webkitLineClamp, retour: document.querySelector('#fiche-vue .journal-tete .btn').textContent.trim(), rang: document.querySelector('#fiche-vue .pager span').textContent }; });
+    const m1 = await mesure(p);
+    await capture(p, `f1-${largeur}-echange-ouvert`);
+    verifier(`${ecran} 1 bis. échange de 479 caractères ouvert d'un toucher : lisible en entier (sans line-clamp), la fiche ne déborde pas`,
+      ok(fiche0) && fiche0.lien && e1 && e1.egal && e1.entier && e1.clamp === 'none' && e1.retour === '‹ Fiche' && e1.rang === '1 / 20' && ok(m1), JSON.stringify({ fiche0: fiche0.h, lien: fiche0.lien, e1, m1: m1.h }));
+    /* › : l'échange suivant, très long (plus de 3 000 caractères) : il défile dans sa propre zone, jamais la fiche */
+    await p.click('#fiche-vue .pager button[aria-label="Plus ancien"]'); await pause(p, 80);
+    const e2 = await p.evaluate(() => { const e = document.querySelector('#echange'); const r = e.getBoundingClientRect(); return { n: e.textContent.length, defile: e.scrollHeight > e.clientHeight + 1, oy: getComputedStyle(e).overflowY, x: r.left + r.width / 2, y: r.top + r.height / 2, rang: document.querySelector('#fiche-vue .pager span').textContent }; });
+    const m2 = await mesure(p);
+    await glisser(p, e2.x, e2.y + 60, 150, telephone);
+    await pause(p, 400);
+    const defile = await p.evaluate(() => ({ echange: document.querySelector('#echange').scrollTop, corps: document.querySelector('#modal .sheet-body').scrollTop }));
+    verifier(`${ecran} 1 bis. échange de ${e2.n} caractères (2 / 20) : il défile dans sa zone au geste, la fiche ne défile pas`,
+      e2.n > 3000 && e2.defile && e2.oy === 'auto' && e2.rang === '2 / 20' && ok(m2) && defile.echange > 0 && defile.corps === 0, JSON.stringify({ e2, m2: m2.h, defile }));
+    /* « ‹ Fiche » : retour à la fiche, « Tout le journal (20) » toujours visible */
+    await p.click('#fiche-vue .journal-tete .btn:has-text("Fiche")'); await pause(p, 80);
+    const retour = { ...await mesure(p), lien: await lienVisible(), resume: await p.evaluate(() => !!document.querySelector('#fiche-resume')) };
+    verifier(`${ecran} 1 bis. « ‹ Fiche » : la fiche revient, « Tout le journal (20) » visible, rien ne déborde`, retour.resume && retour.lien && ok(retour), retour.h);
+    /* Depuis « Tout le journal » : une ligne de la page 2 s'ouvre en entier, « ‹ Journal » ramène à la page 2 */
+    await p.click('#modal .lien-btn'); await pause(p, 60);
+    await p.click('#modal .pager button[aria-label="Plus anciens"]'); await pause(p, 60);
+    await p.click('#fiche-vue .journal li:nth-child(3)'); await pause(p, 80);
+    const e3 = await p.evaluate(() => { const e = document.querySelector('#echange'); return { egal: e.textContent === [...aVoir('cLong20').historique].reverse()[10].texte, n: e.textContent.length, entier: e.scrollHeight <= e.clientHeight + 1, rang: document.querySelector('#fiche-vue .pager span').textContent }; });
+    const m3 = await mesure(p);
+    await p.click('#fiche-vue .journal-tete .btn:has-text("Journal")'); await pause(p, 60);
+    const page = await p.evaluate(() => ({ page: document.querySelector('#fiche-vue .pager span')?.textContent, n: document.querySelectorAll('#fiche-vue .journal li').length }));
+    verifier(`${ecran} 1 bis. « Tout le journal », page 2 : l'échange touché (${e3.n} car.) se lit en entier, « ‹ Journal » ramène à la page 2`,
+      e3.egal && e3.entier && e3.rang === '11 / 20' && ok(m3) && page.page === '2 / 3' && page.n === 8 && ok(await mesure(p)), JSON.stringify({ e3, m3: m3.h, page }));
+    await fermerFiche(p);
   }
 
   /* ---------- 2. Ouverture en tactile : pas de champ actif (ni clavier ni zoom) ; à l'ordinateur, le titre est prêt à taper ---------- */
@@ -251,6 +312,57 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     verifier(`${ecran} 4. confirmer() n'est plus appelé par les 4 suppressions`, sources.every(x => !x), JSON.stringify(sources));
   }
 
+  /* ---------- 4 bis. Double clic ou double toucher sur ce qui ferme la fiche : le second ne tombe pas sur la page dessous ---------- */
+  {
+    const doubleClic = async sel => {
+      const b = await p.evaluate(s => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+      if (telephone) { await p.touchscreen.tap(b.x, b.y); await p.waitForTimeout(80); await p.touchscreen.tap(b.x, b.y); }
+      else await p.mouse.dblclick(b.x, b.y);
+      return b;
+    };
+    const apres = () => p.evaluate(() => ({ hash: location.hash, fiche: document.querySelector('#modal').open ? document.querySelector('#modal-titre').textContent : '', noter: !document.querySelector('#rencontre').hidden }));
+    /* Supprimer (menu ⋯) : sous le menu, une ligne de la liste (ordinateur, #dossiers) ou « + Abonné » (téléphone, #kamifood) */
+    const vue = telephone ? '#kamifood' : '#dossiers';
+    await p.evaluate(v => { location.hash = v; }, vue); await pause(p, 250);
+    const photo = () => p.evaluate(() => JSON.stringify(['events', 'dossiers', 'abonnes', 'aVoir'].map(k => state[k])));
+    const avant = await photo();
+    const ouvrirMenu = async () => {
+      if (telephone) await p.evaluate(() => openAbonne(state.abonnes.find(a => a.restaurant === 'Le Petit Zinc').id));
+      else await p.evaluate(id => openDossier(id), ids.garage);
+      await pause(p, 250);
+      await p.click('#modal .sheet-plus'); await pause(p, 100);
+    };
+    /* Ce qui est sous « Supprimer », dans la page (vu fiche fermée) : le second clic y tombait */
+    await ouvrirMenu();
+    const sous = await p.evaluate(() => { const m = document.querySelector('#modal'), r = m.querySelector('.sheet-menu .danger').getBoundingClientRect(); m.close(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); const c = e && e.closest('button, a, li, tr, [onclick]'); return c ? c.textContent.trim().replace(/\s+/g, ' ').slice(0, 30) : ''; });
+    await pause(p, 200);
+    await ouvrirMenu();
+    await doubleClic('#modal .sheet-menu .danger');
+    await pause(p, 120);
+    const r1 = await apres();
+    const t1 = await toastTexte(p);
+    /* « Annuler » du toast répond tout de suite, même dans la demi-seconde */
+    await p.click('#toast.show .toast-action'); await pause(p, 200);
+    const remis = (await photo()) === avant;
+    verifier(`${ecran} 4 bis. double ${telephone ? 'toucher' : 'clic'} sur « Supprimer » (${vue}, dessous : « ${sous} ») : aucune autre fiche ne s'ouvre, « Annuler » répond aussitôt`,
+      !!sous && r1.hash === vue && !r1.fiche && !r1.noter && t1.msg.startsWith('Supprimé') && t1.action === 'Annuler' && remis, JSON.stringify({ r1, t1, remis }));
+    /* Enregistrer : au téléphone, dessous il y a les onglets (le second toucher changeait de vue) */
+    await p.evaluate(() => { location.hash = '#planning'; }); await pause(p, 250);
+    await p.evaluate(() => openEvent('ev300')); await pause(p, 250);
+    await doubleClic('#modal .modal-actions .btn.primary');
+    await pause(p, 400);
+    const r2 = await apres();
+    verifier(`${ecran} 4 bis. double ${telephone ? 'toucher' : 'clic'} sur « Enregistrer » : la fiche se ferme, la vue reste le planning, rien d'autre ne s'ouvre`, r2.hash === '#planning' && !r2.fiche && !r2.noter, JSON.stringify(r2));
+    /* Un clic ailleurs, juste après la fermeture, n'est pas ignoré */
+    await p.evaluate(() => openEvent('ev300')); await pause(p, 250);
+    await p.click('#modal .sheet-fermer');
+    const nav = telephone ? '#nav a[href="#dossiers"]' : '#nav a[href="#contacts"]';
+    await p.click(nav); await pause(p, 250);
+    const r3 = await apres();
+    verifier(`${ecran} 4 bis. fiche fermée par ✕ puis, aussitôt, un clic ailleurs (onglet) : il est pris en compte`, r3.hash === (telephone ? '#dossiers' : '#contacts') && !r3.fiche, JSON.stringify(r3));
+    await p.evaluate(() => { location.hash = '#dashboard'; }); await pause(p, 200);
+  }
+
   /* ---------- 5. Fiche contact de Mme Roth : résumé, Appeler, Supprimer caché dans ⋯ ---------- */
   {
     await p.evaluate(id => openAVoir(id), ids.roth); await pause(p, 250);
@@ -284,6 +396,39 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await p.click('#modal .modal-actions .btn.primary'); await pause(p, 200);
     const j2 = await p.evaluate(() => { const v = state.aVoir.find(x => x.nom === 'Julien'); return { priorite: v.priorite, attente: v.attente, ouvert: document.querySelector('#modal').open }; });
     verifier(`${ecran} 5. volet Suivi : priorité haute et « Rien en attente » enregistrés`, j2.priorite === 'haute' && j2.attente === '' && !j2.ouvert, JSON.stringify(j2));
+  }
+
+  /* ---------- 5 bis. Résumé « Tu lui dois : … » : le jour promis n'est pas l'objet ---------- */
+  {
+    const cas = [['moi', 'Je lui envoie le devis lundi', 'le devis'], ['moi', 'Je lui envoie le devis demain matin', 'le devis'], ['moi', 'je lui dois le devis la semaine prochaine', 'le devis'],
+      ['moi', 'Je lui envoie le devis d\'ici vendredi', 'le devis'], ['moi', 'je lui envoie les tarifs fin octobre', 'les tarifs'], ['lui', 'elle doit m\'envoyer ses avis jeudi, rappel dans 3 jours', 'ses avis'],
+      ['lui', 'il doit m\'envoyer ses factures au plus tard le 20', 'ses factures'], ['moi', 'je lui envoie le devis signé', 'le devis signé'], ['lui', 'Croisée au marché, elle doit m\'envoyer ses avis 2024-2025', 'ses avis 2024-2025']];
+    const lus = await p.evaluate(c => c.map(([a, t]) => ceQuiEstDu({ nom: 'Mme Test', attente: a, historique: [{ date: '2026-10-08', texte: t }] })), cas);
+    const faux = cas.filter((c, i) => lus[i] !== c[2]).map((c, i) => `${c[1]} → ${lus[cas.indexOf(c)]}`);
+    verifier(`${ecran} 5 bis. ce qui est dû, sans le jour promis : « Je lui envoie le devis lundi » → « le devis » (${cas.length} phrases)`, !faux.length, faux.join(' | '));
+    await p.evaluate(() => { state.aVoir.push({ id: 'cDevis', createdAt: 1, nom: 'M. Devis', activite: 'cee', priorite: 'normale', statut: 'suivi', attente: 'moi', rappel: '2026-10-12', historique: [{ date: '2026-10-08', texte: 'Je lui envoie le devis lundi' }] }); save(); openAVoir('cDevis'); });
+    await pause(p, 200);
+    const r3 = await p.evaluate(() => document.querySelector('#fiche-resume .r3').textContent);
+    verifier(`${ecran} 5 bis. fiche : « Tu lui dois : le devis »`, r3 === 'Tu lui dois : le devis', r3);
+    await fermerFiche(p);
+  }
+
+  /* ---------- Puce Formule au nom long : elle reste dans la feuille, le nom finit par « … », le prix reste lisible ---------- */
+  {
+    await p.evaluate(() => { state.formules.push({ id: 'fLong', nom: 'Pro — tarif fondateur avec engagement de vingt-quatre mois', prix: 59 }); save(); openAbonne(); });
+    await pause(p, 250);
+    const r = await p.evaluate(() => {
+      const b = document.querySelector('#modal .sheet-body'), c = document.querySelector('#modal [aria-labelledby="lab-formule"] [data-v="fLong"]'), s = c.querySelector('.chip-suf');
+      const br = b.getBoundingClientRect(), cr = c.getBoundingClientRect(), sr = s.getBoundingClientRect(), pad = parseFloat(getComputedStyle(b).paddingRight);
+      return { dedans: cr.right <= br.right - pad + 1, droite: Math.round(cr.right), corps: Math.round(br.right - pad), prix: s.textContent.trim(), prixVisible: sr.width > 0 && sr.right <= cr.right + 0.5,
+        largeur: b.scrollWidth <= b.clientWidth + 1, page: document.documentElement.scrollWidth <= innerWidth + 1, titre: c.title };
+    });
+    await p.click('#modal [aria-labelledby="lab-formule"] [data-v="fLong"]');
+    const prix = await p.$eval('#f-prix', e => e.value);
+    verifier(`${ecran} formule au nom long : la puce tient dans la feuille, « · 59 € » visible, le nom complet en infobulle, la puce remplit le prix`,
+      r.dedans && /^· 59\s€$/.test(r.prix) && r.prixVisible && r.largeur && r.page && /vingt-quatre mois · 59/.test(r.titre) && prix === '59', JSON.stringify({ ...r, prix }));
+    await fermerFiche(p);
+    await p.evaluate(() => { state.formules = state.formules.filter(f => f.id !== 'fLong'); save(); });
   }
 
   /* ---------- 6. Le geste retour ferme la fiche, sans changer le # ---------- */
@@ -331,6 +476,95 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
 
   verifier(`${ecran} aucun défilement horizontal`, await sansScrollHorizontal(p));
   verifier(`${ecran} aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+  await fermer();
+}
+
+/* ---------- 1 ter. Écrans bas : iPhone dans Safari avec ses barres (390x664), iPhone SE (375x667), fenêtre basse à l'ordinateur (1366x650).
+   Rien n'est jamais coupé sans recours : chaque champ est visible, ou le corps défile jusqu'à lui au geste ; les fiches neuves tiennent sans défiler ---------- */
+for (const [largeur, hauteur] of [[390, 664], [375, 667], [1366, 650]]) {
+  const ecran = `${largeur}x${hauteur}`;
+  const telephone = largeur <= 760;
+  const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, exemple: true });
+  await pause(p, 2600);
+  const ids = await preparer(p);
+  /* Le pire RDV : date dans les raccourcis et durée hors liste (5 puces de durée, sur deux rangs) */
+  await p.evaluate(() => { state.events.push({ id: 'ev45', titre: 'Point 45 min', date: '2026-10-12', heure: '17:00', duree: 45, mode: 'visio', activite: 'kamifood', lien: '', fait: false, notes: '' }); save(); });
+  /* Champs et boutons du volet affiché qui dépassent du corps (en haut ou en bas) */
+  const coupes = () => p.evaluate(() => {
+    document.querySelectorAll('[data-coupe]').forEach(e => { delete e.dataset.coupe; });
+    const b = document.querySelector('#modal .sheet-body'), br = b.getBoundingClientRect();
+    const pane = [...b.querySelectorAll('.pane')].find(x => !x.hidden) || b;
+    return [...pane.querySelectorAll('input:not([type=hidden]), select, textarea, button, a, label.chip, label.check')].filter(el => {
+      if (el.type === 'checkbox' && el.closest('label')) return false; // la puce ou la case qui la porte compte
+      const r = el.getBoundingClientRect();
+      return (r.width || r.height) && (r.bottom > br.bottom + 1 || r.top < br.top - 1);
+    }).map((el, i) => { el.dataset.coupe = String(i); const r = el.getBoundingClientRect(); return { i, nom: el.name || el.id || el.textContent.trim().slice(0, 24), haut: Math.round(r.top), bas: Math.round(r.bottom) }; });
+  });
+  const fiches = [
+    ['Nouveau RDV', `openEvent()`], ['RDV 45 min (5 durées)', `openEvent('ev45')`], ['RDV 300 caractères de notes', `openEvent('ev300')`],
+    ['Nouveau dossier', `openDossier()`], ['Dossier', `openDossier('${ids.garage}')`], ['Nouvel abonné', `openAbonne()`], ['Abonné', `openAbonne('${ids.abonne}')`],
+    ['Contact (20 échanges)', `openAVoir('c20')`],
+  ];
+  const sansDefiler = {};
+  for (const [nom, code] of fiches) {
+    await p.evaluate(code); await pause(p, 300);
+    const n = await p.evaluate(() => document.querySelectorAll('#modal .pane').length);
+    const res = [];
+    for (let i = 0; i < n; i++) {
+      await p.click(`#modal #volet-${i}`); await pause(p, 60);
+      await p.evaluate(() => { document.querySelector('#modal .sheet-body').scrollTop = 0; });
+      const c0 = await coupes();
+      const etat = await p.evaluate(() => { const b = document.querySelector('#modal .sheet-body'), m = document.querySelector('#modal'), r = b.getBoundingClientRect(); return { oy: getComputedStyle(b).overflowY, trop: b.scrollHeight - b.clientHeight, modal: m.scrollHeight <= m.clientHeight + 1, x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      if (i === 0) sansDefiler[nom] = !c0.length && etat.trop <= 1;
+      if (!c0.length) { res.push({ i, ok: etat.modal, trop: etat.trop }); continue; }
+      /* Coupé : le corps défile au geste (doigt ou molette), et chaque élément coupé devient visible et touchable */
+      await glisser(p, etat.x, etat.y + 100, Math.min(etat.trop + 120, 240), telephone);
+      await pause(p, 450);
+      const vus = await p.evaluate(ids => {
+        const b = document.querySelector('#modal .sheet-body'), br = b.getBoundingClientRect();
+        return { scrollTop: b.scrollTop, tous: ids.every(i => {
+          const el = document.querySelector(`#modal [data-coupe="${i}"]`), r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + Math.min(r.width / 2, 20), r.top + r.height / 2);
+          return r.bottom <= br.bottom + 1 && r.top >= br.top - 1 && !!hit && (hit === el || el.contains(hit) || hit.contains(el));
+        }) };
+      }, c0.map(x => x.i));
+      res.push({ i, ok: etat.modal && etat.oy === 'auto' && vus.scrollTop > 0 && vus.tous, trop: etat.trop, coupes: c0.map(x => x.nom).join(','), scrollTop: vus.scrollTop });
+    }
+    verifier(`${ecran} 1 ter. ${nom} : aucun champ coupé sans recours (visible, ou le corps défile jusqu'à lui)`, res.length >= 2 && res.every(r => r.ok), JSON.stringify(res));
+    await fermerFiche(p);
+  }
+  verifier(`${ecran} 1 ter. Nouveau RDV (⚠ Alerte, Type), Nouvel abonné (« Planifier les RDV inclus »), Nouveau dossier : tiennent sans défiler`,
+    sansDefiler['Nouveau RDV'] && sansDefiler['Nouvel abonné'] && sansDefiler['Nouveau dossier'], JSON.stringify(sansDefiler));
+  verifier(`${ecran} 1 ter. aucun défilement horizontal`, await sansScrollHorizontal(p));
+  verifier(`${ecran} 1 ter. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+  await fermer();
+}
+
+/* ---------- Minuit passé, fiche RDV ouverte : « Aujourd'hui » vaut le jour du toucher, les puces suivent le jour ---------- */
+{
+  const { p, erreurs, fermer } = await ouvrir({ largeur: 390, hauteur: 844, horloge: '2026-10-10T23:59:00+02:00' });
+  const puces = () => p.evaluate(() => [...document.querySelectorAll('#f-dates .puces [data-v]')].map(b => `${b.textContent.trim()}=${b.dataset.v}`));
+  await p.evaluate(() => openEvent()); await pause(p, 300);
+  const avant = await puces();
+  await p.clock.runFor(120000); // 00:01 le 11 (Paris) : la mise à jour de la minute a eu lieu
+  const apres = await puces();
+  await p.fill('#f-titre', 'Après minuit'); await p.click('#modal [aria-labelledby="lab-activite"] [data-v="perso"]');
+  await p.click('#f-dates .puces [data-j="0"]');
+  const date = await p.$eval('#f-date', e => e.value);
+  await p.click('#modal .modal-actions .btn.primary'); await p.clock.runFor(500);
+  const ev = await p.evaluate(() => ({ auj: today(), date: state.events.find(e => e.titre === 'Après minuit')?.date }));
+  verifier('minuit : fiche ouverte le 10 à 23:59 ; à 00:01 les puces suivent (« Aujourd\'hui » = 11, « Demain » = 12), « Aujourd\'hui » touché date le RDV du 11',
+    avant[0] === 'Aujourd\'hui=2026-10-10' && apres[0] === 'Aujourd\'hui=2026-10-11' && apres[1] === 'Demain=2026-10-12' && date === '2026-10-11' && ev.date === '2026-10-11' && ev.auj === '2026-10-11', JSON.stringify({ avant, apres, date, ev }));
+  /* Sans attendre la mise à jour de la minute : le jour du toucher compte quand même */
+  await p.clock.setSystemTime(new Date('2026-10-11T23:59:40+02:00'));
+  await p.evaluate(() => openEvent()); await pause(p, 200);
+  await p.clock.setSystemTime(new Date('2026-10-12T00:00:05+02:00'));
+  const fige = await puces();
+  await p.click('#f-dates .puces [data-j="1"]'); // « Demain », affiché pour le 12, touché le 12 : le 13
+  const r = await p.evaluate(() => ({ date: document.querySelector('#f-date').value, puces: [...document.querySelectorAll('#f-dates .puces [data-v]')].map(b => `${b.textContent.trim()}=${b.dataset.v}${b.classList.contains('on') ? '*' : ''}`) }));
+  verifier('minuit : puce « Demain » touchée juste après minuit, avant toute mise à jour : la date est celle du lendemain du toucher (le 13), les puces sont refaites',
+    fige[1] === 'Demain=2026-10-12' && r.date === '2026-10-13' && r.puces[0] === 'Aujourd\'hui=2026-10-12' && r.puces[1] === 'Demain=2026-10-13*', JSON.stringify({ fige, r }));
+  verifier('minuit : aucune erreur JS', erreurs.length === 0, erreurs.join(' | '));
   await fermer();
 }
 

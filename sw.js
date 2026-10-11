@@ -1,7 +1,7 @@
 /* Service worker du KGD : rend l'appli installable et utilisable hors ligne.
    Réseau d'abord pour les pages et scripts (toujours la dernière version), cache en secours.
    Les appels /api ne sont jamais mis en cache. */
-const VERSION = 'kgd-v13';
+const VERSION = 'kgd-v14';
 const SHELL = ['./', './index.html', './style.css', './app.js', './views.js', './lire.js', './manifest.json', './favicon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/logo.svg'];
 
 self.addEventListener('install', e => {

@@ -587,6 +587,7 @@ function saisieEnCours() {
 const menuOuvert = () => !!($('#menu-plus') && !$('#menu-plus').hidden) || !!($('#menu-ajout') && !$('#menu-ajout').hidden);
 function rafraichir() {
   if (document.visibilityState !== 'visible') return;
+  majDatesRdv(); // une fiche RDV ouverte : ses puces « Aujourd'hui », « Demain » suivent le jour (la fiche n'est jamais redessinée)
   const jour = today(), nouveauJour = jour !== dernierRendu.jour;
   if (!nouveauJour && Date.now() - dernierRendu.t <= 5 * 60e3) return;
   /* La conversation avec Kami ne dépend pas de l'heure : seul un nouveau jour la redessine, jamais pendant une réponse */
@@ -1072,10 +1073,12 @@ const inp = (name, val, type = 'text', extra = '') => `<input id="f-${name}" nam
 const sel = (name, opts, val) => `<select id="f-${name}" name="${name}">${Object.entries(opts).map(([k, o]) => `<option value="${esc(k)}" ${k === val ? 'selected' : ''}>${esc(typeof o === 'string' ? o : o.long)}</option>`).join('')}</select>`;
 /* Une zone de texte fait au plus 3 lignes (au-delà, elle défile en elle-même, jamais la feuille) */
 const zoneTexte = (name, val) => `<textarea id="f-${name}" name="${name}" rows="3">${esc(val || '')}</textarea>`;
-/* Puces à choix unique : un input caché (name) porte la valeur ; seg = segment plein largeur, couleur = pastille du secteur */
+/* Puces à choix unique : un input caché (name) porte la valeur ; seg = segment plein largeur, couleur = pastille du secteur.
+   Un libellé [nom, suffixe] (formule et son prix) : un nom trop long se termine par « … », le suffixe reste toujours lisible */
+const libellePuce = l => Array.isArray(l) ? `<span class="chip-nom">${esc(l[0])}</span><span class="chip-suf"> · ${esc(l[1])}</span>` : `<span class="chip-nom">${esc(l)}</span>`;
 function puces(name, opts, val, { label = '', cls = 'full', seg = false, couleur = false, apres = '' } = {}) {
   const v = val == null ? '' : String(val);
-  const items = Object.entries(opts).map(([k, l]) => `<button type="button" class="${seg ? '' : 'chip'} ${k === v ? 'on' : ''}" role="radio" aria-checked="${k === v}" data-v="${esc(k)}" onclick="puce(this)">${couleur ? `<i style="background:var(--${secteurConnu(k) ? k : 'perso'})"></i>` : ''}${esc(l)}</button>`).join('');
+  const items = Object.entries(opts).map(([k, l]) => `<button type="button" class="${seg ? '' : 'chip'} ${k === v ? 'on' : ''}" role="radio" aria-checked="${k === v}" data-v="${esc(k)}"${Array.isArray(l) ? ` title="${esc(l.join(' · '))}"` : ''} onclick="puce(this)">${couleur ? `<i style="background:var(--${secteurConnu(k) ? k : 'perso'})"></i>` : ''}${seg ? esc(l) : libellePuce(l)}</button>`).join('');
   return `<div class="field ${cls}"><span class="lab" id="lab-${name}">${label}</span><div class="${seg ? 'seg plein' : 'puces'}" role="radiogroup" aria-labelledby="lab-${name}" data-puces><input type="hidden" id="f-${name}" name="${name}" value="${esc(v)}"${apres ? ` onchange="${apres}"` : ''}>${items}</div></div>`;
 }
 function puce(b) {
@@ -1141,6 +1144,7 @@ function showModal(html, onSubmit) {
     const bad = form.querySelector('input:invalid, select:invalid, textarea:invalid');
     if (bad) { montrerChamp(bad); bad.reportValidity(); return; }
     onSubmit(Object.fromEntries(new FormData(form)));
+    fermeeSousLeDoigt(); // fiche enregistrée et fermée d'un toucher : un second toucher au même endroit ne tombe pas sur la page
   };
   modal().showModal();
   /* Au téléphone, pas de clavier (ni de zoom) à l'ouverture : on lit d'abord, on touche le champ voulu ensuite.
@@ -1191,7 +1195,7 @@ function openAbonne(id) {
      ni statut, ni prix, ni date de résiliation, ni suppression (elle reviendrait) */
   const estMoi = id === 'moi';
   const estimee = a.statut === 'resilie' && !!a.finEstimee;
-  const fOpts = Object.fromEntries(state.formules.map(f => [f.id, `${f.nom}${num(f.prix) ? ' · ' + eur(f.prix) : ''}`]));
+  const fOpts = Object.fromEntries(state.formules.map(f => [f.id, num(f.prix) ? [String(f.nom || 'Formule'), eur(f.prix)] : String(f.nom || 'Formule')]));
   /* Un résilié : sa date de résiliation est essentielle (à côté du début) ; sinon elle attend dans « Plus d'options » */
   const fin = field('fin', estimee ? 'Date de résiliation <b class="estimee">estimée, à corriger</b>' : 'Date de résiliation', inp('fin', a.fin, 'date', estimee ? 'oninput="this.dataset.touche=1"' : ''));
   const essentiel = `<div class="fields">
@@ -1316,19 +1320,38 @@ const villeDe = l => {
   const id = l.slice(2), x = l[0] === 'a' ? abonne(id) : l[0] === 'd' ? dossier(id) : l[0] === 'c' ? aVoir(id) : null;
   return x && typeof x.ville === 'string' ? x.ville : '';
 };
-/* Puces de date : Aujourd'hui · Demain · J+2 · le lundi d'après · Autre… (Autre montre le champ date à la place des puces) */
-function datesRdv(val) {
+/* Puces de date : Aujourd'hui · Demain · J+2 · le lundi d'après · Autre… (Autre montre le champ date à la place des puces).
+   « Aujourd'hui » et « Demain » portent un décalage (data-j) : ils valent le jour du toucher, même si la fiche est restée ouverte passé minuit. */
+function raccourcisDates() {
   const t = new Date(), j2 = addDays(t, 2);
   let lun = addDays(j2, 1);
   while (lun.getDay() !== 1) lun = addDays(lun, 1);
   const court = d => cap(d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }));
-  const liste = [[today(), 'Aujourd\'hui'], [iso(addDays(t, 1)), 'Demain'], [iso(j2), court(j2)], [iso(lun), court(lun)]];
-  const connue = liste.some(([d]) => d === val);
+  return [[today(), 'Aujourd\'hui', 0], [iso(addDays(t, 1)), 'Demain', 1], [iso(j2), court(j2)], [iso(lun), court(lun)]];
+}
+const pucesDates = val => raccourcisDates().map(([d, l, j]) => `<button type="button" class="chip ${d === val ? 'on' : ''}" data-v="${d}"${j == null ? '' : ` data-j="${j}"`} aria-pressed="${d === val}" onclick="toucherDate(this)">${esc(l)}</button>`).join('')
+  + '<button type="button" class="chip" id="f-date-autre" onclick="dateAutre(true)">Autre…</button>';
+function datesRdv(val) {
+  const connue = raccourcisDates().some(([d]) => d === val);
   return `<div class="field full"><span class="lab" id="lab-date">Date</span>
-    <div class="dates ${connue ? '' : 'autre'}" id="f-dates" role="group" aria-labelledby="lab-date">
-      <div class="puces">${liste.map(([d, l]) => `<button type="button" class="chip ${d === val ? 'on' : ''}" data-v="${d}" aria-pressed="${d === val}" onclick="choisirDate('${d}')">${esc(l)}</button>`).join('')}<button type="button" class="chip" id="f-date-autre" onclick="dateAutre(true)">Autre…</button></div>
+    <div class="dates ${connue ? '' : 'autre'}" id="f-dates" role="group" aria-labelledby="lab-date" data-jour="${today()}">
+      <div class="puces">${pucesDates(val)}</div>
       <div class="date-autre"><input id="f-date" name="date" type="date" value="${esc(val)}" required onchange="choisirDate(this.value, true)"><button type="button" class="chip" onclick="dateAutre(false)">Raccourcis</button></div>
     </div></div>`;
+}
+/* Le jour a changé depuis l'affichage des puces (minuit passé, appli reprise le lendemain) : libellés et dates refaits, la date choisie reste */
+function majDatesRdv() {
+  const box = $('#f-dates'), i = $('#f-date');
+  if (!box || !i || box.dataset.jour === today()) return;
+  box.dataset.jour = today();
+  box.querySelector('.puces').innerHTML = pucesDates(i.value);
+  choisirDate(i.value, true);
+}
+/* Une puce de date touchée : « Aujourd'hui », « Demain » au jour du toucher ; les autres, la date affichée */
+function toucherDate(b) {
+  const d = b.dataset.j != null ? iso(addDays(new Date(), Number(b.dataset.j))) : b.dataset.v;
+  majDatesRdv();
+  choisirDate(d);
 }
 /* Une puce touchée (ou le champ changé) : la date et les puces suivent */
 function choisirDate(d, depuisChamp) {
@@ -2296,10 +2319,15 @@ function ceQuiEstDu(v) {
   for (let i = h.length - 1; i >= Math.max(0, h.length - 3); i--) {
     const txt = String(h[i].texte || '');
     try {
-      const j = (Lire.lireNote(txt, today(), [], []).jetons || []).find(x => x.cle === 'attente' && x.valeur === v.attente);
+      const jetons = Lire.lireNote(txt, today(), [], []).jetons || [];
+      const j = jetons.find(x => x.cle === 'attente' && x.valeur === v.attente);
       if (!j) continue;
       const art = /\b(?:une|un|ma|mon|mes|le|la|les|des|notre|nos)\s*$/i.exec(txt.slice(j.debut, j.fin)); // « il attend une réponse » → « une réponse »
-      let reste = txt.slice(art ? j.fin - art[0].length : j.fin).split(/[,.;:!?\n]|\set\s|\srappel/i)[0].trim();
+      /* Le jour promis n'est pas l'objet : « je lui envoie le devis lundi » → « le devis » (coupé au premier rappel ou créneau lu après) */
+      const quand = jetons.filter(x => (x.cle === 'rappel' || x.cle === 'creneau') && x.debut >= j.fin).sort((a, b) => a.debut - b.debut)[0];
+      let reste = txt.slice(art ? j.fin - art[0].length : j.fin, quand ? quand.debut : txt.length)
+        .split(/[,.;:!?\n]|\set\s|\srappel|\s(?=(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|apr[eè]s-demain|ce soir|cette semaine|la semaine prochaine)(?![\wàâçéèêëîïôûùüÿ-]))/i)[0].trim()
+        .replace(/\s+(?:pour|avant|d['’]ici(?:\s+à)?|dès|au plus tard|sous|vers|à partir d[eu']?|de|du)$/i, '').trim();
       /* « elle doit m'envoyer ses avis » → « ses avis » : pronom et verbe d'envoi retirés */
       reste = reste.replace(/^(?:(?:lui|leur|me|nous|vous)\s+|[mt]['’]\s*)/i, '').replace(/^(?:envoyer|renvoyer|transmettre|faire parvenir|faire|donner|passer|confirmer|pr[ée]parer|proposer|redire|dire)\s+/i, '').trim();
       if (reste.length >= 3) return reste.length > 60 ? reste.slice(0, 59).trim() + '…' : reste;
@@ -2331,12 +2359,25 @@ function ficheResume(v) {
       <p class="r3 ${v.attente === 'moi' ? 'doit' : ''}">${esc(l3)}</p>
     </div>`;
 }
-/* Une ligne du journal : 2 lignes de texte ; un toucher l'ouvre en entier (une seule à la fois) */
-const ligneJournal = x => `<li onclick="ouvrirLigne(this)"><span class="when">${esc(fmtDate(x.date)) || '—'}</span><div class="grow">${esc(x.texte)}</div></li>`;
-function ouvrirLigne(li) {
-  const ouvert = li.classList.contains('ouvert');
-  li.parentElement.querySelectorAll('li.ouvert').forEach(x => x.classList.remove('ouvert'));
-  if (!ouvert) li.classList.add('ouvert');
+/* Une ligne du journal : 2 lignes de texte ; un toucher ouvre l'échange en entier, à la place du bloc.
+   i : rang de l'échange (0 = le plus récent) ; page : la page de « Tout le journal » d'où il est ouvert (-1 : depuis la fiche) */
+const ligneJournal = (x, i, page = -1) => `<li role="button" tabindex="0" onclick="echangeVue(${i}, ${page})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();echangeVue(${i}, ${page})}"><span class="when">${esc(fmtDate(x.date)) || '—'}</span><div class="grow">${esc(x.texte)}</div></li>`;
+/* Un échange en entier : tout son texte, sans coupe. Très long, il défile dans sa propre zone (comme les Notes), jamais la fiche.
+   ‹ › passent à l'échange plus récent ou plus ancien ; « ‹ Fiche » ou « ‹ Journal » ramène d'où l'on vient. */
+function echangeVue(i, page = -1) {
+  const v = aVoir(ficheId), box = $('#fiche-vue');
+  if (!v || !box) return;
+  const h = [...(v.historique || [])].reverse(), n = h.length;
+  if (!n) return ficheVue();
+  i = Math.min(Math.max(0, Number(i) || 0), n - 1);
+  const x = h[i] || {};
+  const depuisJournal = page >= 0;
+  box.innerHTML = `<div class="journal-tete">
+      <button type="button" class="btn small" onclick="${depuisJournal ? `journalPage(${Math.floor(i / 8)})` : 'ficheVue()'}">‹ ${depuisJournal ? 'Journal' : 'Fiche'}</button>
+      <span class="meta">${esc(x.date ? jourLong(x.date) : 'Sans date')}</span>
+      <div class="pager"><button type="button" class="btn small" ${i ? '' : 'disabled'} onclick="echangeVue(${i - 1}, ${page})" aria-label="Plus récent">‹</button><span>${i + 1} / ${n}</span><button type="button" class="btn small" ${i < n - 1 ? '' : 'disabled'} onclick="echangeVue(${i + 1}, ${page})" aria-label="Plus ancien">›</button></div>
+    </div>
+    <div class="echange" id="echange" tabindex="0" aria-label="Échange en entier">${esc(x.texte || '')}</div>`;
   verifierSansAscenseur();
 }
 function ficheHtml(v) {
@@ -2350,7 +2391,7 @@ function ficheHtml(v) {
     </div>
     <div class="fiche-journal">
       <span class="lab">Journal</span>
-      <ul class="list journal">${n ? [...h].reverse().slice(0, 5).map(ligneJournal).join('') : '<li class="meta">Aucune prise de contact notée.</li>'}</ul>
+      <ul class="list journal">${n ? [...h].reverse().slice(0, 5).map((x, i) => ligneJournal(x, i)).join('') : '<li class="meta">Aucune prise de contact notée.</li>'}</ul>
       ${n > 5 ? `<button type="button" class="lien-btn" onclick="journalPage(0)">Tout le journal (${n})</button>` : ''}
     </div>`;
 }
@@ -2365,7 +2406,7 @@ function journalPage(p) {
       <span class="meta">${h.length} échange${h.length > 1 ? 's' : ''}</span>
       <div class="pager"><button type="button" class="btn small" ${p ? '' : 'disabled'} onclick="journalPage(${p - 1})" aria-label="Plus récents">‹</button><span>${p + 1} / ${pages}</span><button type="button" class="btn small" ${p < pages - 1 ? '' : 'disabled'} onclick="journalPage(${p + 1})" aria-label="Plus anciens">›</button></div>
     </div>
-    <ul class="list journal complet">${h.slice(p * 8, p * 8 + 8).map(ligneJournal).join('')}</ul>`;
+    <ul class="list journal complet">${h.slice(p * 8, p * 8 + 8).map((x, k) => ligneJournal(x, p * 8 + k, p)).join('')}</ul>`;
   verifierSansAscenseur();
 }
 function ficheVue() { const v = aVoir(ficheId), box = $('#fiche-vue'); if (v && box) { box.innerHTML = ficheHtml(v); verifierSansAscenseur(); } }
@@ -2879,6 +2920,25 @@ $('#modal').addEventListener('close', () => {
   fermerMenuFeuille(); modalQuitte(); placerToast();
   setTimeout(rechargementDiffere, 0);
 });
+/* Double clic ou double toucher sur ce qui ferme une fiche (Supprimer du menu ⋯, Enregistrer, ✕, Annuler) : la fiche part tout de suite
+   et le second clic tomberait sur la page dessous (une autre fiche s'ouvrirait, un onglet changerait). Pendant 400 ms, un clic au même
+   endroit (à 40 px près) ne fait rien ; ailleurs, et sur le toast (« Annuler »), tout répond aussitôt. */
+let clicFiche = null, clicsAbsorbes = null;
+function fermeeSousLeDoigt() {
+  const e = clicFiche;
+  if (!e || e !== clicEnCours || modal().open) return;
+  clicFiche = null;
+  clicsAbsorbes = { t: performance.now(), x: e.clientX, y: e.clientY };
+}
+document.addEventListener('click', e => {
+  const a = clicsAbsorbes;
+  if (a && e.isTrusted && performance.now() - a.t < 400 && Math.hypot(e.clientX - a.x, e.clientY - a.y) < 40 && !(e.target.closest && e.target.closest('#toast'))) {
+    e.preventDefault(); e.stopPropagation(); return;
+  }
+  clicFiche = e.isTrusted && e.detail > 0 && modal().open && modal().contains(e.target) ? e : null;
+}, true);
+/* Après les gestionnaires du clic (✕, Annuler, Supprimer) : la fiche s'est-elle fermée ? (Enregistrer : vu à l'envoi du formulaire) */
+window.addEventListener('click', e => { if (e === clicFiche) fermeeSousLeDoigt(); });
 /* Menu ⋯ : refermé par un toucher ailleurs dans la fiche, ou par Échap (sans fermer la fiche) */
 $('#modal').addEventListener('pointerdown', e => { if (!e.target.closest('.sheet-menu, .sheet-plus')) fermerMenuFeuille(); });
 $('#modal').addEventListener('keydown', e => { if (e.key === 'Escape' && fermerMenuFeuille()) { e.preventDefault(); e.stopPropagation(); } });
