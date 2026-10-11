@@ -5,12 +5,16 @@
  *   ... await fermer();
  * Sert le dossier racine du dépôt (celui qui contient ce fichier, deux niveaux au-dessus) sur un port libre.
  * L'horloge est figée en heure locale du navigateur (Europe/Paris) avec page.clock.
+ * Les dates sans fuseau écrites dans les tests ('2026-10-10T09:00:00') sont lues en heure de Paris,
+ * côté Node comme côté navigateur : sans cela, sur une machine en UTC, « 09:00 » devenait 11:00 à Paris.
  */
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+
+process.env.TZ = 'Europe/Paris';
 
 export const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 

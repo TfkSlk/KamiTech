@@ -76,6 +76,7 @@ main { padding: 30px 34px 70px; max-width: 1240px; width: 100%; min-width: 0; }
 .section-head h2 { margin: 0; }
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .card-head h2 { margin: 0; }
+.card-head > div:first-child { flex: 1 1 12rem; min-width: 0; }
 .card-head .meta { margin-top: 2px; }
 .meta { color: var(--muted); font-size: 13px; }
 .note { color: var(--muted); font-size: 13px; max-width: 72ch; margin-top: 14px; }
@@ -195,7 +196,10 @@ td.late { color: var(--danger); font-weight: 600; }
 .chart .val { fill: var(--text-2); font-size: 11.5px; font-weight: 600; font-family: var(--font); }
 .chart rect[data-tip]:hover { fill: color-mix(in srgb, var(--text) 5%, transparent); }
 .chart path[fill]:not([fill="transparent"]) { transition: opacity .15s; }
-.donut-wrap { display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: center; }
+.donut-wrap { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 20px; align-items: center; }
+/* Carte trop étroite pour l'anneau et la légende côte à côte (deux cartes vers 1000 px) : la légende passe dessous, rien ne déborde */
+.charts-row > .card { container-type: inline-size; }
+@container (max-width: 440px) { .donut-wrap { grid-template-columns: minmax(0, 1fr); justify-items: center; } }
 .donut { width: 200px; height: 200px; }
 .donut path { transition: opacity .15s; }
 .donut:hover path:not(:hover) { opacity: .55; }
@@ -353,6 +357,7 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
 
 /* lignes secteur sur téléphone */
 .only-sm { display: none; }
+@media (min-width: 761px) { .only-sm { display: none !important; } } /* .sect-rows (display: grid) ne doit pas réapparaître sur ordinateur */
 .sect-rows { display: grid; gap: 0; padding: 6px 20px; }
 .sect-row { padding: 12px 0; border-top: 1px solid var(--border); }
 .sect-row:first-child { border-top: 0; }
@@ -366,6 +371,7 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
   .kpis, .cols-4 { grid-template-columns: repeat(2, 1fr); }
+  th, td { padding-left: 7px; padding-right: 7px; } /* vers 1000 px, les tableaux tiennent sans glisser de côté */
   .cols-3 { grid-template-columns: 1fr; }
   .jour-layout { grid-template-columns: 1fr; }
   .jour-side { position: static; }
@@ -387,11 +393,11 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
   #nav { flex-direction: row; justify-content: space-around; }
   #nav a { flex-direction: column; gap: 2px; font-size: 10px; padding: 6px 2px; text-align: center; border-radius: 8px; }
   #nav a.active { box-shadow: none; }
-  main { padding: 18px 16px 100px; }
+  main { padding: 18px 16px calc(150px + env(safe-area-inset-bottom, 0px)); } /* le + flottant (76 + 56 px) ne couvre jamais la dernière ligne */
   h1 { font-size: 22px; }
   .kpis, .cols-4 { grid-template-columns: 1fr 1fr; }
   .kpi .value { font-size: 22px; }
-  .kpi .label { font-size: 11px; }
+  .kpi .label { font-size: 11px; white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .spark-row { flex-direction: column; align-items: flex-start; gap: 4px; }
   .spark { width: 100%; height: 28px; }
   main { display: flex; flex-direction: column; }
@@ -418,8 +424,8 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
   #nav a { font-size: 10.5px; min-height: 50px; justify-content: center; }
   #nav a svg { width: 21px; height: 21px; }
   .act-card .tag { display: none; }
-  .act-card .title { min-width: 0; }
-  .act-card .title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .act-card .title { min-width: 0; flex-direction: column; align-items: flex-start; gap: 0; }
+  .act-card .title span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fields { grid-template-columns: 1fr; }
   .hide-sm { display: none; }
   .week-nav strong { min-width: 0; flex: 1; }
@@ -870,4 +876,35 @@ a.kpi-lien:hover { border-color: var(--border-strong); box-shadow: var(--shadow-
   .alerte-ligne .compte { width: 90px; padding: 0 4px; font-size: 12px; }
   .alerte-ligne button { gap: 11px; }
   .rang-tete .seg button { padding: 5px 10px; }
+}
+
+/* Contacts (liste complète) au téléphone : « Contacté » et « RDV » passent sous le texte, le nom et « Il te doit » restent entiers */
+@media (max-width: 760px) {
+  .list li.av-plein { flex-wrap: wrap; row-gap: 8px; }
+  .list li.av-plein > .grow { flex: 1 1 calc(100% - 30px); }
+  .list li.av-plein > .dot { align-self: flex-start; margin-top: 6px; }
+  .list li.av-plein > .av-actions { order: 3; flex-basis: 100%; display: flex; gap: 8px; }
+}
+.av-actions { display: flex; gap: 10px; flex: none; }
+
+/* Tableaux au téléphone (KamiFood, dossiers, commissions) : une ligne par fiche, tout visible, sans glisser de côté.
+   Ligne 1 : le nom et le montant (ou l'action) ; ligne 2 : le reste, la dernière valeur calée à droite. */
+@media (max-width: 760px) {
+  table.tab-tel, .tab-tel tbody, .tab-tel tfoot { display: block; }
+  .tab-tel thead { display: none; }
+  .tab-tel tr { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .tab-tel tr::after { content: ''; order: 3; flex-basis: 100%; height: 0; } /* coupure : le reste toujours en ligne 2 */
+  .tab-tel tfoot tr::after { display: none; }
+  .tab-tel tbody tr:last-child { border-bottom: 0; }
+  .tab-tel tfoot tr { border-top: 1px solid var(--border-strong); border-bottom: 0; }
+  .tab-tel td { display: block; padding: 0; border: 0; }
+  .tab-tel td:empty { display: none; }
+  .tab-tel .c-nom { order: 1; flex: 1 1 calc(100% - 132px); min-width: 0; }
+  .tab-tel tfoot .c-nom { flex-basis: auto; }
+  .tab-tel .c-montant { order: 2; margin-left: auto; text-align: right; }
+  .tab-tel .c-sous { order: 4; }
+  .tab-tel .c-droite { margin-left: auto; }
+  .tab-tel td[data-l]::before { content: attr(data-l); display: block; color: var(--muted); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; text-align: right; }
+  .tab-tel td[data-s]::after { content: ' ' attr(data-s); color: var(--muted); font-size: 12px; font-weight: 400; }
+  .tab-tel td.c-sous:not(.c-droite):not([data-l]) { color: var(--muted); font-size: 13px; }
 }

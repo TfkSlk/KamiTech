@@ -249,7 +249,7 @@ function dashboard() {
   <div class="grid cols-2 charts-row">
     <div class="card">
       <div class="card-head"><div><h2>Gains par secteur</h2><p class="meta">Encaissé · ${per}</p></div></div>
-      ${donut(donutParts, eur, `Encaissé · ${per}`)}
+      ${donut(donutParts, eur, 'encaissé')}
     </div>
     <div class="card">
       <div class="card-head"><div><h2>Charge de la semaine</h2><p class="meta">Heures planifiées par jour · ${esc(hrs(semaine.tot.total + semaine.perso.total))} au total</p></div><a class="link" href="#planning">Planning →</a></div>
@@ -439,8 +439,8 @@ function gainsView() {
     <div class="card kpi"><div class="label">Gain par heure</div><div class="value">${esc(parHeure(b.tot.gagne, b.tot.total))}</div><div class="sub">sur ${esc(hrs(b.tot.total))} d'heures pro</div></div>
   </div>
   <div class="grid cols-2 charts-row">
-    <div class="card"><div class="card-head"><div><h2>Répartition des gains</h2><p class="meta">Encaissé · ${PERIODES[p].toLowerCase()}</p></div></div>${donut(donutParts, eur, `Encaissé · ${PERIODES[p].toLowerCase()}`)}</div>
-    <div class="card"><div class="card-head"><div><h2>Répartition du temps</h2><p class="meta">Heures planifiées · ${PERIODES[p].toLowerCase()}, perso compris</p></div></div>${donut(tempsParts, hrs, 'Planifié, perso compris')}</div>
+    <div class="card"><div class="card-head"><div><h2>Répartition des gains</h2><p class="meta">Encaissé · ${PERIODES[p].toLowerCase()}</p></div></div>${donut(donutParts, eur, 'encaissé')}</div>
+    <div class="card"><div class="card-head"><div><h2>Répartition du temps</h2><p class="meta">Heures planifiées · ${PERIODES[p].toLowerCase()}, perso compris</p></div></div>${donut(tempsParts, hrs, 'planifié')}</div>
   </div>
   <div class="card chart-card">
     <div class="card-head"><div><h2>Gains par mois</h2><p class="meta">Encaissé sur les 6 derniers mois, par secteur</p></div></div>

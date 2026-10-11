@@ -436,15 +436,18 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await fermer();
   }
 
-  /* ---------- Recette A1. Le redessin automatique (5 min, retour au premier plan) garde les défilements internes ---------- */
+  /* ---------- Recette A1. Le redessin automatique (5 min, retour au premier plan) garde les défilements ----------
+     Ordinateur : la grille horaire du planning (zone interne). Téléphone : les tableaux tiennent désormais dans l'écran
+     (une ligne par fiche, plus rien ne glisse de côté) ; on vérifie donc la page des dossiers défilée. */
   {
     const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, exemple: true, vue: tel ? 'dossiers' : 'planning' });
     await p.evaluate(h => { location.hash = '#' + h; }, tel ? 'dossiers' : 'planning'); await pause(p, 200);
-    const zone = tel ? '#main .table-wrap' : '#main .tg-body';
-    const avant = await p.evaluate(({ z, tel }) => { const b = document.querySelector(z); if (tel) b.scrollLeft = 200; else b.scrollTop = 250; document.querySelector('#main').insertAdjacentHTML('beforeend', '<i id="marque"></i>'); return tel ? b.scrollLeft : b.scrollTop; }, { z: zone, tel });
+    const zone = tel ? null : '#main .tg-body';
+    const avant = await p.evaluate(({ z }) => { const b = z ? document.querySelector(z) : document.scrollingElement; if (z) b.scrollTop = 250; else b.scrollTop = 200; document.querySelector('#main').insertAdjacentHTML('beforeend', '<i id="marque"></i>'); return b.scrollTop; }, { z: zone });
     await p.clock.runFor(6 * 60e3); await pause(p, 200);
-    const apres = await p.evaluate(({ z, tel }) => { const b = document.querySelector(z); return { pos: tel ? b.scrollLeft : b.scrollTop, redessine: !document.querySelector('#marque') }; }, { z: zone, tel });
-    verifier(`${ecran} recette. ${tel ? 'tableau des dossiers glissé de côté' : 'grille horaire du planning défilée'} : position gardée après le redessin des 5 min`, avant > 0 && apres.redessine && apres.pos === avant, JSON.stringify({ avant, apres }));
+    const apres = await p.evaluate(({ z }) => { const b = z ? document.querySelector(z) : document.scrollingElement; return { pos: b.scrollTop, redessine: !document.querySelector('#marque'), tableauGlisse: [...document.querySelectorAll('#main .table-wrap')].some(t => t.scrollWidth > t.clientWidth + 1) }; }, { z: zone });
+    verifier(`${ecran} recette. ${tel ? 'page des dossiers défilée' : 'grille horaire du planning défilée'} : position gardée après le redessin des 5 min`, avant > 0 && apres.redessine && apres.pos === avant, JSON.stringify({ avant, apres }));
+    if (tel) verifier(`${ecran} recette. tableaux des dossiers et des commissions entiers dans l'écran (rien ne glisse de côté)`, !apres.tableauGlisse, JSON.stringify(apres));
     verifier(`${ecran} recette. redessin automatique : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
     await fermer();
   }

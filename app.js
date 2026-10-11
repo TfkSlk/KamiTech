@@ -753,16 +753,16 @@ function kamifood() {
     <div class="card kpi"><div class="label">RDV clients à venir</div><div class="value">${state.events.filter(e => e.activite === 'kamifood' && e.date >= t && !e.fait).length}</div><div class="sub">installations, formations, suivis</div></div>
   </div>
   ${clients ? `<div class="card table-wrap">
-    <table>
+    <table class="tab-tel">
       <thead><tr><th>Restaurant</th><th>Formule</th><th class="num">Prix / mois</th><th>Statut</th><th class="num hide-sm">Fin d'engagement</th><th class="hide-sm">Prochain RDV</th></tr></thead>
       <tbody>${ab.map(a => {
         const n = prochain(a.id);
         const finEng = a.debut ? iso(addMonths(parse(a.debut), num(a.engagement) || 12)) : '';
         return `<tr class="clickable" onclick="openAbonne('${a.id}')">
-        <td><strong>${esc(a.restaurant)}</strong>${a.interne ? ' <span class="status paye">Éditeur</span>' : ''}${a.impaye ? ' <span class="status perdu">Impayé</span>' : ''}<div class="meta">${esc([a.contact, a.ville, a.stripeId ? 'Stripe' : '', a.statut === 'resilie' && a.finEstimee ? 'fin estimée, à corriger' : ''].filter(Boolean).join(' · '))}</div></td>
-        <td>${esc(a.formuleNom || formule(a.formule)?.nom || '—')}</td>
-        <td class="num">${a.interne ? '<span class="meta">licence</span>' : eur(a.prix)}</td>
-        <td>${abBadge(a.statut)}</td>
+        <td class="c-nom"><strong>${esc(a.restaurant)}</strong>${a.interne ? ' <span class="status paye">Éditeur</span>' : ''}${a.impaye ? ' <span class="status perdu">Impayé</span>' : ''}<div class="meta">${esc([a.contact, a.ville, a.stripeId ? 'Stripe' : '', a.statut === 'resilie' && a.finEstimee ? 'fin estimée, à corriger' : ''].filter(Boolean).join(' · '))}</div></td>
+        <td class="c-sous">${esc(a.formuleNom || formule(a.formule)?.nom || '—')}</td>
+        <td class="num c-montant" ${a.interne ? '' : 'data-s="/ mois"'}>${a.interne ? '<span class="meta">licence</span>' : eur(a.prix)}</td>
+        <td class="c-sous c-droite">${abBadge(a.statut)}</td>
         <td class="num hide-sm">${fmtDate(finEng)}</td>
         <td class="hide-sm">${n ? `${fmtDate(n.date)} · ${esc(n.titre)}` : '<span class="meta">—</span>'}</td>
       </tr>`; }).join('')}</tbody>
@@ -843,15 +843,15 @@ function dossiers() {
     <input id="filtre-q" type="search" placeholder="Rechercher une entreprise, un contact…" value="${esc(filtre.q)}" oninput="filtre.q=this.value;refreshTable()">
   </div>
   <div class="card table-wrap" id="dossiers-table">${rows.length ? `
-    <table>
+    <table class="tab-tel">
       <thead><tr><th>Entreprise</th><th>Secteur</th><th>Statut</th><th class="hide-sm">Partenaire</th><th class="num">Commission</th><th class="num">Relance</th></tr></thead>
       <tbody>${rows.map(d => `<tr class="clickable" onclick="openDossier('${d.id}')">
-        <td><strong>${esc(d.entreprise)}</strong><div class="meta">${esc([d.contact, d.tel].filter(Boolean).join(' · '))}</div></td>
-        <td>${tag(d.activite)}</td>
-        <td>${statusBadge(d.statut)}</td>
+        <td class="c-nom"><strong>${esc(d.entreprise)}</strong><div class="meta">${esc([d.contact, d.tel].filter(Boolean).join(' · '))}</div></td>
+        <td class="c-sous">${tag(d.activite)}</td>
+        <td class="c-sous">${statusBadge(d.statut)}</td>
         <td class="hide-sm">${esc(d.partenaire || '')}</td>
-        <td class="num">${eur(d.commEstimee)}</td>
-        <td class="num ${late(d) ? 'late' : ''}">${fmtDate(d.dateRelance)}</td>
+        <td class="num c-montant">${eur(d.commEstimee)}</td>
+        <td class="num c-sous c-droite ${late(d) ? 'late' : ''}" ${d.dateRelance ? 'data-l="Relance"' : ''}>${fmtDate(d.dateRelance)}</td>
       </tr>`).join('')}</tbody>
     </table>` : '<div class="empty">Aucun dossier ne correspond.</div>'}
   </div>
@@ -867,17 +867,17 @@ function commissionsTable() {
   if (!rows.length) return '';
   const tot = rows.reduce((s, d) => ({ e: s.e + num(d.commEstimee), r: s.r + num(d.commRecue) }), { e: 0, r: 0 });
   return `<div class="section-head"><h2>Commissions signées</h2></div>
-  <div class="card table-wrap"><table>
+  <div class="card table-wrap"><table class="tab-tel">
     <thead><tr><th>Entreprise</th><th>Secteur</th><th class="num hide-sm">Signé le</th><th class="num">Prévue</th><th class="num">Reçue</th><th></th></tr></thead>
     <tbody>${rows.map(d => `<tr>
-      <td class="clickable" onclick="openDossier('${d.id}')"><strong>${esc(d.entreprise)}</strong></td>
-      <td>${tag(d.activite)}</td>
+      <td class="clickable c-nom" onclick="openDossier('${d.id}')"><strong>${esc(d.entreprise)}</strong></td>
+      <td class="c-sous">${tag(d.activite)}</td>
       <td class="num hide-sm">${fmtDate(d.dateSignature)}</td>
-      <td class="num">${eur(d.commEstimee)}</td>
-      <td class="num">${eur(d.commRecue)}</td>
-      <td class="num">${d.statut === 'paye' ? statusBadge('paye') : `<button class="btn small" onclick="marquerPaye('${d.id}')">Marquer payé</button>`}</td>
+      <td class="num c-sous c-droite" data-l="Prévue">${eur(d.commEstimee)}</td>
+      <td class="num c-sous" data-l="Reçue">${eur(d.commRecue)}</td>
+      <td class="num c-montant">${d.statut === 'paye' ? statusBadge('paye') : `<button class="btn small" onclick="marquerPaye('${d.id}')">Marquer payé</button>`}</td>
     </tr>`).join('')}</tbody>
-    <tfoot><tr><td colspan="2">Total</td><td class="hide-sm"></td><td class="num">${eur(tot.e)}</td><td class="num">${eur(tot.r)}</td><td></td></tr></tfoot>
+    <tfoot><tr><td colspan="2" class="c-nom">Total</td><td class="hide-sm"></td><td class="num c-sous c-droite" data-l="Prévue">${eur(tot.e)}</td><td class="num c-sous" data-l="Reçue">${eur(tot.r)}</td><td></td></tr></tfoot>
   </table></div>`;
 }
 function marquerPaye(id) {
@@ -930,7 +930,7 @@ function parametres() {
       <div class="btn-row"><button class="btn" onclick="saveModele();state.rdvModele.push({titre:'Nouveau RDV',jours:0,duree:60,mode:'visio'});save();render()">+ RDV</button><button class="btn primary" onclick="saveModele();toast('RDV inclus enregistrés')">Enregistrer</button></div>
     </div>
     <div class="card">
-      <h2>Jarvis</h2>
+      <h2>${esc(jarvis.nom || 'Kami')}</h2>
       <p>Le cerveau tourne sur Vercel (<code>/api/jarvis</code>). Le jeton doit être le même que <code>JARVIS_TOKEN</code> dans les variables d'environnement Vercel. Il est enregistré uniquement dans ce navigateur.</p>
       <div class="rows">
         <div class="row"><label for="j-nom" class="meta" style="min-width:90px">Son nom</label><input id="j-nom" type="text" value="${esc(jarvis.nom)}" placeholder="Kami" class="short"><span class="meta">= le mot d'activation en mains libres</span></div>
@@ -939,7 +939,7 @@ function parametres() {
         <div class="row"><label for="j-voice" class="meta" style="min-width:90px">Voix</label><select id="j-voice">${voixOptions()}</select></div>
       </div>
       <div class="btn-row">
-        <button class="btn primary" onclick="jarvis.nom=$('#j-nom').value.trim()||'Kami';jarvis.token=$('#j-token').value.trim();jarvis.endpoint=$('#j-endpoint').value.trim()||'/api/jarvis';jarvis.voixNom=$('#j-voice').value;saveJarvis();toast('Réglages Jarvis enregistrés')">Enregistrer</button>
+        <button class="btn primary" onclick="jarvis.nom=$('#j-nom').value.trim()||'Kami';jarvis.token=$('#j-token').value.trim();jarvis.endpoint=$('#j-endpoint').value.trim()||'/api/jarvis';jarvis.voixNom=$('#j-voice').value;saveJarvis();toast('Réglages de '+jarvis.nom+' enregistrés')">Enregistrer</button>
         <button class="btn" onclick="testerJarvis()">Tester la connexion</button>
         <button class="btn" onclick="parler('Bonjour Toufek, je suis prêt.')">Tester la voix</button>
         <button class="btn danger" onclick="jarvis.historique=[];saveJarvis();toast('Conversation effacée')">Effacer la conversation</button>
@@ -2526,14 +2526,16 @@ function aVoirItem(v, compact) {
   const alerte = ouvert && jours !== null && (jours < 0 || (v.attente === 'moi' && jours <= 0));
   const attente = v.attente === 'lui' ? `<span class="status att-lui" title="${esc(ATTENTES.lui)}">↩ ${estElle(v) ? 'Elle' : 'Il'} te doit</span>`
     : v.attente === 'moi' ? `<span class="status att-moi" title="${esc(ATTENTES.moi)}">↪ Tu lui dois</span>` : '';
-  return `<li class="${late ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''}">
+  const boutons = `${ouvert || passe ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
+    ${ouvert && !compact ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">RDV</button>` : ''}`;
+  /* Liste complète : au téléphone, les deux boutons passent sous le texte (le nom et « Il te doit » ne sont plus coupés) */
+  return `<li class="${late ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''} ${compact ? '' : 'av-plein'}">
     <div class="grow clickable" onclick="openAVoir('${v.id}')">
       <div class="when ${late ? 'late' : passe || (ouvert && jours === 0) ? 'du' : ''}">${esc(when)}</div>
       <div class="title-txt">${alerte ? '<span class="warn-ico" title="À traiter">⚠</span> ' : ''}${esc(nomDe(v))}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
       <div class="meta">${d ? `${esc(fmtDate(d.date))} : ${esc(d.texte)}` : 'Aucune prise de contact notée'}</div>
     </div>
-    ${ouvert || passe ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
-    ${ouvert && !compact ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">RDV</button>` : ''}
+    ${compact ? boutons : boutons.trim() ? `<div class="av-actions">${boutons}</div>` : ''}
     <i class="dot" style="background:var(--${v.activite || 'perso'})" data-tip="${esc(SECTEURS[v.activite]?.label || '')}" aria-label="${esc(SECTEURS[v.activite]?.label || '')}"></i>
   </li>`;
 }
@@ -2661,7 +2663,7 @@ async function testerJarvis() {
 async function jarvisEnvoyer(texte, viaVoix) {
   texte = String(texte || '').trim();
   if (!texte || jarvisOccupe) return;
-  if (!jarvis.token) { toast('Colle d\'abord ton jeton Jarvis dans Réglages'); location.hash = '#parametres'; return; }
+  if (!jarvis.token) { toast(`Colle d'abord ton jeton ${jarvis.nom || 'Kami'} dans Réglages`); location.hash = '#parametres'; return; }
   jarvisOccupe = true;
   jarvis.historique.push({ role: 'user', content: texte, voix: !!viaVoix });
   majChat();
@@ -2704,14 +2706,16 @@ function majChat() {
 }
 
 function jarvisView() {
-  setTimeout(testerJarvis, 0);
+  /* Sans jeton, rien à vérifier : un texte calme, jamais d'erreur rouge (Noter et le reste marchent sans Kami) */
+  const sansJeton = !jarvis.token, nom = jarvis.nom || 'Kami';
+  if (!sansJeton) setTimeout(testerJarvis, 0);
   setTimeout(majChat, 0);
   return `
   <div class="page-head">
-    <div><h1>${esc(jarvis.nom)}</h1><p id="jarvis-etat" class="${jarvisEtat.ok ? 'ok' : jarvisEtat.ok === false ? 'ko' : ''}">${esc(jarvisEtat.texte)}</p></div>
+    <div><h1>${esc(nom)}</h1><p id="jarvis-etat" class="${sansJeton ? '' : jarvisEtat.ok ? 'ok' : jarvisEtat.ok === false ? 'ko' : ''}">${esc(sansJeton ? `${nom} arrive bientôt. En attendant, Noter comprend déjà tes phrases.` : jarvisEtat.texte)}</p></div>
     <div class="btn-row">
-      <button class="btn ${jarvis.voix ? 'on' : ''}" onclick="jarvis.voix=!jarvis.voix;saveJarvis();render()" title="Jarvis répond à voix haute quand tu lui parles à la voix">🔊 Voix ${jarvis.voix ? 'on' : 'off'}</button>
-      ${SR ? `<button class="btn ${jarvis.mainsLibres ? 'primary' : ''}" onclick="mainsLibres(!jarvis.mainsLibres)" title="Il n'écoute que quand tu dis « Jarvis »">${jarvis.mainsLibres ? '● Mains libres actif' : '○ Mains libres'}</button>` : ''}
+      <button class="btn ${jarvis.voix ? 'on' : ''}" onclick="jarvis.voix=!jarvis.voix;saveJarvis();render()" title="${esc(nom)} répond à voix haute quand tu lui parles à la voix">🔊 Voix ${jarvis.voix ? 'on' : 'off'}</button>
+      ${SR ? `<button class="btn ${jarvis.mainsLibres ? 'primary' : ''}" onclick="mainsLibres(!jarvis.mainsLibres)" title="Il n'écoute que quand tu dis « ${esc(nom)} »">${jarvis.mainsLibres ? '● Mains libres actif' : '○ Mains libres'}</button>` : ''}
       <button class="btn" onclick="parler('Bonjour Toufek, je suis prêt.')" title="Tester la voix">Test voix</button>
     </div>
   </div>
@@ -2719,10 +2723,10 @@ function jarvisView() {
     <div id="chat-log"></div>
     <form id="chat-form" onsubmit="event.preventDefault();const i=$('#chat-in');jarvisEnvoyer(i.value,false);i.value=''">
       ${SR ? `<button type="button" class="btn mic" id="chat-mic" onclick="dicter()" aria-label="Parler">🎤</button>` : ''}
-      <input id="chat-in" type="text" placeholder="${SR ? 'Écris, ou appuie sur le micro et parle…' : 'Écris à Jarvis…'}" autocomplete="off">
+      <input id="chat-in" type="text" placeholder="${SR ? 'Écris, ou appuie sur le micro et parle…' : `Écris à ${esc(nom)}…`}" autocomplete="off">
       <button class="btn primary" id="chat-send" ${jarvisOccupe ? 'disabled' : ''}>Envoyer</button>
     </form>
-    ${SR ? '' : '<p class="note">Ton navigateur ne gère pas la reconnaissance vocale. Utilise Chrome ou Edge pour parler à Jarvis.</p>'}
+    ${SR ? '' : `<p class="note">Ton navigateur ne gère pas la reconnaissance vocale. Utilise Chrome ou Edge pour parler à ${esc(nom)}.</p>`}
   </div>`;
 }
 
@@ -2768,12 +2772,12 @@ function arreterEcoute() { ecoute = false; if (rec) { try { rec.stop(); } catch 
 function majMic() { const b = $('#chat-mic'); if (b) b.classList.toggle('on', ecoute); }
 function mainsLibres(on) {
   jarvis.mainsLibres = !!on; saveJarvis();
-  if (on) { dicteeSeule = false; demarrerEcoute(); toast('Mains libres : dis « Jarvis, … »'); } else arreterEcoute();
+  if (on) { dicteeSeule = false; demarrerEcoute(); toast(`Mains libres : dis « ${jarvis.nom || 'Kami'}, … »`); } else arreterEcoute();
   render();
 }
 function dicter() {
   if (ecoute && dicteeSeule) { dicteeSeule = false; arreterEcoute(); return; }
-  if (jarvis.mainsLibres) { toast('Mains libres déjà actif : dis « Jarvis, … »'); return; }
+  if (jarvis.mainsLibres) { toast(`Mains libres déjà actif : dis « ${jarvis.nom || 'Kami'}, … »`); return; }
   dicteeSeule = true; demarrerEcoute(); toast('Je t\'écoute…');
 }
 function voixDispo() {
