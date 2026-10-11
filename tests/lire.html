@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Banc du lecteur</title>
+  <style>
+    :root { --fond: #f6f6f4; --carte: #fff; --texte: #111214; --doux: #6b6e75; --trait: #e3e3df; --vert: #1f7a4d; --vert-fond: #e8f4ee; --rouge: #c8102e; --rouge-fond: #fbe9ec; }
+    @media (prefers-color-scheme: dark) { :root { --fond: #0d0e10; --carte: #16181b; --texte: #ecedef; --doux: #9a9da4; --trait: #2a2d31; --vert: #5cc48e; --vert-fond: #12261b; --rouge: #ff5a6e; --rouge-fond: #2a1216; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--fond); color: var(--texte); font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+    header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin-bottom: 16px; }
+    h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+    .meta { color: var(--doux); font-size: 13px; }
+    #score { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    #score.vert { color: var(--vert); } #score.rouge { color: var(--rouge); }
+    .cas { background: var(--carte); border: 1px solid var(--trait); border-left: 4px solid var(--vert); border-radius: 10px; padding: 10px 12px; margin: 8px 0; display: grid; grid-template-columns: 26px minmax(0, 1.2fr) minmax(0, 1fr); gap: 4px 12px; align-items: start; }
+    .cas.ko { border-left-color: var(--rouge); background: var(--rouge-fond); }
+    .etat { font-weight: 700; color: var(--vert); } .ko .etat { color: var(--rouge); }
+    .note { font-weight: 600; overflow-wrap: anywhere; }
+    .note mark { background: none; color: inherit; border-bottom: 2px solid #9aa0a6; padding: 0 1px; }
+    .note mark.ign { text-decoration: line-through; border-bottom-style: dashed; color: var(--doux); }
+    .lu { color: var(--doux); font-size: 13px; overflow-wrap: anywhere; }
+    .ecarts { grid-column: 2 / -1; color: var(--rouge); font-size: 12.5px; margin: 2px 0 0; padding-left: 18px; overflow-wrap: anywhere; }
+    @media (max-width: 640px) { .cas { grid-template-columns: 22px minmax(0, 1fr); } .lu { grid-column: 2; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><h1>Banc du lecteur local</h1><div class="meta">lire.js · référence samedi 10 octobre 2026 · <span id="vitesse"></span></div></div>
+      <div id="score">…</div>
+    </header>
+    <div id="liste"></div>
+  </main>
+  <script src="../lire.js"></script>
+  <script src="cas.js"></script>
+  <script>
+    'use strict';
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    /* La note avec les morceaux reconnus soulignés */
+    function surligner(note, jetons) {
+      let html = '', i = 0;
+      for (const j of [...jetons].sort((a, b) => a.debut - b.debut)) {
+        if (j.debut < i) continue;
+        html += esc(note.slice(i, j.debut)) + `<mark class="${j.ignore ? 'ign' : ''}" title="${esc(j.cle + ' : ' + j.libelle + (j.ignore ? ' (ignoré)' : ''))}">${esc(note.slice(j.debut, j.fin))}</mark>`;
+        i = j.fin;
+      }
+      return html + esc(note.slice(i));
+    }
+    const resultats = CAS_LIRE.executer(Lire);
+    const verts = resultats.filter(r => !r.ecarts.length).length;
+    const score = document.getElementById('score');
+    score.textContent = `${verts}/${resultats.length}`;
+    score.className = verts === resultats.length ? 'vert' : 'rouge';
+    document.getElementById('liste').innerHTML = resultats.map(r => `
+      <div class="cas ${r.ecarts.length ? 'ko' : 'ok'}">
+        <span class="etat">${r.ecarts.length ? '✗' : '✓'}</span>
+        <div class="note">${surligner(r.note, r.resultat.jetons)}${r.ignores ? ` <span class="meta">(ignorés : ${esc(r.ignores.join(', '))})</span>` : ''}</div>
+        <div class="lu">${esc(r.resultat.resume || '—')}</div>
+        ${r.ecarts.length ? `<ul class="ecarts">${r.ecarts.map(e => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}
+      </div>`).join('');
+    const t0 = performance.now();
+    for (let i = 0; i < 100; i++) Lire.lireNote(CAS_LIRE.phrase200, CAS_LIRE.ref);
+    document.getElementById('vitesse').textContent = `phrase de 200 caractères : ${((performance.now() - t0) / 100).toFixed(2)} ms`;
+  </script>
+</body>
+</html>

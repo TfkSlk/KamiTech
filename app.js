@@ -1141,6 +1141,9 @@ function openContact(id, prefill) {
     creneau: 'aucun', crDate: today(), crHeure: '', crSemaine: iso(monday(addDays(new Date(), 7))), crDu: today(), crAu: iso(addMonths(new Date(), 1)),
     objet: 'Présentation des services', tel: '', lien: v ? (v.lien || '') : '', date: today(), resume: '',
   };
+  /* Valeurs de départ des champs que la lecture de la note peut remplir (ce qui vient du formulaire d'accueil compte comme saisi) */
+  renc.defauts = { ...Object.fromEntries(RENC_LUS.map(k => [k, renc[k]])), nom: v ? v.nom : '', entreprise: v ? (v.entreprise || '') : '', sujet: '' };
+  renc.lu = {}; renc.noteLue = '';
   rencRender();
   $('#rencontre').hidden = false; document.body.classList.add('no-scroll');
   setTimeout(() => $('#r-note')?.focus(), 50);
@@ -1151,14 +1154,61 @@ function rencAller(delta) {
   const liste = RENC_ETAPES(), i = liste.indexOf(renc.etape);
   rencLire();
   if (delta > 0 && renc.etape === 1 && !renc.nom.trim()) { toast('Le nom de la personne, au moins'); $('#r-nom')?.focus(); return; }
-  if (delta > 0 && renc.etape === 0 && !renc.v && !renc.nom.trim()) { renc.nom = premierNom(renc.note); }
+  if (delta > 0 && renc.etape === 0) lireRencontre();
+  if (delta > 0 && renc.etape === 0 && !renc.v && !renc.nom.trim()) { renc.nom = premierNom(renc.note); renc.lu.nom = renc.nom; }
   const j = Math.min(liste.length - 1, Math.max(0, i + delta));
   renc.etape = liste[j]; rencRender();
 }
-/* Sans Kami : on devine le nom depuis la note (« croisé Karim de Karim SARL… ») */
+/* Sans Kami : on devine le nom depuis la note (« croisé Karim de Karim SARL… »), avec le lecteur local (lire.js) */
 function premierNom(note) {
-  const m = note.match(/(?:crois[ée]|vu|appel[ée]|rencontr[ée]|avec|chez)\s+([A-ZÀ-Ý][\wÀ-ÿ'-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'-]+)?)/);
-  return m ? m[1] : note.split(/[,:.]/)[0].trim().slice(0, 40);
+  return window.Lire ? Lire.premierNom(note) : String(note || '').split(/[,:.]/)[0].trim().slice(0, 40);
+}
+/* Les fiches déjà connues, pour que la lecture d'une note reconnaisse quelqu'un (contacts, dossiers, abonnés hors licence) */
+const connus = () => [
+  ...state.aVoir.map(v => ({ type: 'c', id: v.id, nom: v.nom || '', entreprise: v.entreprise || '', activite: v.activite || '' })),
+  ...state.dossiers.map(d => ({ type: 'd', id: d.id, nom: d.contact || '', entreprise: d.entreprise || '', activite: d.activite || '' })),
+  ...state.abonnes.filter(a => !a.interne).map(a => ({ type: 'a', id: a.id, nom: a.contact || '', entreprise: a.restaurant || '', activite: 'kamifood' })),
+];
+/* Lecture d'une note (lecteur local ou Kami) appliquée à la prise de contact.
+   Un champ changé à la main n'est jamais remplacé (sauf par Kami quand on le lui demande : force) ; un champ vide de la lecture ne remplace rien ;
+   ce qu'une lecture précédente avait rempli et que la note ne dit plus revient à sa valeur de départ. */
+const RENC_LUS = ['nom', 'entreprise', 'tel', 'activite', 'attente', 'rappel', 'rappelJ', 'creneau', 'crDate', 'crHeure', 'crSemaine', 'crDu', 'crAu', 'objet', 'sujet'];
+function lectureVersRenc(x, j, force) {
+  const o = {};
+  if (!x.v) { if (j.nom) o.nom = j.nom; if (j.entreprise) o.entreprise = j.entreprise; if (j.tel) o.tel = j.tel; }
+  /* Contact connu : son service ne change pas sur un mot de la note (l'écran « Qui ? » est sauté), seulement si Kami le dit */
+  if (j.activite && secteurConnu(j.activite) && (!x.v || force)) o.activite = j.activite;
+  if (j.attente === 'lui' || j.attente === 'moi') o.attente = j.attente;
+  /* Rappel : seulement une date dite dans la note ; sinon le rappel par défaut (3 jours ouvrés, ou celui déjà posé) reste */
+  const dit = Array.isArray(j.jetons) ? j.jetons.some(t => t.cle === 'rappel' && !t.ignore) : !!j.rappel;
+  if (dit && /^\d{4}-\d{2}-\d{2}$/.test(j.rappel || '')) {
+    o.rappel = j.rappel;
+    const puce = RAPPELS.find(([k]) => /^\d+$/.test(k) && rappelDans(Number(k)) === j.rappel); // « dans 3 jours » allume la puce 3 jours
+    o.rappelJ = puce ? puce[0] : 'x';
+  }
+  const c = j.creneau || {};
+  if (c.type === 'date' && c.date) { o.creneau = 'date'; o.crDate = c.date; o.crHeure = c.heure || ''; }
+  if (c.type === 'semaine' && c.du) { o.creneau = 'semaine'; o.crSemaine = c.du; }
+  if (c.type === 'periode' && c.du && c.au) { o.creneau = 'periode'; o.crDu = c.du; o.crAu = c.au; }
+  if (o.creneau && j.objet) o.objet = j.objet;
+  if (j.sujet) o.sujet = j.sujet;
+  return o;
+}
+function appliquerLecture(x, j, force = false) {
+  const lu = x.lu || (x.lu = {}), def = x.defauts || {};
+  const o = lectureVersRenc(x, j, force);
+  for (const k of RENC_LUS) {
+    if (k in o) { if (force || x[k] === (k in lu ? lu[k] : def[k])) { x[k] = o[k]; lu[k] = o[k]; } }
+    else if (!force && k in lu && x[k] === lu[k]) { x[k] = def[k]; delete lu[k]; }
+  }
+  x.noteLue = (x.note || '').trim();
+}
+/* Sans réseau ni clé : le lecteur local lit la note (une fois par version de la note) et remplit ce qui n'a pas été touché */
+function lireRencontre() {
+  const r = renc, note = (r.note || '').trim();
+  if (!window.Lire || note === (r.noteLue || '')) return;
+  try { appliquerLecture(r, Lire.lireNote(note, new Date(), connus().filter(c => !(r.v && c.type === 'c' && c.id === r.v.id)))); }
+  catch (e) { r.noteLue = note; console.warn('Lecture locale impossible', e); }
 }
 /* Lit les champs de l'étape affichée dans renc */
 function rencLire() {
@@ -1204,9 +1254,9 @@ function rencRender() {
     <textarea id="r-note" placeholder="Ex. : croisé Karim de Karim SARL, on a parlé du KGD Pro, je lui envoie le dossier, rappelle-moi dans 3 jours, à voir début 2027">${esc(r.note)}</textarea>
     <div class="r-tools">
       ${SR ? `<button type="button" class="btn" id="r-mic" onclick="dicteeRencontre()">🎤 Dicter</button>` : ''}
-      <button type="button" class="btn primary" onclick="analyserRencontre()" ${jarvis.token ? '' : 'disabled title="Jeton Kami requis (Réglages)"'}>Kami remplit tout</button>
+      ${jarvis.token ? `<button type="button" class="btn primary" onclick="analyserRencontre()">Kami remplit tout</button>` : ''}
     </div>
-    <p class="meta">${jarvis.token ? 'Une phrase suffit : Kami remplit les écrans suivants, tu vérifies, tu enregistres.' : 'Sans jeton Kami, tu remplis les écrans suivants à la main.'}</p>`;
+    <p class="meta">${jarvis.token ? 'Une phrase suffit : Kami remplit les écrans suivants, tu vérifies, tu enregistres.' : 'Une phrase suffit : nom, service, dates et téléphone sont lus ici, sans réseau. Tu vérifies, tu enregistres.'}</p>`;
   if (r.etape === 1) corps = `
     <label class="r-label" for="r-nom">Personne</label><input id="r-nom" value="${esc(r.nom)}" placeholder="Prénom, nom" autocomplete="off">
     <label class="r-label" for="r-entreprise">Entreprise</label><input id="r-entreprise" value="${esc(r.entreprise)}" placeholder="Facultatif" autocomplete="off">
@@ -1299,25 +1349,20 @@ async function analyserRencontre() {
   const texte = (renc.note || '').trim();
   if (!texte) { toast('Écris ou dicte d\'abord une phrase'); return; }
   if (!jarvis.token) { toast('Colle ton jeton Kami dans Réglages'); return; }
+  lireRencontre(); // le lecteur local d'abord : si Kami ne répond pas, ce qu'il a lu reste
+  const x = renc;
   const b = $('#rencontre .btn.primary'); if (b) { b.disabled = true; b.textContent = 'Kami lit…'; }
   try {
     const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: today() }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.erreur || `Erreur ${r.status}`);
-    const x = renc;
-    if (!x.v) { if (j.nom) x.nom = j.nom; if (j.entreprise) x.entreprise = j.entreprise; if (j.tel) x.tel = j.tel; }
-    if (secteurConnu(j.activite)) x.activite = j.activite;
-    x.attente = j.attente || ''; x.sujet = j.sujet || texte;
-    if (j.rappel) { x.rappel = j.rappel; x.rappelJ = 'x'; } // sinon le rappel par défaut (3 jours ouvrés, ou celui déjà posé) reste
-    const c = j.creneau || { type: 'aucun' };
-    x.creneau = c.type || 'aucun';
-    if (c.type === 'date') { x.crDate = c.date || x.crDate; x.crHeure = c.heure || ''; }
-    if (c.type === 'semaine') x.crSemaine = c.du || x.crSemaine;
-    if (c.type === 'periode') { x.crDu = c.du || x.crDu; x.crAu = c.au || x.crAu; }
-    if (c.type !== 'aucun' && j.objet) x.objet = j.objet;
+    if (renc !== x) return; // Rencontre fermée entre-temps
+    /* Kami complète : ce qu'il lit remplace, ce qu'il laisse vide ne retire rien au lecteur local */
+    appliquerLecture(x, j, true);
     x.resume = j.resume || '';
     x.etape = 4; rencRender();
   } catch (e) {
+    if (renc !== x) return;
     toast(e.message || 'Analyse impossible'); rencRender();
   }
 }
