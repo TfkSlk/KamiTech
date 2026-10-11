@@ -12,7 +12,8 @@ const capture = async (p, nom) => { if (CAPTURES) await p.screenshot({ path: pat
 const pause = (p, ms = 80) => p.waitForTimeout(ms);
 const sansScrollHorizontal = p => p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 const titre = p => p.$eval('#rencontre h2', e => e.textContent.trim());
-const continuer = async p => { await p.click('#rencontre .r-foot .btn.primary'); await pause(p, 60); };
+/* Depuis N2, l'écran 0 est « Noter » : son bouton principal enregistre ; « Ajuster… » mène aux étapes suivantes */
+const continuer = async p => { await p.click((await titre(p)) === 'Noter' ? '#r-ajuster' : '#rencontre .r-foot .btn.primary'); await pause(p, 60); };
 const retour = async p => { await p.click('#rencontre .r-foot .btn:not(.primary)'); await pause(p, 60); };
 const KARIM = 'croisé Karim de Karim SARL, on a parlé du KGD Pro, je lui envoie le dossier, rappelle-moi dans 3 jours, à voir début 2027';
 const AUCUN = JSON.stringify({ type: 'aucun', date: '', heure: '', du: '', au: '' });
@@ -71,7 +72,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     charge.ordre && charge.api === 'jourOuvre,lireNote,normaliser,premierNom,scoreFlou' && charge.gele && charge.nues.length === 0, JSON.stringify(charge));
   verifier(`${ecran} premierNom d'app.js = Lire.premierNom (le nom, sinon le début de la note)`, charge.premier === 'Karim|visite du salon', charge.premier);
   const sw = fs.readFileSync(path.join(RACINE, 'sw.js'), 'utf8');
-  verifier(`${ecran} sw.js : './lire.js' dans SHELL, VERSION kgd-v5`, /SHELL = \[[^\]]*'\.\/lire\.js'/.test(sw) && /VERSION = 'kgd-v5'/.test(sw));
+  verifier(`${ecran} sw.js : './lire.js' dans SHELL, VERSION kgd-v5 ou plus récente`, /SHELL = \[[^\]]*'\.\/lire\.js'/.test(sw) && Number((/VERSION = 'kgd-v(\d+)'/.exec(sw) || [])[1]) >= 5);
 
   /* 2. Dates, référence samedi 2026-10-10 (horloge de la page) */
   const d = {
@@ -113,7 +114,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   const sansJeton = await p.evaluate(() => !jarvis.token);
   await p.evaluate(() => openContact());
   await pause(p);
-  const meta0 = await p.$eval('#rencontre .r-body .meta', e => e.textContent.trim());
+  const meta0 = await p.$eval('#rencontre .r-jetons-vide', e => e.textContent.trim());
   const boutonKami = await p.evaluate(() => /Kami remplit tout/.test(document.body.innerHTML));
   await p.fill('#r-note', KARIM);
   const vues = [{ t: await titre(p), ok: await sansDefilement(p, '#rencontre .r-body') }];
@@ -139,7 +140,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   await continuer(p); // Enregistrer
   const cree = await p.evaluate(() => { const v = state.aVoir.at(-1); const ev = state.events.find(e => e.id === v.eventId); return { v: { nom: v.nom, entreprise: v.entreprise, activite: v.activite, attente: v.attente, rappel: v.rappel, statut: v.statut, journal: v.historique.at(-1)?.texte }, ev: ev && { date: ev.date, fin: ev.fin, aPrevoir: ev.aPrevoir, lien: ev.lien === 'c:' + v.id }, toast: $('#toast').textContent }; });
   verifier(`${ecran} Rencontre sans jeton : le texte de l'écran 1 annonce la lecture locale, pas de bouton Kami grisé, rien de rouge`,
-    sansJeton && /lus ici, sans réseau/.test(meta0) && !boutonKami && await p.evaluate(() => !document.querySelector('#rencontre .manque, #rencontre .alerte-donnees')), meta0);
+    sansJeton && /lus ici, même hors ligne/.test(meta0) && !boutonKami && await p.evaluate(() => !document.querySelector('#rencontre .manque, #rencontre .alerte-donnees')), meta0);
   verifier(`${ecran} Rencontre sans jeton : « Qui ? » pré-rempli (Karim · Karim SARL · KGD Pro)`, e1.t === 'Qui ?' && e1.nom === 'Karim' && e1.entreprise === 'Karim SARL' && e1.chip === 'KGD Pro', JSON.stringify(e1));
   verifier(`${ecran} Rencontre sans jeton : « Et ensuite ? » = je lui dois, rappel « → mardi 13 oct. », puce 3 jours allumée`, e2.att === 'Je lui dois des informations' && e2.rappel === '→ mardi 13 oct.' && e2.date === '2026-10-13' && e2.puce === '3 jours', JSON.stringify(e2));
   verifier(`${ecran} Rencontre sans jeton : « Dans le planning ? » = une période du 2027-01-04 au 2027-02-28`, e3.cr === 'Une période' && e3.du === '2027-01-04' && e3.au === '2027-02-28', JSON.stringify(e3));
@@ -188,7 +189,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   await p.evaluate(() => openContact());
   await pause(p);
   await p.fill('#r-note', KARIM);
-  await p.click('#rencontre .r-tools .btn.primary');
+  await p.click('#r-affiner');
   await pause(p, 250);
   const kami = await p.evaluate(() => ({ t: document.querySelector('#rencontre h2').textContent, nom: renc.nom, entreprise: renc.entreprise, activite: renc.activite, attente: renc.attente, rappel: renc.rappel, creneau: renc.creneau, crDu: renc.crDu, sujet: renc.sujet }));
   await p.evaluate(() => fermerRencontre());
@@ -200,13 +201,13 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   await p.evaluate(() => openContact());
   await pause(p);
   await p.fill('#r-note', KARIM);
-  await p.click('#rencontre .r-tools .btn.primary');
+  await p.click('#r-affiner');
   await pause(p, 250);
   const panne = await p.evaluate(() => ({ t: document.querySelector('#rencontre h2').textContent, nom: renc.nom, activite: renc.activite, rappel: renc.rappel, creneau: renc.creneau }));
   await continuer(p);
   const apresPanne = await p.evaluate(() => ({ t: document.querySelector('#rencontre h2').textContent, nom: $('#r-nom').value }));
   await p.evaluate(() => { fermerRencontre(); jarvis.token = ''; });
-  verifier(`${ecran} Kami en panne : la lecture locale reste, Continuer garde les champs`, panne.t === 'Raconte' && panne.nom === 'Karim' && panne.activite === 'kgdpro' && panne.rappel === '2026-10-13' && panne.creneau === 'periode' && apresPanne.t === 'Qui ?' && apresPanne.nom === 'Karim', JSON.stringify({ panne, apresPanne }));
+  verifier(`${ecran} Kami en panne : la lecture locale reste, Continuer garde les champs`, panne.t === 'Noter' && panne.nom === 'Karim' && panne.activite === 'kgdpro' && panne.rappel === '2026-10-13' && panne.creneau === 'periode' && apresPanne.t === 'Qui ?' && apresPanne.nom === 'Karim', JSON.stringify({ panne, apresPanne }));
 
   verifier(`${ecran} aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
   await fermer();

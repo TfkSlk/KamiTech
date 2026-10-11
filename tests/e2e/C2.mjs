@@ -187,7 +187,8 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await p.bringToFront();
     await p.evaluate(() => openContact(null, { nom: 'Inès Onglet', sujet: 'deux fenêtres' }));
     await pause(p, 80);
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 6; i++) { // depuis N2, « Enregistrer » de l'écran Noter enregistre et ferme d'un toucher
+      if (await p.$eval('#rencontre', e => e.hidden)) break;
       const t = await p.$eval('#rencontre h2', e => e.textContent.trim());
       await p.click('#rencontre .r-foot .btn.primary'); await pause(p, 80);
       if (t === 'On enregistre ?') break;
@@ -223,7 +224,8 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await b.evaluate(() => { state.events.push({ id: 'evB2', titre: 'RDV B pendant la Rencontre', date: '2026-10-14', heure: '09:00', duree: 30, mode: 'visio', activite: 'perso', lien: '', fait: false, notes: '' }); save(); });
     await pause(p, 300);
     const attendA = await p.evaluate(() => aRecharger);
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 6; i++) { // depuis N2, « Enregistrer » de l'écran Noter enregistre et ferme d'un toucher
+      if (await p.$eval('#rencontre', e => e.hidden)) break;
       const t = await p.$eval('#rencontre h2', e => e.textContent.trim());
       await p.click('#rencontre .r-foot .btn.primary'); await pause(p, 80);
       if (t === 'On enregistre ?') break;

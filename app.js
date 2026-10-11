@@ -502,10 +502,17 @@ let filtre = { activite: 'all', statut: 'actifs', q: '' };
 let planFiltre = 'all';
 
 function render() {
+  /* #noter (raccourci de l'appli installée, lien) : l'accueil, et l'écran Noter par-dessus ; le retour revient à l'accueil */
+  if (location.hash === '#noter') {
+    try { history.replaceState(null, '', '#dashboard'); } catch (e) { location.hash = '#dashboard'; return; }
+    render(); openContact(); focusNote();
+    return;
+  }
   if (aRecharger && !occupe()) { aRecharger = false; state = load(); setTimeout(() => toast('Mis à jour depuis une autre fenêtre'), 0); }
   document.documentElement.dataset.theme = state.prefs.theme === 'dark' ? 'dark' : 'light';
   const h = location.hash.slice(1);
   const view = Object.prototype.hasOwnProperty.call(views, h) ? h : 'dashboard';
+  majFab(view);
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
   $('#brand-name').textContent = state.nom;
   document.title = state.nom;
@@ -1125,34 +1132,208 @@ function rappelsContacts() {
 /* Dates lisibles : « mardi 13 oct. » et « jeu. 15 oct. » */
 const jourLong = s => s ? parse(s).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' }) : '';
 const jourCourt = s => s ? parse(s).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+/* ---------- Couches (Noter, et plus tard les autres écrans plein cadre) : le geste retour du téléphone ferme la couche du dessus ----------
+   coucheOuvrir pousse une entrée d'historique (même adresse, le # ne change pas) ; un seul écouteur popstate ferme la couche du dessus.
+   Le ✕, Annuler et Échap passent par history.back() (coucheFermer) ; une couche fermée par le code (enregistrement) appelle coucheQuittee,
+   qui retire son entrée. Pendant ce retrait (asynchrone), une nouvelle couche attend pour pousser la sienne : l'historique reste propre. */
+const couches = [];
+let popIgnore = 0;
+function pousserCouche(c) { try { history.pushState({ couche: c.nom }, ''); c.pousse = true; } catch (e) { /* historique indisponible : ✕, Annuler et Échap ferment quand même */ } }
+function coucheOuvrir(nom, fermer) {
+  const c = { nom, fermer, pousse: false };
+  couches.push(c);
+  if (!popIgnore) pousserCouche(c);
+}
+function coucheFermer() {
+  const c = couches[couches.length - 1];
+  if (!c) return;
+  if (c.pousse && !popIgnore) history.back();
+  else { couches.pop(); c.fermer(); }
+}
+function coucheQuittee(nom) {
+  for (let i = couches.length - 1; i >= 0; i--) {
+    if (couches[i].nom !== nom) continue;
+    const [c] = couches.splice(i, 1);
+    if (c.pousse && i === couches.length && history.state && history.state.couche === nom) { popIgnore++; history.back(); }
+    return;
+  }
+}
+window.addEventListener('popstate', () => {
+  if (popIgnore > 0) { popIgnore--; if (!popIgnore) couches.filter(c => !c.pousse).forEach(pousserCouche); return; }
+  const c = couches.pop();
+  if (c) c.fermer();
+});
+/* Une entrée de couche restée d'avant un rechargement ne doit plus rien fermer */
+if (history.state && history.state.couche) { try { history.replaceState(null, ''); } catch (e) { /* ignore */ } }
+
+/* Icônes (traits, couleur du texte) */
+const ICONES = {
+  noter: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9.5" cy="8" r="3.6"/><path d="M3 20.5a6.5 6.5 0 0 1 13 0"/><path d="M19 7.5v6M16 10.5h6"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  rdv: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  dossier: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></svg>',
+  abonne: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v7a3 3 0 0 0 6 0V3M7 3v18"/><path d="M17 3c-2 2-3 5-3 8h3v10"/></svg>',
+  micro: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>',
+};
+
 /* Bouton rapide : une prise de contact (nouvelle personne, ou nouvelle entrée pour une personne connue) */
-/* Rencontre : saisie en étapes, chaque écran tient sans défiler (téléphone compris) */
+/* Rencontre : l'écran « Noter » (une phrase, ce qui est compris, un rappel, Enregistrer), puis au besoin les étapes pour ajuster.
+   Chaque écran tient sans défiler (téléphone compris, clavier ouvert aussi). */
 let renc = null;
-function openContact(id, prefill) {
-  const v = id ? aVoir(id) : null;
-  const p = prefill || {};
+function nouvelleRenc(v, p = {}) {
   /* Un rappel futur déjà posé est gardé ; sinon rappel dans 3 jours ouvrés, choisi d'office et enregistré tel quel */
   const garder = !!(v && v.rappel && v.rappel > today());
-  renc = {
+  const r = {
     v, etape: 0, note: [p.nom, p.sujet].filter(Boolean).join(' : '),
     nom: v ? v.nom : (p.nom || ''), entreprise: v ? (v.entreprise || '') : (p.entreprise || ''),
     activite: v ? (v.activite || 'perso') : (APPORT.includes(filtre.activite) ? filtre.activite : 'energie'),
     sujet: p.sujet || '', attente: v ? (v.attente || '') : '', rappel: garder ? v.rappel : rappelDans(3), rappelJ: garder ? 'garder' : '3',
     creneau: 'aucun', crDate: today(), crHeure: '', crSemaine: iso(monday(addDays(new Date(), 7))), crDu: today(), crAu: iso(addMonths(new Date(), 1)),
     objet: 'Présentation des services', tel: '', lien: v ? (v.lien || '') : '', date: today(), resume: '',
+    /* Noter : jetons écartés d'un toucher, dernière lecture, champ « Qui ? », contact d'origine et brouillon repris */
+    ignores: [], lecture: null, cleLue: null, qui: false, depuis: v ? v.id : null, brouillonT: 0,
   };
   /* Valeurs de départ des champs que la lecture de la note peut remplir (ce qui vient du formulaire d'accueil compte comme saisi) */
-  renc.defauts = { ...Object.fromEntries(RENC_LUS.map(k => [k, renc[k]])), nom: v ? v.nom : '', entreprise: v ? (v.entreprise || '') : '', sujet: '' };
-  renc.lu = {}; renc.noteLue = '';
-  rencRender();
-  $('#rencontre').hidden = false; document.body.classList.add('no-scroll');
-  setTimeout(() => $('#r-note')?.focus(), 50);
+  r.defauts = { ...Object.fromEntries(RENC_LUS.map(k => [k, r[k]])), nom: v ? v.nom : '', entreprise: v ? (v.entreprise || '') : '', sujet: '' };
+  r.lu = {}; r.noteLue = '';
+  return r;
 }
-function fermerRencontre() { $('#rencontre').hidden = true; document.body.classList.remove('no-scroll'); arreterDictee(); renc = null; rechargementDiffere(); }
+/* Même note, rattachée à un contact connu : ses nom, entreprise et service ; les choix faits à la main (rappel, attente…) restent */
+function versContact(a, v) {
+  const r = nouvelleRenc(v);
+  const touche = k => a[k] !== (k in a.lu ? a.lu[k] : a.defauts[k]);
+  for (const k of RENC_LUS) if (!['nom', 'entreprise', 'tel', 'activite'].includes(k) && touche(k)) r[k] = a[k];
+  Object.assign(r, { note: a.note, ignores: [...a.ignores], depuis: a.depuis, brouillonT: a.brouillonT, retourFocus: a.retourFocus });
+  return r;
+}
+function openContact(id, prefill) {
+  if (renc) fermerRencontre(); // une autre Rencontre ouverte (toast « Noter la suite »…) : son brouillon est déjà gardé
+  if (modal().open) modal().close(); // la fenêtre est au premier plan : elle cacherait la Rencontre
+  const v = id ? aVoir(id) || null : null;
+  const cid = v ? v.id : null;
+  renc = nouvelleRenc(v, prefill);
+  renc.retourFocus = document.activeElement;
+  /* Brouillon de moins de 24 h pour cette rencontre : le texte revient (et son rattachement à un contact, s'il avait été choisi) */
+  const b = renc.note ? null : lireBrouillon(cid);
+  if (b) {
+    const c = b.contactId && b.contactId !== cid ? aVoir(b.contactId) : null;
+    renc.note = b.note; renc.brouillonT = b.t;
+    if (c) { renc.depuis = cid; renc = versContact(renc, c); }
+  }
+  lireRencontre();
+  const el = $('#rencontre');
+  rencRender();
+  el.hidden = false; document.body.classList.add('no-scroll');
+  ['#main', '.sidebar', '#fab'].forEach(s => $(s)?.setAttribute('inert', ''));
+  coucheOuvrir('rencontre', () => fermerRencontre(true));
+  suivreClavier(true);
+  /* Au téléphone, le clavier ne s'ouvre que sur un geste : l'accueil et le bouton + donnent le focus eux-mêmes, tout de suite */
+  if (window.innerWidth > 760) focusNote();
+}
+function focusNote() {
+  const ta = $('#r-note');
+  if (!ta) return;
+  ta.focus({ preventScroll: true });
+  try { ta.selectionStart = ta.selectionEnd = ta.value.length; } catch (e) { /* ignore */ }
+}
+/* Ferme la Rencontre. depuisHistorique : appelée par le retour (popstate) ; sinon l'entrée d'historique de la couche est retirée */
+function fermerRencontre(depuisHistorique) {
+  const el = $('#rencontre');
+  if (!renc && el.hidden) return;
+  if (!depuisHistorique) coucheQuittee('rencontre');
+  clearTimeout(noteSaisie.t);
+  const focus = renc && renc.retourFocus;
+  arreterDictee(); renc = null;
+  el.hidden = true; el.innerHTML = ''; el.classList.remove('clavier');
+  document.body.classList.remove('no-scroll');
+  ['#main', '.sidebar', '#fab'].forEach(s => $(s)?.removeAttribute('inert'));
+  suivreClavier(false);
+  if (focus && focus.isConnected && focus !== document.body && window.innerWidth > 760) { try { focus.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  rechargementDiffere();
+}
+/* ✕, geste retour et Échap : la Rencontre se ferme, le brouillon reste */
+function quitterRencontre() {
+  if (couches.some(c => c.nom === 'rencontre')) coucheFermer();
+  else fermerRencontre();
+}
+/* Annuler : la note est effacée (brouillon compris), avec quelques secondes pour la rétablir */
+function annulerRencontre() {
+  const r = renc;
+  if (!r) return;
+  rencLire();
+  const note = (r.note || '').trim(), cid = r.v && aVoir(r.v.id) ? r.v.id : null;
+  effacerBrouillon();
+  quitterRencontre();
+  if (note) toastAction('Note effacée', 'Rétablir', () => { ecrireBrouillon({ note, contactId: cid, depuis: cid, t: Date.now() }); openContact(cid); if (window.innerWidth <= 760) focusNote(); }, 6000);
+}
+
+/* ---------- Brouillon : la note n'est jamais perdue (appel qui coupe, retour, rechargement) ---------- */
+const BROUILLON = 'kgd-brouillon';
+function ecrireBrouillon(b) { try { localStorage.setItem(BROUILLON, JSON.stringify(b)); } catch (e) { /* stockage plein ou bloqué : la note reste à l'écran */ } }
+function effacerBrouillon() { try { localStorage.removeItem(BROUILLON); } catch (e) { /* ignore */ } }
+function lireBrouillonBrut() { try { const b = JSON.parse(localStorage.getItem(BROUILLON) || 'null'); return b && typeof b === 'object' && !Array.isArray(b) ? b : null; } catch (e) { return null; } }
+/* Le brouillon de cette rencontre (même contact, ou nouvelle rencontre : null), s'il a moins de 24 h */
+function lireBrouillon(cid) {
+  const b = lireBrouillonBrut();
+  if (!b || typeof b.note !== 'string' || !b.note.trim()) return null;
+  const t = Number(b.t);
+  if (!Number.isFinite(t) || Date.now() - t >= 864e5) return null;
+  const c = typeof b.contactId === 'string' ? b.contactId : null;
+  const d = b.depuis === undefined ? c : (typeof b.depuis === 'string' ? b.depuis : null);
+  if (c !== cid && d !== cid) return null;
+  return { note: b.note, contactId: c, t };
+}
+function sauverBrouillon() {
+  const r = renc;
+  if (!r) return;
+  const contactId = r.v ? r.v.id : null;
+  if ((r.note || '').trim()) { ecrireBrouillon({ note: r.note, contactId, etape: r.etape, t: Date.now(), depuis: r.depuis ?? null }); return; }
+  /* Note vidée : on n'efface que le brouillon de cette rencontre, jamais celui d'une autre */
+  const b = lireBrouillonBrut();
+  if (b && (b.contactId === contactId || b.depuis === r.depuis)) effacerBrouillon();
+}
+const brouillonTexte = t => `Brouillon ${jourLocal(t) === today() ? 'de' : 'd\'hier,'} ${new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} repris`;
+/* « Effacer » du bandeau : on repart d'une note vide (et du contact d'origine si la note avait été rattachée à un autre) */
+function effacerNote() {
+  const r = renc;
+  if (!r) return;
+  effacerBrouillon();
+  if (r.v && r.v.id !== r.depuis) { renc = nouvelleRenc(r.depuis ? aVoir(r.depuis) || null : null); renc.retourFocus = r.retourFocus; rencRender(); }
+  else {
+    r.note = ''; r.brouillonT = 0;
+    const ta = $('#r-note'); if (ta) ta.value = '';
+    lireRencontre(); majNoter();
+  }
+  focusNote();
+}
+
+/* ---------- Clavier du téléphone : la Rencontre suit la partie visible de l'écran ---------- */
+function majClavier() {
+  const vv = window.visualViewport, el = $('#rencontre');
+  if (!vv || el.hidden) return;
+  el.style.setProperty('--vvh', vv.height + 'px');
+  el.style.setProperty('--vvt', vv.offsetTop + 'px');
+  const c = vv.height < 560;
+  if (c !== el.classList.contains('clavier')) el.classList.toggle('clavier', c);
+  compacterJetons();
+}
+function suivreClavier(on) {
+  const vv = window.visualViewport, el = $('#rencontre');
+  if (!vv) return;
+  if (on) {
+    if (!suivreClavier.f) { suivreClavier.f = majClavier; vv.addEventListener('resize', majClavier); vv.addEventListener('scroll', majClavier); }
+    majClavier();
+  } else {
+    if (suivreClavier.f) { vv.removeEventListener('resize', majClavier); vv.removeEventListener('scroll', majClavier); suivreClavier.f = null; }
+    el.style.removeProperty('--vvh'); el.style.removeProperty('--vvt'); el.classList.remove('clavier');
+  }
+}
+
 const RENC_ETAPES = () => renc.v ? [0, 2, 3, 4] : [0, 1, 2, 3, 4];
 function rencAller(delta) {
   const liste = RENC_ETAPES(), i = liste.indexOf(renc.etape);
   rencLire();
+  clearTimeout(noteSaisie.t);
   if (delta > 0 && renc.etape === 1 && !renc.nom.trim()) { toast('Le nom de la personne, au moins'); $('#r-nom')?.focus(); return; }
   if (delta > 0 && renc.etape === 0) lireRencontre();
   if (delta > 0 && renc.etape === 0 && !renc.v && !renc.nom.trim()) { renc.nom = premierNom(renc.note); renc.lu.nom = renc.nom; }
@@ -1203,18 +1384,146 @@ function appliquerLecture(x, j, force = false) {
   }
   x.noteLue = (x.note || '').trim();
 }
-/* Sans réseau ni clé : le lecteur local lit la note (une fois par version de la note) et remplit ce qui n'a pas été touché */
-function lireRencontre() {
-  const r = renc, note = (r.note || '').trim();
-  if (!window.Lire || note === (r.noteLue || '')) return;
-  try { appliquerLecture(r, Lire.lireNote(note, new Date(), connus().filter(c => !(r.v && c.type === 'c' && c.id === r.v.id)))); }
-  catch (e) { r.noteLue = note; console.warn('Lecture locale impossible', e); }
+/* Sans réseau ni clé : le lecteur local lit la note (une fois par version de la note et des jetons écartés) et remplit ce qui n'a pas été touché.
+   force : relire même si rien n'a changé (contact rattaché, par exemple). */
+function lireRencontre(force) {
+  const r = renc;
+  if (!r || !window.Lire) return;
+  const note = (r.note || '').trim(), cle = note + '\u0000' + r.ignores.join(',');
+  if (!force && cle === r.cleLue) return;
+  r.cleLue = cle;
+  try {
+    r.lecture = Lire.lireNote(note, new Date(), connus().filter(c => !(r.v && c.type === 'c' && c.id === r.v.id)), r.ignores);
+    appliquerLecture(r, r.lecture);
+  } catch (e) { r.lecture = null; r.noteLue = note; console.warn('Lecture locale impossible', e); }
+}
+
+/* ---------- Noter : ce qui a été compris (jetons), le rappel, le doublon ---------- */
+const RAPPELS_COURTS = { 2: '2 j', 3: '3 j', 7: '1 sem.', 14: '2 sem.', clos: 'Clore' };
+const CLES_JETONS = ['nom', 'entreprise', 'activite', 'attente', 'rappel', 'creneau', 'tel', 'important'];
+function jetonTexte(j) {
+  const l = String(j.libelle ?? '');
+  if (j.cle === 'attente') return j.valeur === 'moi' ? 'Je lui dois' : 'J\'attends son retour';
+  if (j.cle === 'rappel') return 'Rappel ' + l.replace(/^rappel\s+/, '');
+  if (j.cle === 'creneau') return j.valeur && j.valeur.type === 'periode' ? 'À voir ' + l : l.charAt(0).toUpperCase() + l.slice(1);
+  if (j.cle === 'tel') return 'Tél. ' + l;
+  if (j.cle === 'important') return 'Important';
+  return l;
+}
+function jetonsHtml(r) {
+  const js = (r.lecture && r.lecture.jetons || []).filter(j => CLES_JETONS.includes(j.cle));
+  if (!js.length) return `<span class="r-jetons-vide">${(r.note || '').trim() ? 'Rien de reconnu pour l\'instant : ta phrase sera gardée telle quelle' : 'Nom, service, dates : lus ici, même hors ligne'}</span>`;
+  return js.map(j => {
+    const cl = j.cle === 'rappel' || j.cle === 'creneau' ? 'date' : j.cle === 'activite' && secteurConnu(j.valeur) ? 'secteur' : (j.cle === 'attente' && j.valeur === 'moi') || j.cle === 'important' ? 'rouge' : '';
+    const style = cl === 'secteur' ? ` style="--c:var(--${j.valeur})"` : '';
+    return `<button type="button" class="jeton ${cl} ${j.ignore ? 'ignore' : ''}"${style} data-cle="${esc(j.cle)}" aria-pressed="${j.ignore ? 'false' : 'true'}" title="${j.ignore ? 'Écarté : touche pour le reprendre' : 'Compris : touche pour l\'écarter'}" onpointerdown="event.preventDefault()" onclick="basculerJeton('${esc(j.cle)}')"><span>${esc(jetonTexte(j))}</span></button>`;
+  }).join('');
+}
+/* Un toucher écarte un jeton (barré, son champ revient à sa valeur de départ), un second le reprend */
+function basculerJeton(cle) {
+  const r = renc;
+  if (!r || !CLES_JETONS.includes(cle)) return;
+  rencLire();
+  const i = r.ignores.indexOf(cle);
+  if (i >= 0) r.ignores.splice(i, 1); else r.ignores.push(cle);
+  lireRencontre(); majNoter();
+}
+/* Clavier ouvert : les jetons tiennent sur une ligne, ceux qui débordent sont remplacés par « +N » (un toucher ferme le clavier) */
+function compacterJetons() {
+  const box = $('#r-jetons');
+  if (!box) return;
+  box.querySelector('.jeton-plus')?.remove();
+  const items = [...box.querySelectorAll('.jeton')];
+  items.forEach(x => { x.hidden = false; });
+  if (!$('#rencontre').classList.contains('clavier') || !items.length || box.scrollWidth <= box.clientWidth + 1) return;
+  const plus = document.createElement('button');
+  plus.type = 'button'; plus.className = 'jeton jeton-plus';
+  plus.onclick = () => document.activeElement?.blur();
+  box.appendChild(plus);
+  let n = 0;
+  for (let i = items.length - 1; i >= 0 && box.scrollWidth > box.clientWidth + 1; i--) { items[i].hidden = true; n++; plus.textContent = '+' + n; plus.setAttribute('aria-label', `${n} autre(s) : ferme le clavier pour tout voir`); }
+}
+function bandeauxHtml(r) {
+  let h = '';
+  if (r.brouillonT) h += `<div class="r-bandeau brouillon" id="r-brouillon"><span>${esc(brouillonTexte(r.brouillonT))}</span><button type="button" onpointerdown="event.preventDefault()" onclick="effacerNote()">Effacer</button></div>`;
+  const ex = r.lecture && r.lecture.existant;
+  const c = ex && ex.type === 'c' && !(r.v && r.v.id === ex.id) ? aVoir(ex.id) : null;
+  if (c) h += `<div class="r-bandeau doublon" id="r-doublon"><span><b>${esc(c.nom)}</b>${c.entreprise ? ` (${esc(c.entreprise)})` : ''} existe déjà</span><button type="button" onclick="rattacherContact('${esc(c.id)}')">Ajouter à sa fiche</button></div>`;
+  return h;
+}
+/* « Ajouter à sa fiche » : la note part dans le journal du contact existant, aucun doublon n'est créé */
+function rattacherContact(id) {
+  const v = aVoir(id);
+  if (!renc || !v) return;
+  rencLire();
+  renc = versContact(renc, v);
+  lireRencontre(true);
+  rencRender(); sauverBrouillon();
+  toast(`La note ira dans la fiche de ${v.nom}`);
+}
+function pucesHtml(r) {
+  const garder = r.v && r.v.rappel && r.v.rappel > today();
+  return `<div class="r-zone-tete"><span class="r-label">Me le rappeler</span><span class="r-rappel-txt ${r.rappel || r.rappelJ === 'clos' ? '' : 'manque'}" id="r-rappel-txt">${esc(rappelTexte(r))}</span></div>
+    <div class="chips r-puces" id="r-rappels">${garder ? `<button type="button" class="chip ${r.rappelJ === 'garder' ? 'on' : ''}" data-j="garder" onpointerdown="event.preventDefault()" onclick="rencSet('rappelJ','garder')">Garder</button>` : ''}${RAPPELS.map(([j]) => `<button type="button" class="chip ${j === 'clos' ? 'clore' : ''} ${r.rappelJ === j ? 'on' : ''}" data-j="${j}" onpointerdown="event.preventDefault()" onclick="rencSet('rappelJ','${j}')">${RAPPELS_COURTS[j]}</button>`).join('')}</div>`;
+}
+/* Aucun nom trouvé pour un nouveau contact : « Qui ? » prend la place des puces, dans le même écran */
+const quiHtml = r => `<div class="r-zone-tete"><label class="r-label" for="r-qui">Qui ?</label><span class="r-rappel-txt" id="r-rappel-txt">${esc(rappelTexte(r))}</span></div>
+    <input id="r-qui" value="${esc(r.nom)}" placeholder="Prénom, nom" autocomplete="off" autocapitalize="words" enterkeyhint="done" oninput="renc.nom=this.value" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();enregistrerNoter()}">`;
+const kamiDispo = () => !!jarvis.token && navigator.onLine !== false;
+/* Met à jour l'écran Noter sans toucher au champ de saisie (le curseur et le clavier restent) */
+function majNoter() {
+  const r = renc;
+  if (!r || r.etape !== 0 || $('#rencontre').hidden) return;
+  const maj = (sel, html) => { const e = $(sel); if (e && e.innerHTML !== html) e.innerHTML = html; return e; };
+  maj('#r-bandeaux', bandeauxHtml(r));
+  const avant = $('#r-jetons')?.innerHTML;
+  maj('#r-jetons', jetonsHtml(r));
+  if ($('#r-jetons') && $('#r-jetons').innerHTML !== avant) compacterJetons();
+  maj('#r-kami', kamiDispo() ? '<button type="button" class="r-affiner" id="r-affiner" onclick="analyserRencontre()">Affiner avec Kami</button>' : '');
+  if (r.qui) { const t = $('#r-rappel-txt'); if (t) t.textContent = rappelTexte(r); return; }
+  document.querySelectorAll('#r-rappels .chip').forEach(b => b.classList.toggle('on', b.dataset.j === r.rappelJ));
+  const t = $('#r-rappel-txt');
+  if (t) { t.textContent = rappelTexte(r); t.classList.toggle('manque', !r.rappel && r.rappelJ !== 'clos'); }
+}
+/* Frappe dans la note : brouillon tout de suite, lecture 120 ms après la dernière touche */
+function noteSaisie(val) {
+  if (!renc) return;
+  renc.note = val;
+  sauverBrouillon();
+  clearTimeout(noteSaisie.t);
+  noteSaisie.t = setTimeout(() => { if (!renc || renc.etape !== 0) return; lireRencontre(); majNoter(); }, 120);
+}
+/* Entrée (« OK » du clavier du téléphone) ferme le clavier ; Ctrl ou Cmd + Entrée enregistre (raccourci global) */
+function noteTouche(e) {
+  if (e.key !== 'Enter' || e.isComposing || e.shiftKey || e.ctrlKey || e.metaKey) return;
+  if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) { e.preventDefault(); e.target.blur(); }
+}
+/* Enregistrer depuis Noter : la lecture finale est appliquée, puis la prise de contact est enregistrée d'un seul toucher */
+function enregistrerNoter() {
+  const r = renc;
+  if (!r) return;
+  clearTimeout(noteSaisie.t);
+  rencLire();
+  if (!r.v && !r.note.trim() && !r.nom.trim()) { toast('Écris d\'abord une phrase'); focusNote(); return; }
+  lireRencontre();
+  if (!r.v && !r.nom.trim()) {
+    if (!window.Lire) { r.nom = premierNom(r.note); r.lu.nom = r.nom; }
+    else {
+      if (r.qui) toast('Le nom de la personne, au moins');
+      r.qui = true;
+      const z = $('#r-zone'); if (z && !$('#r-qui')) z.innerHTML = quiHtml(r);
+      majNoter();
+      $('#r-qui')?.focus();
+      return;
+    }
+  }
+  enregistrerRencontre();
 }
 /* Lit les champs de l'étape affichée dans renc */
 function rencLire() {
   const g = id => $('#r-' + id)?.value;
   const r = renc;
-  if (r.etape === 0) r.note = g('note') ?? r.note;
+  if (r.etape === 0) { r.note = g('note') ?? r.note; if (r.qui) r.nom = g('qui') ?? r.nom; }
   if (r.etape === 1) { r.nom = g('nom') ?? r.nom; r.entreprise = g('entreprise') ?? r.entreprise; }
   if (r.etape === 2) { const d = g('rappel'); if (d !== undefined && d !== r.rappel) { r.rappel = d; r.rappelJ = 'x'; } }
   if (r.etape === 3) { r.crDate = g('crDate') ?? r.crDate; r.crHeure = g('crHeure') ?? r.crHeure; r.crSemaine = g('crSemaine') ?? r.crSemaine; r.crDu = g('crDu') ?? r.crDu; r.crAu = g('crAu') ?? r.crAu; r.objet = g('objet') ?? r.objet; }
@@ -1223,7 +1532,8 @@ function rencLire() {
 function rencSet(k, val) {
   rencLire(); renc[k] = val;
   if (k === 'rappelJ') renc.rappel = val === 'clos' ? '' : val === 'garder' ? (renc.v?.rappel || '') : rappelDans(Number(val));
-  rencRender();
+  /* Sur Noter, le champ de saisie n'est pas redessiné : le clavier reste ouvert */
+  if (renc.etape === 0) majNoter(); else rencRender();
 }
 /* Date de rappel choisie à la main : aucune puce ne reste allumée, la date en clair suit (sans redessiner l'écran) */
 function rencDate(val) {
@@ -1248,15 +1558,16 @@ function rencSuite(r) {
 function rencRender() {
   const r = renc, liste = RENC_ETAPES(), pos = liste.indexOf(r.etape);
   const opt = (k, val, label, sub) => `<button type="button" class="opt ${r[k] === val ? 'on' : ''}" onclick="rencSet('${k}','${val}')"><b>${label}</b>${sub ? `<span>${sub}</span>` : ''}</button>`;
-  const titres = ['Raconte', 'Qui ?', 'Et ensuite ?', 'Dans le planning ?', 'On enregistre ?'];
+  const titres = ['Noter', 'Qui ?', 'Et ensuite ?', 'Dans le planning ?', 'On enregistre ?'];
   let corps = '';
   if (r.etape === 0) corps = `
-    <textarea id="r-note" placeholder="Ex. : croisé Karim de Karim SARL, on a parlé du KGD Pro, je lui envoie le dossier, rappelle-moi dans 3 jours, à voir début 2027">${esc(r.note)}</textarea>
-    <div class="r-tools">
-      ${SR ? `<button type="button" class="btn" id="r-mic" onclick="dicteeRencontre()">🎤 Dicter</button>` : ''}
-      ${jarvis.token ? `<button type="button" class="btn primary" onclick="analyserRencontre()">Kami remplit tout</button>` : ''}
+    <div class="r-bandeaux" id="r-bandeaux">${bandeauxHtml(r)}</div>
+    <div class="r-saisie ${SR ? 'micro' : ''}">
+      <textarea id="r-note" rows="3" enterkeyhint="done" autocomplete="off" autocapitalize="sentences" aria-label="Ta note" placeholder="${r.v ? 'Ex. : il m\'envoie ses factures, rappelle-moi jeudi' : 'Ex. : croisé Karim de Karim SARL pour les CEE, je lui envoie le devis, rappelle-moi jeudi'}" oninput="noteSaisie(this.value)" onkeydown="noteTouche(event)">${esc(r.note)}</textarea>
+      ${SR ? `<button type="button" class="r-mic ${recNote ? 'on' : ''}" id="r-mic" onclick="dicteeRencontre()" aria-label="${recNote ? 'Arrêter la dictée' : 'Dicter'}" title="Dicter">${ICONES.micro}</button>` : ''}
     </div>
-    <p class="meta">${jarvis.token ? 'Une phrase suffit : Kami remplit les écrans suivants, tu vérifies, tu enregistres.' : 'Une phrase suffit : nom, service, dates et téléphone sont lus ici, sans réseau. Tu vérifies, tu enregistres.'}</p>`;
+    <div class="r-compris"><div class="r-jetons" id="r-jetons" aria-label="Ce qui a été compris">${jetonsHtml(r)}</div><div id="r-kami">${kamiDispo() ? '<button type="button" class="r-affiner" id="r-affiner" onclick="analyserRencontre()">Affiner avec Kami</button>' : ''}</div></div>
+    <div class="r-zone" id="r-zone">${r.qui ? quiHtml(r) : pucesHtml(r)}</div>`;
   if (r.etape === 1) corps = `
     <label class="r-label" for="r-nom">Personne</label><input id="r-nom" value="${esc(r.nom)}" placeholder="Prénom, nom" autocomplete="off">
     <label class="r-label" for="r-entreprise">Entreprise</label><input id="r-entreprise" value="${esc(r.entreprise)}" placeholder="Facultatif" autocomplete="off">
@@ -1287,20 +1598,35 @@ function rencRender() {
       ${r.v ? '' : `<label class="r-label" for="r-tel">Téléphone (facultatif)</label><input id="r-tel" type="tel" value="${esc(r.tel)}">`}
     </div>`;
   }
+  const pied = r.etape === 0
+    ? `<button type="button" class="btn r-annuler" onclick="annulerRencontre()">Annuler</button>
+        <div class="r-pied-droite"><button type="button" class="btn" id="r-ajuster" onclick="rencAller(1)">Ajuster…</button><button type="button" class="btn primary" id="r-enregistrer" onclick="enregistrerNoter()" title="Ctrl ou Cmd + Entrée" aria-keyshortcuts="Control+Enter Meta+Enter">Enregistrer</button></div>`
+    : `<button type="button" class="btn" onclick="rencAller(-1)">Retour</button>
+        ${r.etape === 4 ? `<button type="button" class="btn primary" onclick="enregistrerRencontre()" aria-keyshortcuts="Control+Enter Meta+Enter">Enregistrer</button>` : `<button type="button" class="btn primary" onclick="rencAller(1)">Continuer</button>`}`;
   $('#rencontre').innerHTML = `
     <div class="r-card">
       <div class="r-head">
-        <div><div class="meta">${r.v ? 'Prise de contact · ' + esc(r.v.nom) : 'Prise de contact'}</div><h2>${titres[r.etape]}</h2></div>
-        <div class="r-dots">${liste.map((e, i) => `<i class="${i <= pos ? 'on' : ''}"></i>`).join('')}</div>
-        <button type="button" class="btn icon" onclick="fermerRencontre()" aria-label="Fermer">✕</button>
+        <div><div class="meta">${r.v ? 'Prise de contact · ' + esc(r.v.nom) : 'Prise de contact'}</div><h2 id="r-titre">${titres[r.etape]}</h2></div>
+        <div class="r-dots" aria-hidden="true">${liste.map((e, i) => `<i class="${i <= pos ? 'on' : ''}"></i>`).join('')}</div>
+        <button type="button" class="btn icon" onclick="quitterRencontre()" aria-label="Fermer">✕</button>
       </div>
-      <div class="r-body">${corps}</div>
-      <div class="r-foot">
-        <button type="button" class="btn" onclick="${pos === 0 ? 'fermerRencontre()' : 'rencAller(-1)'}">${pos === 0 ? 'Annuler' : 'Retour'}</button>
-        ${r.etape === 4 ? `<button type="button" class="btn primary" onclick="enregistrerRencontre()">Enregistrer</button>` : `<button type="button" class="btn primary" onclick="rencAller(1)">Continuer</button>`}
-      </div>
+      <div class="r-body ${r.etape === 0 ? 'noter' : ''}">${corps}</div>
+      <div class="r-foot ${r.etape === 0 ? 'noter' : ''}">${pied}</div>
     </div>`;
+  if (r.etape === 0) compacterJetons();
+  sauverBrouillon();
 }
+/* Ctrl ou Cmd + Entrée : Enregistrer (Noter ou récapitulatif) ; Échap ferme la Rencontre, le brouillon reste */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && fermerMenuPlus()) { e.preventDefault(); return; }
+  if (!renc || $('#rencontre').hidden || document.querySelector('dialog[open]')) return;
+  if (e.key === 'Escape') { e.preventDefault(); quitterRencontre(); }
+  else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) {
+    e.preventDefault();
+    if (renc.etape === 0) enregistrerNoter(); else if (renc.etape === 4) enregistrerRencontre();
+  }
+});
+['online', 'offline'].forEach(t => window.addEventListener(t, () => majNoter()));
 /* Enregistre la prise de contact. Jamais sans suite : un rappel, un créneau, ou la clôture explicite.
    Toutes les vérifications passent avant la moindre modification des données. */
 function enregistrerRencontre() {
@@ -1324,12 +1650,25 @@ function enregistrerRencontre() {
   if (!Array.isArray(target.historique)) target.historique = [];
   target.historique.push({ date: r.date || today(), texte: sujet || 'Prise de contact' });
   if (!v) state.aVoir.push(target);
-  let msg = clore ? `${target.nom} · contact clos` : target.rappel ? `${target.nom} · rappel ${jourLong(target.rappel)}` : `${target.nom} enregistré`;
   const ev = cr ? creneauContact(target, { creneau: r.creneau, crDate: r.crDate, crHeure: r.crHeure, crSemaine: r.crSemaine, crDu: r.crDu, crAu: r.crAu, objet: r.objet }) : null;
-  if (ev) msg = estPeriode(ev) ? `${target.nom} · à prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}` : `${target.nom} · RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`;
   /* « RDV planifié » seulement s'il y a vraiment un nouveau RDV daté ; sinon le contact repart en suivi avec sa suite */
   if (target.statut === 'planifie' && !(ev && !estPeriode(ev))) target.statut = 'suivi';
-  save(); fermerRencontre(); render(); toast(msg);
+  /* Le brouillon n'est effacé que si l'enregistrement a vraiment eu lieu */
+  if (save()) effacerBrouillon();
+  fermerRencontre(); render(); toast(messageRencontre(target, clore, ev), 4000);
+}
+/* Ce qui a été créé, en une ligne : « Karim · Karim SARL · rappel mar. 13 oct. · RDV jeu. 15 à 14:00 » */
+function messageRencontre(v, clore, ev) {
+  const parts = [v.nom, v.entreprise].filter(Boolean);
+  if (clore) parts.push('contact clos');
+  else if (v.rappel) parts.push('rappel ' + jourCourt(v.rappel));
+  if (ev) {
+    const jour = parse(ev.date).getMonth() === new Date().getMonth() && parse(ev.date).getFullYear() === new Date().getFullYear()
+      ? parse(ev.date).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }) : jourCourt(ev.date);
+    parts.push(estPeriode(ev) ? `à prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}` : `RDV ${jour}${ev.heure ? ' à ' + ev.heure : ''}`);
+  }
+  if (parts.length === 1) parts.push('enregistré');
+  return parts.join(' · ');
 }
 /* Dictée de la note (reconnaissance vocale du navigateur, en français) */
 let recNote = null;
@@ -1337,21 +1676,24 @@ function dicteeRencontre() {
   if (!SR) return;
   if (recNote) { arreterDictee(); return; }
   recNote = new SR(); recNote.lang = 'fr-FR'; recNote.continuous = true; recNote.interimResults = false;
-  recNote.onresult = e => { const t = Array.from(e.results).slice(e.resultIndex).map(x => x[0].transcript).join(' ').trim(); const ta = $('#r-note'); if (ta && t) { ta.value = (ta.value ? ta.value.trim() + ' ' : '') + t; renc.note = ta.value; } };
-  recNote.onend = () => { recNote = null; const b = $('#r-mic'); if (b) b.textContent = '🎤 Dicter'; };
+  recNote.onresult = e => { const t = Array.from(e.results).slice(e.resultIndex).map(x => x[0].transcript).join(' ').trim(); const ta = $('#r-note'); if (ta && t && renc) { ta.value = (ta.value ? ta.value.trim() + ' ' : '') + t; noteSaisie(ta.value); } };
+  /* Fin de la dictée : la note est relue tout de suite */
+  recNote.onend = () => { recNote = null; majMicNote(); if (renc && renc.etape === 0) { clearTimeout(noteSaisie.t); lireRencontre(); majNoter(); } };
   recNote.onerror = () => { arreterDictee(); toast('Micro indisponible'); };
-  try { recNote.start(); const b = $('#r-mic'); if (b) b.textContent = '⏹ Stop'; } catch (e) { recNote = null; }
+  try { recNote.start(); majMicNote(); } catch (e) { recNote = null; }
 }
-function arreterDictee() { if (recNote) { try { recNote.stop(); } catch (e) { /* ignore */ } recNote = null; } }
+function majMicNote() { const b = $('#r-mic'); if (b) { b.classList.toggle('on', !!recNote); b.setAttribute('aria-label', recNote ? 'Arrêter la dictée' : 'Dicter'); } }
+function arreterDictee() { if (recNote) { try { recNote.stop(); } catch (e) { /* ignore */ } recNote = null; majMicNote(); } }
 /* Kami lit la note et remplit toutes les étapes ; on saute au récapitulatif */
 async function analyserRencontre() {
   rencLire();
   const texte = (renc.note || '').trim();
   if (!texte) { toast('Écris ou dicte d\'abord une phrase'); return; }
   if (!jarvis.token) { toast('Colle ton jeton Kami dans Réglages'); return; }
+  clearTimeout(noteSaisie.t);
   lireRencontre(); // le lecteur local d'abord : si Kami ne répond pas, ce qu'il a lu reste
   const x = renc;
-  const b = $('#rencontre .btn.primary'); if (b) { b.disabled = true; b.textContent = 'Kami lit…'; }
+  const b = $('#r-affiner'); if (b) { b.disabled = true; b.textContent = 'Kami lit…'; }
   try {
     const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: today() }) });
     const j = await r.json();
@@ -1790,6 +2132,67 @@ async function installerAppli() {
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => { /* hors ligne indisponible */ }); });
 }
+
+/* ---------- Bouton + (téléphone) : l'action de la vue ; ailleurs, Noter. Appui long : les 4 actions ---------- */
+const FAB_VUES = { planning: ['Nouveau RDV', 'plus'], kamifood: ['Nouvel abonné', 'plus'], dossiers: ['Nouveau dossier', 'plus'] };
+function majFab(view) {
+  const b = $('#fab');
+  if (!b) return;
+  const [label, ico] = FAB_VUES[view] || ['Noter une rencontre', 'noter'];
+  if (b.getAttribute('aria-label') === label && b.firstElementChild) return;
+  b.setAttribute('aria-label', label); b.title = label; b.innerHTML = ICONES[ico];
+}
+function actionPlus() {
+  if (actionPlus.long) { actionPlus.long = false; return; } // le clic qui suit un appui long a déjà ouvert le menu
+  fermerMenuPlus();
+  const h = location.hash;
+  if (h === '#planning') openEvent(null, (typeof planDate === 'string' && planDate) || today());
+  else if (h === '#kamifood') openAbonne();
+  else if (h === '#dossiers') openDossier();
+  else { openContact(); focusNote(); }
+}
+const MENU_PLUS = [['noter', 'Noter quelqu\'un', 'noter'], ['rdv', 'Nouveau RDV', 'rdv'], ['dossier', 'Nouveau dossier', 'dossier'], ['abonne', 'Nouvel abonné', 'abonne']];
+function ouvrirMenuPlus() {
+  const m = $('#menu-plus');
+  if (!m) return;
+  m.innerHTML = MENU_PLUS.map(([k, l, i]) => `<button type="button" role="menuitem" data-action="${k}" onclick="choixPlus('${k}')"><span class="mp-ico">${ICONES[i]}</span>${esc(l)}</button>`).join('');
+  m.hidden = false;
+  $('#fab')?.setAttribute('aria-expanded', 'true');
+  try { navigator.vibrate?.(12); } catch (e) { /* ignore */ }
+  m.querySelector('button')?.focus({ preventScroll: true });
+}
+/* Ferme le menu s'il est ouvert ; renvoie vrai s'il l'était */
+function fermerMenuPlus() {
+  const m = $('#menu-plus');
+  if (!m || m.hidden) return false;
+  m.hidden = true;
+  $('#fab')?.setAttribute('aria-expanded', 'false');
+  return true;
+}
+function choixPlus(k) {
+  fermerMenuPlus();
+  if (k === 'noter') { openContact(); focusNote(); }
+  else if (k === 'rdv') openEvent(null, (typeof planDate === 'string' && planDate) || today());
+  else if (k === 'dossier') openDossier();
+  else if (k === 'abonne') openAbonne();
+}
+(function appuiLongPlus() {
+  const b = $('#fab');
+  if (!b) return;
+  let t = null;
+  b.addEventListener('pointerdown', e => {
+    if (e.button > 0) return;
+    if (fermerMenuPlus()) { actionPlus.long = true; return; } // menu ouvert : ce toucher le referme seulement
+    actionPlus.long = false;
+    clearTimeout(t);
+    t = setTimeout(() => { actionPlus.long = true; ouvrirMenuPlus(); }, 500);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(k => b.addEventListener(k, () => clearTimeout(t)));
+  b.addEventListener('contextmenu', e => e.preventDefault());
+  /* Un toucher ailleurs, un changement de vue : le menu se referme */
+  document.addEventListener('pointerdown', e => { if (!e.target.closest || !e.target.closest('#menu-plus, #fab')) fermerMenuPlus(); }, true);
+  window.addEventListener('hashchange', fermerMenuPlus);
+})();
 
 /* Une saisie fermée (fenêtre ou Rencontre) applique le rechargement mis de côté */
 $('#modal').addEventListener('close', () => setTimeout(rechargementDiffere, 0));

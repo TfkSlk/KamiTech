@@ -4,7 +4,8 @@ import { ouvrir, verifier, bilan, sansDefilement } from './outil.mjs';
 
 const AUJ = '2026-10-10';
 const titre = p => p.$eval('#rencontre h2', e => e.textContent.trim());
-const continuer = async p => { await p.click('#rencontre .r-foot .btn.primary'); await p.waitForTimeout(60); };
+/* Depuis N2, l'écran 0 est « Noter » : son bouton principal enregistre tout de suite ; « Ajuster… » mène aux étapes */
+const continuer = async p => { await p.click((await titre(p)) === 'Noter' ? '#r-ajuster' : '#rencontre .r-foot .btn.primary'); await p.waitForTimeout(60); };
 const sansScrollHorizontal = p => p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 /* Avance dans la Rencontre jusqu'au récapitulatif ; renvoie les étapes vues et si chacune tenait sans défiler */
 async function jusquAuRecap(p, surEtape) {

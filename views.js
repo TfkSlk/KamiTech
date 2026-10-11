@@ -170,21 +170,15 @@ function dashboard() {
   return `
   <div class="page-head">
     <div><h1>${salut}, Toufek</h1><p>${esc(cap(fmtLong(new Date())))} · ${esc(resume)}</p></div>
-    <div class="btn-row">
-      <button class="btn" onclick="openContact()">+ Contact</button>
+    <div class="btn-row hide-sm">
       <button class="btn" onclick="openEvent()">+ RDV</button>
       <button class="btn" onclick="openAbonne()">+ Abonné</button>
-      <button class="btn primary" onclick="openDossier()">+ Dossier</button>
+      <button class="btn" onclick="openDossier()">+ Dossier</button>
     </div>
   </div>
-  <div class="card capture">
-    <form onsubmit="event.preventDefault();openContact(null,{nom:this.nom.value.trim(),sujet:this.sujet.value.trim()});this.reset()">
-      <div class="capture-lead"><strong>Qui as-tu croisé ?</strong><span class="meta">Contact, sujet, puis rappel ou créneau dans le planning.</span></div>
-      <input name="nom" placeholder="Nom (et entreprise)" required autocomplete="off">
-      <input name="sujet" placeholder="De quoi vous avez parlé" autocomplete="off">
-      <button class="btn primary">Noter</button>
-    </form>
-  </div>
+  <button type="button" class="noter-bar" onclick="openContact();focusNote()" aria-label="Noter quelqu'un que tu viens de croiser">
+    <span class="noter-ico">${ICONES.noter}</span><span class="noter-txt">Noter quelqu'un…</span><span class="noter-aide">Une phrase : nom, service, rappel</span>
+  </button>
   ${empty ? `<div class="card notice"><div><h2>Ton tableau de bord est vide</h2><p class="empty">Ajoute un abonné, un dossier ou un RDV, ou charge un exemple pour voir comment tout se calcule.</p></div><button class="btn" onclick="loadDemo()">Charger un exemple</button></div>` : ''}
   ${!empty && aDemo() ? `<div class="card notice"><div><h2>Des données d'exemple sont affichées</h2><p class="empty">Elles se mélangent à tes vraies données. Retire-les d'un clic : tes RDV, dossiers et abonnés réels restent.</p></div><button class="btn primary" onclick="retirerExemple()">Retirer l'exemple</button></div>` : ''}
   <div class="grid kpis">

@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Kami Groupe</title>
   <meta name="theme-color" content="#000000">
   <meta name="description" content="Tableau de bord Kami Groupe : planning, KamiFood, apport d'affaires, gains.">
@@ -49,9 +49,10 @@
     </form>
   </dialog>
 
-  <div id="rencontre" hidden></div>
+  <div id="rencontre" role="dialog" aria-modal="true" aria-labelledby="r-titre" hidden></div>
 
-  <button id="fab" class="btn primary" aria-label="Nouveau RDV" onclick="openEvent(null, (typeof planDate === 'string' && planDate) || today())">+</button>
+  <button id="fab" class="btn primary" aria-label="Noter une rencontre" aria-haspopup="menu" aria-expanded="false" onclick="actionPlus()">+</button>
+  <div id="menu-plus" class="menu-plus" role="menu" aria-label="Ajouter" hidden></div>
 
   <div id="toast" role="status" aria-live="polite"></div>
 
