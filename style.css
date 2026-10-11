@@ -141,6 +141,7 @@ main { padding: 30px 34px 70px; max-width: 1240px; width: 100%; min-width: 0; }
 .alerte-donnees p { margin: 0; color: var(--text-2); font-size: 14px; }
 .alerte-donnees .btn-row { flex: 0 1 auto; }
 .alerte-donnees label.btn { display: inline-flex; align-items: center; }
+.alerte-donnees:focus { outline: none; }
 /* Réglages > Sauvegarde : état du stockage */
 .etat-stockage { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; max-width: 620px; margin: 16px 0 12px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 14px; }
 .etat-stockage dt { color: var(--muted); }
@@ -397,6 +398,10 @@ dialog::backdrop { background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px);
   main > * { width: 100%; }
   .alerte-donnees .btn-row { width: 100%; }
   .alerte-donnees .btn-row .btn { flex: 1 1 auto; justify-content: center; text-align: center; }
+  /* État du stockage au téléphone : chaque libellé au-dessus de sa valeur, rien d'écrasé ni de superposé */
+  .etat-stockage { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+  .etat-stockage dd { justify-content: flex-start; text-align: left; margin-bottom: 10px; }
+  .etat-stockage dd:last-of-type { margin-bottom: 0; }
   .chart .tick { font-size: 13px; }
   .chart .val { font-size: 14px; }
   .chart-card .chart { max-height: none; }

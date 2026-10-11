@@ -51,12 +51,14 @@ const blank = () => ({
     { titre: 'Bilan trimestriel', jours: 90, duree: 45, mode: 'visio' },
   ],
   prefs: { periode: 'mois' },
-  rev: 0, // version, +1 à chaque enregistrement : une fenêtre en retard n'écrase jamais une plus récente
 });
 /* Données illisibles (JSON abîmé) : une copie brute est gardée et rien n'est écrit tant que Toufek n'a pas choisi quoi faire */
 let donneesIllisibles = false, copieIllisible = false;
 /* Une autre fenêtre a écrit pendant une saisie : on recharge à la fermeture de la fenêtre ou de la Rencontre */
 let aRecharger = false;
+/* Version des données enregistrées, +1 à chaque enregistrement : une fenêtre en retard n'écrase jamais une plus récente.
+   Elle est écrite en tête de la clé, mais ne fait pas partie de l'état (un état restauré est identique à l'original). */
+let revCourant = 0;
 let state = load();
 
 /* Ici, load(), migrate(), assainir() et ce qu'elles appellent tournent AVANT la définition des const utilitaires
@@ -65,7 +67,7 @@ let state = load();
 function jourLocal(ts) { let d = ts == null ? new Date() : new Date(ts); if (isNaN(d)) d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 /* rev en tête du texte stocké : save() le relit sans tout analyser */
-function serialiser(s) { return JSON.stringify({ rev: s.rev || 0, ...s }); }
+function serialiser(s, rev = revCourant) { const o = { rev, ...s }; o.rev = rev; return JSON.stringify(o); }
 function revDe(brut) {
   if (!brut) return 0;
   const m = /^\{"rev":(\d+)[,}]/.exec(brut);
@@ -101,19 +103,29 @@ function garderIllisible(brut) {
 
 function load() {
   let s = blank(), lu = null, avant = {};
-  donneesIllisibles = false;
+  donneesIllisibles = false; revCourant = 0;
   const brut = lireCle(KEY);
   if (brut) {
     try { lu = JSON.parse(brut); } catch (e) { lu = undefined; }
     if (!lu || typeof lu !== 'object' || Array.isArray(lu)) { garderIllisible(brut); lu = null; }
     else {
       s = { ...s, ...lu };
+      revCourant = Number.isInteger(lu.rev) && lu.rev > 0 ? lu.rev : 0;
       /* Copie des drapeaux AVANT migrate : il modifie le même objet prefs.migrations, une nouvelle migration passerait sinon inaperçue */
       const m = lu.prefs && lu.prefs.migrations;
       if (m && typeof m === 'object' && !Array.isArray(m)) avant = { ...m };
     }
   }
-  s = migrate(s);
+  try { s = migrate(s); }
+  catch (e) {
+    /* Filet : une migration ou une réparation qui plante ne donne jamais un écran blanc. Rien n'est écrit, la copie brute
+       est gardée et la carte rouge propose quoi faire (comme pour des données illisibles). */
+    console.warn(e);
+    if (brut) garderIllisible(brut);
+    lu = null;
+    s = migrate(blank());
+    s.prefs.jourCopie = jourLocal(); // ces données lisibles mais en panne ne remplacent pas la bonne copie de la veille aujourd'hui
+  }
   /* Une migration nommée vient de tourner, ou des données ont été réparées : on l'écrit tout de suite pour que ce soit stable
      (save() n'est pas encore utilisable ici). La valeur d'avant part d'abord dans la copie de la veille. */
   if (lu) {
@@ -124,6 +136,7 @@ function load() {
   return s;
 }
 function migrate(s) {
+  delete s.rev; // version d'enregistrement : jamais dans l'état (voir revCourant)
   /* Gardes : une collection absente ou abîmée (null, objet…) redevient un tableau, les éléments vides sont écartés */
   if (!s.prefs || typeof s.prefs !== 'object' || Array.isArray(s.prefs)) s.prefs = {};
   ['dossiers', 'events', 'abonnes', 'aVoir', 'memoire', 'formules', 'rdvModele'].forEach(k => {
@@ -239,9 +252,17 @@ function assainir(s) {
   };
   const refId = (v, t) => { if (v == null || v === '') return ''; v = String(v); return tables[t].get(v) || (ID.test(v) ? v : ''); };
   const maj = (x, k, v) => { if (x[k] !== v) { x[k] = v; n++; } };
-  /* Dates : AAAA-MM-JJ ; un horodatage ISO est ramené à son jour ; sinon la date est vidée */
+  /* Dates : AAAA-MM-JJ ; un horodatage ISO est ramené à son jour ; une date française JJ/MM/AAAA est retournée ;
+     sinon la date est vidée */
   const DATES = ['date', 'fin', 'rappel', 'debut', 'dateRelance', 'dateSignature', 'datePaiement'];
-  const jour = v => typeof v === 'string' && JOUR.test(v) ? v : typeof v === 'string' && JOUR.test(v.slice(0, 10)) && /^T|^ /.test(v.slice(10)) ? v.slice(0, 10) : '';
+  const FR = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
+  const jourFr = v => {
+    const m = FR.exec(v.trim());
+    if (!m) return '';
+    const [j, mo, a] = [Number(m[1]), Number(m[2]), Number(m[3])], d = new Date(a, mo - 1, j);
+    return d.getFullYear() === a && d.getMonth() === mo - 1 && d.getDate() === j ? `${m[3]}-${String(mo).padStart(2, '0')}-${String(j).padStart(2, '0')}` : '';
+  };
+  const jour = v => typeof v !== 'string' ? '' : JOUR.test(v) ? v : JOUR.test(v.slice(0, 10)) && /^T|^ /.test(v.slice(10)) ? v.slice(0, 10) : jourFr(v);
   /* Textes : un nombre devient du texte, un objet son JSON (rien n'est jeté) */
   const TEXTES = ['titre', 'nom', 'entreprise', 'restaurant', 'contact', 'notes', 'heure', 'tel', 'email', 'ville', 'partenaire', 'lieu'];
   const texte = v => v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
@@ -262,6 +283,8 @@ function assainir(s) {
     if (!connu(SECTEURS, v.activite)) maj(v, 'activite', 'perso');
     if (!connu(STATUTS_AV, v.statut)) maj(v, 'statut', 'suivi');
     if (!connu(ATTENTES, v.attente)) maj(v, 'attente', '');
+    /* Règle des contacts : un contact en cours a toujours un rappel (une date illisible vidée, une suite oubliée) → aujourd'hui */
+    if (v.statut === 'suivi' && !v.rappel) maj(v, 'rappel', jourLocal());
     if (!Array.isArray(v.historique)) { v.historique = []; n++; }
     v.historique = v.historique.filter(h => h != null).map(h => {
       if (typeof h !== 'object' || Array.isArray(h)) { n++; return { date: '', texte: texte(h) }; }
@@ -289,26 +312,27 @@ function assainir(s) {
     if (!Array.isArray(s.stripe[k])) { s.stripe[k] = []; n++; }
     else s.stripe[k] = s.stripe[k].filter(x => !!x && typeof x === 'object');
   });
-  if (!Number.isInteger(s.rev) || s.rev < 0) s.rev = 0;
+  delete s.rev; // version d'enregistrement : hors de l'état (voir revCourant)
   return n;
 }
 /* Enregistre. Rien n'est écrit si les données stockées sont illisibles (en attente d'un choix),
    ni si une autre fenêtre a écrit une version plus récente (on recharge plutôt que d'écraser). */
 function save() {
   if (donneesIllisibles) {
-    if (!save.prevenu || Date.now() - save.prevenu > 4000) { save.prevenu = Date.now(); toast('Pas enregistré : choisis d\'abord quoi faire de tes données illisibles'); }
+    /* Après le toast de l'action (« Dossier créé »…), qui sinon le recouvrirait : chaque saisie non enregistrée est signalée */
+    setTimeout(() => toastAction('Pas enregistré : tes données illisibles attendent ton choix', 'Choisir', voirCarteIllisible, 8000), 0);
     return false;
   }
   let brut = null;
   try { brut = localStorage.getItem(KEY); } catch (e) { toast("Impossible d'enregistrer dans ce navigateur"); return false; }
-  if (revDe(brut) > (state.rev || 0)) {
+  if (revDe(brut) > revCourant) {
     recharger();
     setTimeout(() => toast('Mis à jour depuis une autre fenêtre : refais ta dernière action', 4500), 0); // après le toast de l'action perdue
     return false;
   }
   copieVeille(state, brut);
-  state.rev = (state.rev || 0) + 1;
-  try { localStorage.setItem(KEY, serialiser(state)); return true; }
+  const rev = revCourant + 1;
+  try { localStorage.setItem(KEY, serialiser(state, rev)); revCourant = rev; return true; }
   catch (e) {
     if (e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014)) {
       setTimeout(() => toastAction('Stockage plein : sauvegarde maintenant', 'Exporter', exporter, 15000), 0);
@@ -319,12 +343,17 @@ function save() {
 const revStocke = () => revDe(lireCle(KEY));
 /* Relit les données stockées (autre fenêtre, conflit) et redessine */
 function recharger() { aRecharger = false; state = load(); render(); }
-/* Remplace tout l'état (import, retour à la veille, annulation, effacement) sans perdre le fil des versions */
+/* Remplace tout l'état (import, retour à la veille, annulation, effacement) sans perdre le fil des versions.
+   La copie de la veille ne suit que le calendrier : le jour de copie reste celui de l'état en mémoire, jamais celui des données
+   restaurées ou importées. Sinon un retour à la veille, un import ou une annulation referait la copie dans la journée
+   et y mettrait l'état qu'on vient de quitter, à la place de celui d'hier. */
 function remplacerEtat(data) {
-  const rev = Math.max(revStocke(), state.rev || 0);
+  const jc = state.prefs.jourCopie;
+  revCourant = Math.max(revStocke(), revCourant);
   state = migrate({ ...blank(), ...data });
-  state.rev = rev;
-  save(); render();
+  if (jc) state.prefs.jourCopie = jc; else delete state.prefs.jourCopie;
+  const ok = save(); render();
+  return ok;
 }
 /* Une autre fenêtre (ou l'appli rouverte sur iPhone) a écrit : on suit, sauf pendant une saisie */
 const occupe = () => {
@@ -336,8 +365,8 @@ function autreFenetre() {
   recharger(); toast('Mis à jour depuis une autre fenêtre');
 }
 function rechargementDiffere() { if (aRecharger && !occupe()) autreFenetre(); }
-window.addEventListener('storage', e => { if (e.key === KEY && revDe(e.newValue) !== (state.rev || 0)) autreFenetre(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && revStocke() > (state.rev || 0)) autreFenetre(); });
+window.addEventListener('storage', e => { if (e.key === KEY && revDe(e.newValue) !== revCourant) autreFenetre(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && revStocke() > revCourant) autreFenetre(); });
 /* Rechargement mis de côté pendant une frappe : appliqué quand le champ est quitté, jamais au milieu d'un clic
    (le bouton touché serait redessiné sous le doigt et le clic perdu) */
 let pointeurBas = false;
@@ -599,19 +628,41 @@ function choixAjout(k) {
 }
 document.addEventListener('pointerdown', e => { if (!e.target.closest || !e.target.closest('#menu-ajout, #btn-ajout')) fermerMenuAjout(); }, true);
 
-/* Carte rouge en tête quand les données stockées sont illisibles : rien n'est écrit tant qu'aucun choix n'est fait */
+/* Carte rouge en tête quand les données stockées sont illisibles : rien n'est écrit tant qu'aucun choix n'est fait.
+   Sans copie possible (stockage plein), le texte illisible n'existe plus que sous KEY : on propose d'abord de le télécharger. */
 function carteIllisible() {
-  const veille = lireCle(KEY + '.veille');
-  return `<div class="card alerte-donnees" role="alert">
+  const veille = lireCle(KEY + '.veille'), sansCopie = !copieIllisible && lireCle(KEY) !== null;
+  return `<div class="card alerte-donnees" role="alert" tabindex="-1">
     <div><h2>Tes données n'ont pas pu être lues.${copieIllisible ? ' Une copie est gardée.' : ''}</h2>
-    <p>${copieIllisible ? 'Rien n\'est enregistré tant que tu n\'as pas choisi.' : 'Copie impossible (stockage plein) : rien n\'est effacé tant que tu n\'as pas choisi. Exporte d\'abord une sauvegarde si tu peux.'}</p></div>
+    <p>${copieIllisible ? 'Rien n\'est enregistré tant que tu n\'as pas choisi.' : 'Copie impossible (stockage plein) : rien n\'est effacé tant que tu n\'as pas choisi. Télécharge-les d\'abord pour les garder.'}</p></div>
     <div class="btn-row">
-      ${veille ? '<button class="btn primary" onclick="revenirVeille()">Revenir à la veille</button>' : ''}
-      <label class="btn ${veille ? '' : 'primary'}">Importer une sauvegarde<input type="file" accept="application/json,.json" hidden onchange="importer(this.files[0]);this.value=''"></label>
+      ${sansCopie ? '<button class="btn primary" onclick="telechargerIllisible()">Télécharger les données illisibles</button>' : ''}
+      ${veille ? `<button class="btn ${sansCopie ? '' : 'primary'}" onclick="revenirVeille()">Revenir à la veille</button>` : ''}
+      <label class="btn ${veille || sansCopie ? '' : 'primary'}">Importer une sauvegarde<input type="file" accept="application/json,.json" hidden onchange="importer(this.files[0]);this.value=''"></label>
       <button class="btn" onclick="repartirDeZero()">Repartir de zéro</button>
     </div>
   </div>`;
 }
+/* « Choisir » du toast « Pas enregistré » : amène la carte rouge (en tête de chaque page) sous les yeux */
+function voirCarteIllisible() {
+  const c = $('.alerte-donnees[role="alert"]');
+  if (!c) return;
+  c.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  c.focus({ preventScroll: true });
+}
+/* Le texte illisible tel quel, en .txt : rien ne se perd même si le navigateur n'a pas pu en garder une copie */
+function telechargerIllisible() {
+  const brut = lireCle(KEY);
+  if (brut === null) { toast('Plus rien à télécharger : les données illisibles ont déjà été remplacées'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([brut], { type: 'text/plain' }));
+  a.download = `kami-donnees-illisibles-${today()}.txt`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+/* Données illisibles sans copie : les remplacer les perd pour de bon, on demande d'abord */
+const perteIllisible = () => donneesIllisibles && !copieIllisible && lireCle(KEY) !== null;
+const MSG_PERTE = 'Tes données illisibles n\'ont pas pu être copiées : elles seront définitivement remplacées. Télécharge-les d\'abord si tu veux les garder.';
 async function repartirDeZero() {
   if (!await confirmer(copieIllisible ? 'Repartir de zéro ? La copie des données illisibles reste gardée dans ce navigateur.' : 'Repartir de zéro ? Les données illisibles seront remplacées.', 'Repartir de zéro')) return;
   donneesIllisibles = false;
@@ -623,7 +674,10 @@ async function revenirVeille() {
   let data = null;
   try { data = JSON.parse(lireCle(KEY + '.veille')); } catch (e) { /* abîmée */ }
   if (!data || typeof data !== 'object' || Array.isArray(data)) { toast('La copie de la veille est introuvable ou illisible'); return; }
-  if (donneesIllisibles) { donneesIllisibles = false; remplacerEtat(data); toast('Version de la veille restaurée'); return; }
+  if (donneesIllisibles) {
+    if (perteIllisible() && !await confirmer('Revenir à la veille ? ' + MSG_PERTE, 'Remplacer')) return;
+    donneesIllisibles = false; remplacerEtat(data); toast('Version de la veille restaurée'); return;
+  }
   if (!await confirmer('Revenir à la copie automatique ? Les changements faits depuis seront remplacés (tu pourras annuler).', 'Revenir')) return;
   const avant = JSON.stringify(state);
   remplacerEtat(data);
@@ -943,7 +997,7 @@ function importer(file) {
   file.text().then(txt => {
     const data = JSON.parse(txt);
     if (!data || typeof data !== 'object' || !Array.isArray(data.dossiers) || !Array.isArray(data.events)) throw new Error();
-    return confirmer('Remplacer les données actuelles par celles du fichier ?', 'Remplacer').then(ok => {
+    return confirmer(perteIllisible() ? 'Remplacer par les données du fichier ? ' + MSG_PERTE : 'Remplacer les données actuelles par celles du fichier ?', 'Remplacer').then(ok => {
       if (!ok) return;
       const illisible = donneesIllisibles, avant = JSON.stringify(state);
       if (!illisible) { try { localStorage.setItem(KEY + '.avant-import', avant); } catch (e) { /* stockage plein : la copie en mémoire suffit pour annuler */ } }
@@ -1976,7 +2030,7 @@ document.addEventListener('keydown', e => {
 function enregistrerRencontre() {
   rencLire();
   /* Une autre fenêtre a écrit pendant la saisie : on repart de ses données (rien de ce qui est saisi ici n'est perdu) */
-  if (aRecharger || revStocke() > (state.rev || 0)) {
+  if (aRecharger || revStocke() > revCourant) {
     const id = renc.v && renc.v.id;
     aRecharger = false; state = load();
     if (id) { renc.v = aVoir(id); if (!renc.v) { fermerRencontre(); render(); toast('Ce contact a été supprimé dans une autre fenêtre'); return; } }
@@ -2338,11 +2392,14 @@ function projection() {
 }
 
 /* Rejoue sur nos données ce que le cerveau a fait sur sa copie */
-/* Seules les collections que Kami modifie sont acceptées ; ce qui est appliqué est assaini puis enregistré, même si une action échoue */
+/* Seules les collections que Kami modifie sont acceptées ; ce qui est appliqué est assaini puis enregistré, même si une action échoue.
+   Renvoie vrai si c'est enregistré (ou s'il n'y avait rien à faire). */
 const COLLECTIONS_KAMI = ['events', 'dossiers', 'abonnes', 'aVoir'];
 function appliquer(actions) {
-  let nav = null;
+  let nav = null, ok = true;
   const liste = Array.isArray(actions) ? actions : [];
+  /* Une autre fenêtre a écrit pendant la requête : on repart de ses données (les ids de Kami restent valables), rien n'est jeté */
+  if (liste.length && (aRecharger || revStocke() > revCourant)) { aRecharger = false; state = load(); }
   try {
     for (const a of liste) {
       if (!a || typeof a !== 'object') continue;
@@ -2354,9 +2411,10 @@ function appliquer(actions) {
       else if (a.op === 'navigate') nav = a.vue;
     }
   } finally {
-    if (liste.length) { assainir(state); save(); }
+    if (liste.length) { assainir(state); ok = save(); }
   }
-  if (nav && nav !== 'jarvis' && Object.prototype.hasOwnProperty.call(views, nav)) setTimeout(() => { location.hash = '#' + nav; }, 1200);
+  if (ok && nav && nav !== 'jarvis' && Object.prototype.hasOwnProperty.call(views, nav)) setTimeout(() => { location.hash = '#' + nav; }, 1200);
+  return ok;
 }
 
 async function testerJarvis() {
@@ -2394,12 +2452,13 @@ async function jarvisEnvoyer(texte, viaVoix) {
     });
     const j = await r.json().catch(() => ({ erreur: `Réponse illisible (${r.status})` }));
     if (!r.ok || j.erreur) throw new Error(j.erreur || `Erreur ${r.status}`);
-    appliquer(j.actions);
-    jarvis.historique.push({ role: 'assistant', content: j.texte, actions: (j.actions || []).length });
+    /* Kami n'annonce « ✓ appliqué » que si c'est vraiment enregistré ; sinon sa réponse n'est pas gardée (il ne s'en souviendra pas) */
+    if (!appliquer(j.actions)) throw Object.assign(new Error('Pas enregistré : ce que je viens de faire n\'a pas pu être gardé. Redemande-moi.'), { vocal: 'Désolé, ce n\'est pas enregistré. Redemande-moi.' });
+    jarvis.historique.push({ role: 'assistant', content: j.texte, actions: Array.isArray(j.actions) ? j.actions.length : 0 });
     if (jarvis.voix && viaVoix) parler(j.texte);
   } catch (e) {
     jarvis.historique.push({ role: 'assistant', content: e.message || String(e), erreur: true });
-    if (viaVoix && jarvis.voix) parler('Désolé, je n\'ai pas pu répondre.');
+    if (viaVoix && jarvis.voix) parler(e.vocal || 'Désolé, je n\'ai pas pu répondre.');
   }
   jarvisOccupe = false;
   saveJarvis(); majChat();
