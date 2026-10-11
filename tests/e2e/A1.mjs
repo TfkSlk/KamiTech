@@ -52,11 +52,16 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     const css = fs.readFileSync(path.join(RACINE, 'style.css'), 'utf8');
     verifier(`${ecran} 1. style.css : plus de règles order pour .page-head, .notice, .agenda-row, .noter-bar`, !/\.(page-head|notice|agenda-row|noter-bar|alerte-donnees|vide-kf)\s*\{\s*order/.test(css));
 
-    /* En-tête : aucun bouton au téléphone ; « + Ajouter ▾ » (RDV, dossier, abonné) à l'ordinateur */
-    const tete = await p.evaluate(() => ({ boutons: [...document.querySelectorAll('.page-head button')].filter(b => b.getBoundingClientRect().width > 0).map(b => b.textContent.replace(/\s+/g, ' ').trim()) }));
+    /* En-tête : aucun bouton au téléphone ; « Noter » (principal) et « + Ajouter ▾ » (RDV, dossier, abonné) à l'ordinateur */
+    const tete = await p.evaluate(() => ({ boutons: [...document.querySelectorAll('.page-head button')].filter(b => b.getBoundingClientRect().width > 0).map(b => b.textContent.replace(/\s+/g, ' ').trim()),
+      principal: [...document.querySelectorAll('.page-head .btn.primary')].filter(b => b.getBoundingClientRect().width > 0).map(b => b.textContent.trim()) }));
     if (tel) verifier(`${ecran} 1. en-tête sans bouton au téléphone`, tete.boutons.length === 0, JSON.stringify(tete));
     else {
-      verifier(`${ecran} 1. en-tête : « + Ajouter ▾ »`, JSON.stringify(tete.boutons) === '["+ Ajouter ▾"]', JSON.stringify(tete));
+      verifier(`${ecran} 1. en-tête : « Noter » (principal) puis « + Ajouter ▾ » (recette)`, JSON.stringify(tete.boutons) === '["Noter","+ Ajouter ▾"]' && JSON.stringify(tete.principal) === '["Noter"]', JSON.stringify(tete));
+      await p.click('.page-head .btn.primary'); await pause(p, 200);
+      const noter = await p.evaluate(() => ({ ouverte: !document.querySelector('#rencontre').hidden, focus: document.activeElement?.id }));
+      verifier(`${ecran} 1. « Noter » de l'en-tête ouvre l'écran Noter, curseur dans la note`, noter.ouverte && noter.focus === 'r-note', JSON.stringify(noter));
+      await p.evaluate(() => fermerRencontre()); await pause(p, 150);
       await p.click('#btn-ajout'); await pause(p);
       const m = await p.evaluate(() => ({ ouvert: !document.querySelector('#menu-ajout').hidden, items: [...document.querySelectorAll('#menu-ajout [role=menuitem]')].map(b => b.textContent.trim()), aria: document.querySelector('#btn-ajout').getAttribute('aria-expanded') }));
       verifier(`${ecran} 1. menu Ajouter : Nouveau RDV, Nouveau dossier, Nouvel abonné`, m.ouvert && m.aria === 'true' && JSON.stringify(m.items) === '["Nouveau RDV","Nouveau dossier","Nouvel abonné"]', JSON.stringify(m));
@@ -333,6 +338,114 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     const persona = fs.readFileSync(path.join(RACINE, 'api', 'jarvis.js'), 'utf8');
     verifier(`${ecran} Kami : projection().resume.alertes et persona à jour`, Array.isArray(proj) && proj.some(a => a.compte === 'J-5' && a.niveau === 'clair' && a.titre === 'Signature énergie') && persona.includes('resume.alertes') && !persona.includes('le tableau de bord l\'affiche en alerte'), JSON.stringify(proj));
     verifier(`${ecran} 7. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* ---------- Recette A1. Créneau calé depuis la fiche du contact (« Planifier un RDV », RDV sans lien c:) : plus d'alerte, ni rouge ni pastille ---------- */
+  {
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, horloge: '2026-10-12T09:00:00', vue: 'contacts' });
+    await p.evaluate(() => {
+      window.__badge = [];
+      navigator.setAppBadge = n => { window.__badge.push(n); return Promise.resolve(); };
+      navigator.clearAppBadge = () => { window.__badge.push(0); return Promise.resolve(); };
+      state.aVoir.push({ id: 'karim', createdAt: 1, nom: 'Karim', entreprise: '', activite: 'foncier', priorite: 'normale', statut: 'suivi', attente: '', rappel: '2026-10-20', lien: '', historique: [{ date: '2026-10-09', texte: 'Taxe foncière' }], eventId: 'per1' });
+      state.events.push({ id: 'per1', titre: 'Karim · Présentation des services', date: '2026-10-12', fin: '2026-10-18', heure: '', duree: 0, mode: 'tache', activite: 'foncier', lien: 'c:karim', fait: false, notes: '', important: false, aPrevoir: true });
+      save(); render();
+    });
+    const avant = await p.evaluate(() => alertes().map(a => `${a.compte}:${a.sous}`));
+    verifier(`${ecran} recette. période à prévoir de Karim (lien c:karim), sans RDV : « Créneau toujours pas calé » à J-6`, JSON.stringify(avant) === '["J-6:Créneau toujours pas calé, il reste 6 j"]', JSON.stringify(avant));
+    await p.click('#main li:has-text("Karim") .clickable'); await pause(p, 250);
+    await p.click('#modal button:has-text("Planifier un RDV")'); await pause(p, 250);
+    await p.evaluate(() => {
+      const d = document.querySelector('#f-date'); d.value = '2026-10-17'; d.dispatchEvent(new Event('input', { bubbles: true })); d.dispatchEvent(new Event('change', { bubbles: true }));
+      const h = document.querySelector('#f-heure'); h.value = '15:00'; h.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await p.click('#modal button[value="ok"]'); await pause(p, 250);
+    await accueil(p);
+    const r12 = await p.evaluate(() => ({ karim: aVoir('karim').statut, rdv: state.events.filter(e => !e.fin).map(e => `${e.date} ${e.heure} lien="${e.lien}"`), alertes: alertes().length, bandeau: !!document.querySelector('.alertes') }));
+    verifier(`${ecran} recette. RDV du 17 posé par « Planifier un RDV » de la fiche : plus d'alerte « pas calé » ni de bandeau`,
+      r12.karim === 'planifie' && r12.rdv.length === 1 && r12.rdv[0] === '2026-10-17 15:00 lien=""' && r12.alertes === 0 && !r12.bandeau, JSON.stringify(r12));
+    await p.clock.setSystemTime(new Date('2026-10-17T09:00:00'));
+    await p.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await pause(p, 200);
+    const r17 = await p.evaluate(() => ({ jour: document.querySelector('.page-head p').textContent.split(' · ')[0], rouge: !!document.querySelector('.alertes .alerte-ligne.fort'), bandeau: !!document.querySelector('.alertes'), badge: window.__badge.at(-1), pastille: pastille() }));
+    verifier(`${ecran} recette. le 17 à 09:00 (RDV à 15:00) : ni ligne rouge « Demain » ni pastille sur l'icône`, r17.jour === 'Samedi 17 octobre' && !r17.rouge && !r17.bandeau && r17.badge === 0 && r17.pastille === 0, JSON.stringify(r17));
+    verifier(`${ecran} recette. créneau calé depuis la fiche : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* ---------- Recette A1. Ce qui cale (ou non) une période à prévoir d'un contact ; un contact clos n'a plus d'alerte ---------- */
+  {
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur });
+    const r = await p.evaluate(() => {
+      const per = (id, cid, date, fin) => ({ id, titre: 'À prévoir ' + id, date, fin, heure: '', duree: 0, mode: 'tache', activite: 'cee', lien: 'c:' + cid, fait: false, notes: '', important: false, aPrevoir: true });
+      const rdv = (id, date, lien) => ({ id, titre: 'RDV ' + id, date, heure: '10:00', duree: 30, mode: 'place', activite: 'cee', lien, fait: false, notes: '' });
+      const contact = (id, extra) => ({ id, createdAt: 1, nom: 'Contact ' + id, entreprise: '', activite: 'cee', priorite: 'normale', statut: 'suivi', attente: '', rappel: '2026-10-20', lien: '', historique: [], ...extra });
+      state.dossiers.push({ id: 'dx', createdAt: 1, entreprise: 'Garage X', activite: 'cee', statut: 'etude', contact: '', ville: '', partenaire: '', commEstimee: 0 });
+      state.aVoir.push(
+        contact('cA', { statut: 'planifie', rappel: '', eventId: 'rA' }), // RDV posé après la période, à venir
+        contact('cB', { eventId: 'pB', lien: 'd:dx' }), // RDV du client lié du contact dans la période
+        contact('cC', { eventId: 'pC' }), // un RDV sans rapport dans la période : ne cale rien
+        contact('cD', { statut: 'clos', rappel: '', eventId: 'pD' }), // « pas intéressé »
+      );
+      state.events.push(per('pA', 'cA', '2026-10-12', '2026-10-16'), rdv('rA', '2026-10-22', ''),
+        per('pB', 'cB', '2026-10-12', '2026-10-16'), rdv('rB', '2026-10-14', 'd:dx'),
+        per('pC', 'cC', '2026-10-12', '2026-10-16'), rdv('rC', '2026-10-14', ''),
+        per('pD', 'cD', '2026-10-05', '2026-10-11'));
+      save(); render();
+      const avant = { ids: alertes().map(a => a.id), pastille: pastille(), bandeau: document.querySelector('.alertes')?.className.trim(), kami: projection().resume.alertes.length };
+      Object.assign(aVoir('cD'), { statut: 'suivi', rappel: '2026-10-20' }); save(); render();
+      return { avant, rouvert: { ids: alertes().map(a => `${a.id}:${a.niveau}`), pastille: pastille() } };
+    });
+    verifier(`${ecran} recette. calé : RDV du contact posé après la période (à venir), RDV de son client lié dans la période ; pas calé : un RDV sans rapport`, JSON.stringify(r.avant.ids) === '["pC"]', JSON.stringify(r.avant));
+    verifier(`${ecran} recette. contact clos : plus d'alerte rouge « pas calé », pastille à 0, bandeau sans rouge (Kami voit la même chose)`, r.avant.pastille === 0 && r.avant.bandeau === 'card alertes' && r.avant.kami === 1, JSON.stringify(r.avant));
+    verifier(`${ecran} recette. le même contact rouvert : l'alerte « Demain » revient (rouge) et compte sur l'icône`, JSON.stringify(r.rouvert.ids) === '["pD:fort","pC:clair"]' && r.rouvert.pastille === 1, JSON.stringify(r.rouvert));
+    verifier(`${ecran} recette. périodes de contacts : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* ---------- Recette A1. RDV fait ce matin : « quelle suite ? » à faire aujourd'hui, pas en rouge ; RDV d'avant-hier : en retard ---------- */
+  {
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur });
+    await p.evaluate(() => {
+      state.events.push({ id: 'rv', titre: 'RDV Lina', date: '2026-10-10', heure: '08:00', duree: 30, mode: 'place', activite: 'cee', lien: 'c:lina', fait: true, notes: '' },
+        { id: 'rv2', titre: 'RDV Inès', date: '2026-10-08', heure: '11:00', duree: 30, mode: 'place', activite: 'cee', lien: 'c:ines', fait: false, notes: '' });
+      state.aVoir.push({ id: 'lina', createdAt: 1, nom: 'Lina', entreprise: '', activite: 'cee', priorite: 'normale', statut: 'planifie', attente: '', rappel: '', eventId: 'rv', historique: [{ date: '2026-10-01', texte: 'Vue au salon' }] },
+        { id: 'ines', createdAt: 1, nom: 'Inès', entreprise: '', activite: 'cee', priorite: 'normale', statut: 'planifie', attente: '', rappel: '', eventId: 'rv2', historique: [{ date: '2026-10-01', texte: 'RDV calé' }] });
+      save(); render();
+    });
+    for (const vue of ['dashboard', 'contacts']) {
+      await p.evaluate(h => { avFiltre = 'tous'; location.hash = '#' + h; render(); }, vue); await pause(p);
+      const c = await p.evaluate(() => {
+        const li = nom => [...document.querySelectorAll(location.hash === '#contacts' ? '#main .list > li' : '.rappel-card .list > li')].find(l => l.querySelector('.title-txt')?.textContent.includes(nom));
+        const info = l => l && { cl: l.className.trim(), when: l.querySelector('.when').className.trim(), txt: l.querySelector('.when').textContent.trim() };
+        return { lina: info(li('Lina')), ines: info(li('Inès')) };
+      });
+      verifier(`${ecran} #${vue} recette. RDV fait ce matin : « RDV fait · quelle suite ? » à faire aujourd'hui (.when.du), ni retard ni rouge`, c.lina && c.lina.txt === 'RDV fait · quelle suite ?' && !/retard/.test(c.lina.cl) && c.lina.when === 'when du', JSON.stringify(c.lina));
+      verifier(`${ecran} #${vue} recette. RDV d'avant-hier sans suite : en retard (rouge)`, c.ines && /retard/.test(c.ines.cl) && c.ines.when === 'when late', JSON.stringify(c.ines));
+    }
+    const jour = await p.evaluate(() => { location.hash = '#dashboard'; render(); return [...document.querySelectorAll('.jour-card .list > li')].filter(l => /Lina|Inès/.test(l.textContent) && !/RDV (Lina|Inès)/.test(l.querySelector('.title-txt')?.textContent || '')).map(l => `${/Lina/.test(l.textContent) ? 'Lina' : 'Inès'}:${/retard/.test(l.className) ? 'retard' : 'jour'}`); });
+    verifier(`${ecran} recette. « Aujourd'hui » dit la même chose : Inès en retard, Lina dans la journée`, JSON.stringify(jour.sort()) === '["Inès:retard","Lina:jour"]', JSON.stringify(jour));
+    const fiches = [];
+    for (const id of ['lina', 'ines']) {
+      await p.evaluate(i => openAVoir(i), id); await pause(p, 200);
+      fiches.push(await p.evaluate(() => document.querySelector('#fiche-resume .r2').className.trim()));
+      await fermerFiche(p);
+    }
+    verifier(`${ecran} recette. fiche : « Prochaine étape » en rouge seulement pour la suite en retard`, JSON.stringify(fiches) === '["r2","r2 late"]', JSON.stringify(fiches));
+    verifier(`${ecran} recette. suite d'un RDV : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
+    await fermer();
+  }
+
+  /* ---------- Recette A1. Le redessin automatique (5 min, retour au premier plan) garde les défilements internes ---------- */
+  {
+    const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, exemple: true, vue: tel ? 'dossiers' : 'planning' });
+    await p.evaluate(h => { location.hash = '#' + h; }, tel ? 'dossiers' : 'planning'); await pause(p, 200);
+    const zone = tel ? '#main .table-wrap' : '#main .tg-body';
+    const avant = await p.evaluate(({ z, tel }) => { const b = document.querySelector(z); if (tel) b.scrollLeft = 200; else b.scrollTop = 250; document.querySelector('#main').insertAdjacentHTML('beforeend', '<i id="marque"></i>'); return tel ? b.scrollLeft : b.scrollTop; }, { z: zone, tel });
+    await p.clock.runFor(6 * 60e3); await pause(p, 200);
+    const apres = await p.evaluate(({ z, tel }) => { const b = document.querySelector(z); return { pos: tel ? b.scrollLeft : b.scrollTop, redessine: !document.querySelector('#marque') }; }, { z: zone, tel });
+    verifier(`${ecran} recette. ${tel ? 'tableau des dossiers glissé de côté' : 'grille horaire du planning défilée'} : position gardée après le redessin des 5 min`, avant > 0 && apres.redessine && apres.pos === avant, JSON.stringify({ avant, apres }));
+    verifier(`${ecran} recette. redessin automatique : aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
     await fermer();
   }
 }

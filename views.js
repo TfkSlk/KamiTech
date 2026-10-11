@@ -204,6 +204,7 @@ function dashboard() {
   <div class="page-head accueil-tete">
     <div><h1>${salutDuMoment()}, Toufek</h1><p><span class="tete-jour">${esc(jourTxt)}</span> · ${esc(resume)}</p></div>
     <div class="tete-actions hide-sm">
+      <button type="button" class="btn primary" onclick="openContact();focusNote()">Noter</button>
       <button type="button" class="btn" id="btn-ajout" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-ajout" onclick="menuAjout()">+ Ajouter <span class="caret" aria-hidden="true">▾</span></button>
       <div class="menu-ajout" id="menu-ajout" role="menu" aria-label="Ajouter" hidden>
         ${[['rdv', 'Nouveau RDV', 'rdv'], ['dossier', 'Nouveau dossier', 'dossier'], ['abonne', 'Nouvel abonné', 'abonne']].map(([k, l, i]) => `<button type="button" role="menuitem" onclick="choixAjout('${k}')"><span class="mp-ico">${ICONES[i]}</span>${l}</button>`).join('')}

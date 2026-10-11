@@ -598,7 +598,16 @@ function rafraichir() {
     if (typeof planDate === 'string' && planDate === dernierRendu.jour) planDate = jour;
     accueilDeplie.alertes = accueilDeplie.jour = false;
   }
+  const defil = defilementsInternes();
   render();
+  defil.remettre();
+}
+/* Défilements internes de la page (grille horaire du planning, tableaux qui glissent de côté) : un redessin automatique les garde
+   là où Toufek les a laissés. Chaque zone est retrouvée par sa balise, ses classes et son rang ; une zone disparue est ignorée. */
+function defilementsInternes() {
+  const zones = () => { const rang = {}; return [...document.querySelectorAll('#main *')].map(el => { const k = el.tagName + '.' + (el.getAttribute('class') || ''); rang[k] = (rang[k] || 0) + 1; return { el, cle: k + '#' + rang[k] }; }); };
+  const notes = new Map(zones().filter(z => z.el.scrollTop || z.el.scrollLeft).map(z => [z.cle, [z.el.scrollTop, z.el.scrollLeft]]));
+  return { remettre: () => { if (notes.size) zones().forEach(z => { const n = notes.get(z.cle); if (n) { z.el.scrollTop = n[0]; z.el.scrollLeft = n[1]; } }); } };
 }
 document.addEventListener('visibilitychange', rafraichir);
 window.addEventListener('pageshow', e => { if (e.persisted) rafraichir(); });
@@ -1493,6 +1502,14 @@ function rdvPasse(v) {
   const ev = v.eventId && state.events.find(e => e.id === v.eventId);
   return !ev || !!ev.fait || finRdv(ev) < today();
 }
+/* Jour où la suite d'un RDV passé est due : le lendemain de sa fin, au plus tard aujourd'hui (RDV fait ce matin ou hier, RDV retiré :
+   aujourd'hui, à faire, pas en retard). Une date avant aujourd'hui = suite en retard (rouge). */
+function suiteRdvDue(v) {
+  const t = today();
+  const ev = v.eventId && state.events.find(e => e.id === v.eventId);
+  const lendemain = ev?.date ? iso(addDays(parse(finRdv(ev)), 1)) : t;
+  return lendemain < t ? lendemain : t;
+}
 /* Rappels dus et RDV passés sans suite : affichés dans « Aujourd'hui » (ou en retard) ; alerte rouge si je dois quelque chose */
 function rappelsContacts() {
   const t = today();
@@ -1504,15 +1521,24 @@ function rappelsContacts() {
   });
   const passes = state.aVoir.filter(rdvPasse).map(v => {
     const ev = v.eventId && state.events.find(e => e.id === v.eventId);
-    const lendemain = ev?.date ? iso(addDays(parse(finRdv(ev)), 1)) : t;
-    return ligne(v, lendemain < t ? lendemain : t, 'RDV passé · quelle suite ?', { rdvPasse: true, rdvDate: ev?.date || '' });
+    return ligne(v, suiteRdvDue(v), 'RDV passé · quelle suite ?', { rdvPasse: true, rdvDate: ev?.date || '' });
   });
   return [...dus, ...passes];
 }
 /* Alertes de l'accueil, triées par date, avec un compte à rebours (Aujourd'hui, Demain, J-N) :
    - un RDV important non fait dans les 30 jours (une période importante déjà commencée compte jusqu'à sa fin) ;
    - une période « à prévoir » non faite qui finit dans 7 jours ou moins, sans aucun RDV (hors période) du même client dedans.
+     Pour un contact (lien c:<id>), son RDV posé compte aussi, quel que soit le client lié du RDV (bouton « Planifier un RDV »
+     de sa fiche) : le RDV de son eventId tombé dans la période, ou à venir. Un contact clos n'a plus de créneau à caler : pas d'alerte.
    niveau 'fort' à J-1 ou moins, 'clair' sinon. action : le code à lancer au toucher (ids assainis). G1 y ajoutera l'argent en retard. */
+const contactDe = e => e.lien && e.lien.startsWith('c:') ? aVoir(e.lien.slice(2)) || null : null;
+function creneauCale(e) {
+  if (!e.lien) return false;
+  const fin = finRdv(e), v = contactDe(e);
+  const sien = x => x.lien === e.lien || (!!v && (x.id === v.eventId || (!!v.lien && x.lien === v.lien)));
+  if (state.events.some(x => x !== e && !estPeriode(x) && x.date >= e.date && x.date <= fin && sien(x))) return true;
+  return !!v && v.statut === 'planifie' && !rdvPasse(v) && state.events.some(x => x.id === v.eventId && !estPeriode(x));
+}
 function alertes() {
   const t = today(), j30 = iso(addDays(parse(t), 30));
   const dans = d => Math.round((parse(d) - parse(t)) / 864e5);
@@ -1524,9 +1550,9 @@ function alertes() {
   const out = [];
   state.events.forEach(e => {
     if (e.fait || !e.date) return;
+    if (e.aPrevoir && estPeriode(e) && contactDe(e)?.statut === 'clos') return; // « pas intéressé » : plus rien à caler
     const fin = finRdv(e);
-    const cale = () => !!e.lien && state.events.some(x => !estPeriode(x) && x.lien === e.lien && x.date >= e.date && x.date <= fin);
-    if (e.aPrevoir && estPeriode(e) && fin >= t && dans(fin) <= 7 && !cale()) {
+    if (e.aPrevoir && estPeriode(e) && fin >= t && dans(fin) <= 7 && !creneauCale(e)) {
       const n = dans(fin);
       out.push(ligne(e, fin, `Créneau toujours pas calé, ${n <= 0 ? 'c\'est le dernier jour' : `il reste ${n} j`}`));
     } else if (e.important) {
@@ -2344,7 +2370,7 @@ function ficheResume(v) {
   const ev = v.eventId && state.events.find(e => e.id === v.eventId);
   let l2, retard = false;
   if (v.statut === 'clos') l2 = 'Contact clos : plus de rappel';
-  else if (rdvPasse(v)) { l2 = 'RDV passé : quelle suite ?'; retard = true; }
+  else if (rdvPasse(v)) { l2 = 'RDV passé : quelle suite ?'; retard = suiteRdvDue(v) < t; }
   else if (v.statut === 'planifie' && ev) l2 = `RDV ${jourCourt(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`;
   else if (v.rappel) {
     retard = v.rappel < t;
@@ -2485,7 +2511,8 @@ function aVoirItem(v, compact) {
   const d = dernierContact(v);
   const ev = v.eventId && state.events.find(e => e.id === v.eventId);
   const jours = v.rappel ? Math.round((parse(v.rappel) - parse(t)) / 864e5) : null;
-  const late = ouvert && jours !== null && jours < 0;
+  /* En retard (rouge) : un rappel dépassé, ou la suite d'un RDV passé depuis plus d'un jour ; un RDV fait ce matin attend sa suite aujourd'hui */
+  const late = (ouvert && jours !== null && jours < 0) || (passe && suiteRdvDue(v) < t);
   const when = passe ? `${ev && !ev.fait ? 'RDV du ' + fmtDate(ev.date) + ' passé' : ev ? 'RDV fait' : 'RDV retiré'} · quelle suite ?`
     : ev && estPeriode(ev) && !ev.fait ? `À prévoir du ${fmtDate(ev.date)} au ${fmtDate(ev.fin)}${jours !== null && ouvert ? ' · rappel ' + (jours < 0 ? 'dépassé' : jours === 0 ? 'aujourd\'hui' : 'dans ' + jours + ' j') : ''}`
     : v.statut === 'planifie' && ev ? `RDV le ${fmtDate(ev.date)}${ev.heure ? ' à ' + ev.heure : ''}`
@@ -2499,9 +2526,9 @@ function aVoirItem(v, compact) {
   const alerte = ouvert && jours !== null && (jours < 0 || (v.attente === 'moi' && jours <= 0));
   const attente = v.attente === 'lui' ? `<span class="status att-lui" title="${esc(ATTENTES.lui)}">↩ ${estElle(v) ? 'Elle' : 'Il'} te doit</span>`
     : v.attente === 'moi' ? `<span class="status att-moi" title="${esc(ATTENTES.moi)}">↪ Tu lui dois</span>` : '';
-  return `<li class="${late || passe ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''}">
+  return `<li class="${late ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''}">
     <div class="grow clickable" onclick="openAVoir('${v.id}')">
-      <div class="when ${late || passe ? 'late' : ouvert && jours === 0 ? 'du' : ''}">${esc(when)}</div>
+      <div class="when ${late ? 'late' : passe || (ouvert && jours === 0) ? 'du' : ''}">${esc(when)}</div>
       <div class="title-txt">${alerte ? '<span class="warn-ico" title="À traiter">⚠</span> ' : ''}${esc(nomDe(v))}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
       <div class="meta">${d ? `${esc(fmtDate(d.date))} : ${esc(d.texte)}` : 'Aucune prise de contact notée'}</div>
     </div>

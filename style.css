@@ -800,7 +800,7 @@ body.no-scroll #toast.show { transform: translateX(-50%); }
 
 /* ---------- Accueil du matin : l'ordre du DOM est l'ordre affiché, au téléphone comme à l'ordinateur ---------- */
 .accueil-tete .tete-jour { color: var(--text-2); font-weight: 500; }
-.tete-actions { position: relative; flex: none; }
+.tete-actions { position: relative; flex: none; display: flex; align-items: center; gap: 8px; }
 .tete-actions .caret { margin-left: 2px; font-size: 11px; color: var(--muted); }
 #btn-ajout[aria-expanded="true"] { border-color: var(--text-2); background: var(--surface-2); }
 .menu-ajout { position: absolute; top: calc(100% + 6px); right: 0; z-index: 8; min-width: 230px; padding: 6px; display: grid; gap: 2px;
