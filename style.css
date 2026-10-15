@@ -961,3 +961,20 @@ details.connexions .card { margin-bottom: 16px; }
 }
 /* Noter, clavier ouvert : les puces de rappel restent compactes, sur une ligne (la place manque) */
 #rencontre.clavier #r-rappels .chip { min-height: 0; }
+
+/* ---------- Appeler en un geste (T1) ---------- */
+.act-tel { display: inline-flex; gap: 4px; flex: none; align-items: center; }
+.btn.icon.tel-btn { width: 44px; height: 44px; min-width: 44px; padding: 0; display: inline-grid; place-items: center; border-radius: 12px; }
+.btn.icon.tel-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.nom-tel { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nom-tel > div { min-width: 0; }
+@media (max-width: 760px) { .list .act-tel .sec { display: none; } }
+.appel-opts { grid-template-columns: 1fr 1fr; }
+.maintenant { display: flex; align-items: center; gap: 10px; min-height: 52px; max-height: 64px; padding: 6px 8px 6px 14px; margin: 0 0 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+.maintenant[hidden] { display: none; }
+.maintenant.rouge { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
+.maintenant.rouge b { color: var(--danger); }
+.maintenant-txt { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.35; }
+.maintenant .mt-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.maintenant-act { display: flex; align-items: center; gap: 6px; flex: none; }
+.lien-waze { font-size: 12.5px; color: var(--muted); text-decoration: none; padding: 0 4px; }

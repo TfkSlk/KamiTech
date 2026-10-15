@@ -214,6 +214,7 @@ function dashboard() {
   <button type="button" class="noter-bar" onclick="openContact();focusNote()" aria-label="Noter quelqu'un que tu viens de croiser">
     <span class="noter-ico">${ICONES.noter}</span><span class="noter-txt">Noter quelqu'un…</span><span class="noter-aide">Une phrase : nom, service, rappel</span>
   </button>
+  ${bandeauMaintenant()}
   ${!empty && aDemo() ? `<div class="notice mini"><span>Données d'exemple affichées</span> <span aria-hidden="true">·</span> <button type="button" onclick="retirerExemple()">Retirer</button></div>` : ''}
   ${alertesHtml(alertes())}`;
   if (empty) return tete + videAccueil();
@@ -309,6 +310,7 @@ function planning() {
       <button class="btn primary" onclick="openEvent(null,'${planDate}')">+ RDV</button>
     </div>
   </div>
+  ${window.matchMedia('(max-width: 760px)').matches ? bandeauMaintenant() : ''}
   <div class="toolbar">${chips}<span class="legende meta"><i class="lg-bandeau"></i>semaine ou moins <i class="lg-fil"></i>période longue <i class="lg-prevoir"></i>date à prévoir</span></div>
   ${v === 'jour' ? vueJour(all, d) : v === 'mois' ? vueMois(all, d) : vueSemaine(all, lundi)}`;
 }

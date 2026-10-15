@@ -37,7 +37,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     for (const vue of ['jour', 'semaine', 'mois']) {
       await p.evaluate(v => { planDate = '2026-10-10'; setPlanVue(v); }, vue);
       await pause(p);
-      const cibles = await p.evaluate(piege => [...document.querySelectorAll('[data-tip]')].filter(e => e.dataset.tip.includes(piege)).map(e => { const r = e.getBoundingClientRect(); return { x: r.left + Math.min(r.width / 2, 6), y: r.top + Math.min(r.height / 2, 3), w: r.width, h: r.height, multi: e.dataset.tip.includes('\n') }; }).filter(r => r.w > 0 && r.h > 0 && r.y > 0 && r.y < innerHeight), PIEGE);
+      const cibles = await p.evaluate(piege => [...document.querySelectorAll('[data-tip]')].filter(e => e.dataset.tip.includes(piege)).map(e => { const r = e.getBoundingClientRect(), x = r.left + Math.min(r.width / 2, 6), y = r.top + Math.min(r.height / 2, 3), dessus = document.elementFromPoint(x, y); return { x, y, w: r.width, h: r.height, multi: e.dataset.tip.includes('\n'), libre: !!dessus && (dessus === e || e.contains(dessus)) }; }).filter(r => r.w > 0 && r.h > 0 && r.y > 0 && r.y < innerHeight && r.libre), PIEGE); // une cible cachée sous la barre du bas ne compte pas
       let litteral = 0, multiOk = null;
       for (const c of cibles.slice(0, 4)) {
         await p.mouse.move(c.x, c.y); await pause(p, 60);

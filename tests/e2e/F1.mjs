@@ -377,7 +377,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await capture(p, `f1-${largeur}-fiche-roth`);
     verifier(`${ecran} 5. openAVoir(Mme Roth) : résumé « Rencontrée le 7 oct. · 1 échange · dernier il y a 3 j : … »`, /^Rencontrée? le 7 oct\. · 1 échange · dernier il y a 3 j : Croisée au marché/.test(f.lignes[0] || ''), f.lignes[0]);
     verifier(`${ecran} 5. résumé : prochaine étape et ce qu'elle doit (lu dans le journal)`, f.lignes[1] === 'Prochaine étape : rappel aujourd\'hui' && f.lignes[2] === 'Elle te doit : ses avis 2024-2025', JSON.stringify(f.lignes));
-    verifier(`${ecran} 5. lien tel: (et WhatsApp) quand v.tel existe ; boutons d'action de 44 px au moins`, f.tel === 'tel:0612345678' && f.wa === 'https://wa.me/33612345678' && f.boutons.length === 4 && f.boutons.every(b => b.h >= 44) && f.boutons.some(b => b.t === '+ Prise de contact') && f.boutons.some(b => b.t === 'Planifier un RDV'), JSON.stringify(f));
+    verifier(`${ecran} 5. lien tel: (et WhatsApp) quand v.tel existe ; boutons d'action de 44 px au moins`, f.tel === 'tel:0612345678' && f.wa === 'https://wa.me/33612345678' && f.boutons.length === 5 && f.boutons.every(b => b.h >= 44) && f.boutons.some(b => b.t === 'SMS') && f.boutons.some(b => b.t === '+ Prise de contact') && f.boutons.some(b => b.t === 'Planifier un RDV'), JSON.stringify(f));
     await p.click('#modal .sheet-plus'); await pause(p, 80);
     const supprimerApres = await visible(p, '#modal .sheet-menu .danger');
     await capture(p, `f1-${largeur}-menu-supprimer`);

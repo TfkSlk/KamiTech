@@ -566,6 +566,7 @@ function render() {
       <div class="btn-row">${view !== 'dashboard' ? '<a class="btn" href="#dashboard">Retour à l\'accueil</a>' : ''}<button class="btn primary" onclick="exporter()">Exporter (.json)</button></div></div>`;
   }
   $('#main').innerHTML = (donneesIllisibles ? carteIllisible() : '') + html;
+  armerMaintenant();
   dernierRendu = { jour: today(), t: Date.now() };
   majPastille();
 }
@@ -773,7 +774,7 @@ function itemList(items, showDate) {
     const client = lienNom(e.lien);
     const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? [e.aPrevoir ? 'Date à prévoir dans la période' : 'Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client, e.lieu && e.lieu !== client ? e.lieu : ''].filter(Boolean).map(esc).join(' · ');
     return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''}">
-      ${e.contact ? `<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<label class="case"><input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait"></label>`}
+      ${e.contact ? `${actionsTel('c:' + e.contact, '', true)}<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance && actionsTel(e.lien, '', true) ? `<span class="relance-ico" title="Relance">↻</span>${actionsTel(e.lien, '', true)}` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<label class="case"><input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait"></label>`}
       <div class="grow clickable" onclick="${click}">
         <div class="when ${late || (e.contact && e.retard) ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
         <div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
@@ -818,7 +819,7 @@ function kamifood() {
         const n = prochain(a.id);
         const finEng = a.debut ? iso(addMonths(parse(a.debut), num(a.engagement) || 12)) : '';
         return `<tr class="clickable" onclick="openAbonne('${a.id}')">
-        <td class="c-nom"><strong>${esc(a.restaurant)}</strong>${a.interne ? ' <span class="status paye">Éditeur</span>' : ''}${a.impaye ? ' <span class="status perdu">Impayé</span>' : ''}<div class="meta">${esc([a.contact, a.ville, a.stripeId ? 'Stripe' : '', a.statut === 'resilie' && a.finEstimee ? 'fin estimée, à corriger' : ''].filter(Boolean).join(' · '))}</div></td>
+        <td class="c-nom"><div class="nom-tel"><div><strong>${esc(a.restaurant)}</strong>${a.interne ? ' <span class="status paye">Éditeur</span>' : ''}${a.impaye ? ' <span class="status perdu">Impayé</span>' : ''}<div class="meta">${esc([a.contact, a.ville, a.stripeId ? 'Stripe' : '', a.statut === 'resilie' && a.finEstimee ? 'fin estimée, à corriger' : ''].filter(Boolean).join(' · '))}</div></div>${a.interne ? '' : actionsTel('a:' + a.id, '', true)}</div></td>
         <td class="c-sous">${esc(a.formuleNom || formule(a.formule)?.nom || '—')}</td>
         <td class="num c-montant" ${a.interne ? '' : 'data-s="/ mois"'}>${a.interne ? '<span class="meta">licence</span>' : eur(a.prix)}</td>
         <td class="c-sous c-droite">${abBadge(a.statut)}</td>
@@ -905,7 +906,7 @@ function dossiers() {
     <table class="tab-tel">
       <thead><tr><th>Entreprise</th><th>Secteur</th><th>Statut</th><th class="hide-sm">Partenaire</th><th class="num">Commission</th><th class="num">Relance</th></tr></thead>
       <tbody>${rows.map(d => `<tr class="clickable" onclick="openDossier('${d.id}')">
-        <td class="c-nom"><strong>${esc(d.entreprise)}</strong><div class="meta">${esc([d.contact, d.tel].filter(Boolean).join(' · '))}</div></td>
+        <td class="c-nom"><div class="nom-tel"><div><strong>${esc(d.entreprise)}</strong><div class="meta">${esc([d.contact, d.tel].filter(Boolean).join(' · '))}</div></div>${actionsTel('d:' + d.id, '', true)}</div></td>
         <td class="c-sous">${tag(d.activite)}</td>
         <td class="c-sous">${statusBadge(d.statut)}</td>
         <td class="hide-sm">${esc(d.partenaire || '')}</td>
@@ -1691,6 +1692,7 @@ const ICONES = {
   dossier: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/></svg>',
   abonne: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3v7a3 3 0 0 0 6 0V3M7 3v18"/><path d="M17 3c-2 2-3 5-3 8h3v10"/></svg>',
   micro: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>',
+  sms: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4 3v-3H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="M7.5 9.5h9M7.5 12.5h6"/></svg>',
   tel: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.5h2.6l1.4 4-2 1.3a12 12 0 0 0 6.6 6.6l1.3-2 4 1.4v2.6a2 2 0 0 1-2.2 2A17 17 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z"/></svg>',
   bulle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.6a8.4 8.4 0 0 1-12.4 7.4L3.5 20.5l1.5-4.4a8.4 8.4 0 1 1 15.5-4.5z"/><path d="M9 9.5c.3 2 2.5 4.3 4.8 4.8"/></svg>',
 };
@@ -2319,6 +2321,7 @@ function enregistrerRencontre() {
   const sujet = (r.sujet || r.note || '').trim();
   if (!Array.isArray(target.historique)) target.historique = [];
   target.historique.push({ date: r.date || today(), texte: sujet || 'Prise de contact' });
+  delete target.tentatives; // un vrai échange noté : les appels sans réponse repartent de zéro
   if (!v) state.aVoir.push(target);
   const ev = cr ? creneauContact(target, { creneau: r.creneau, crDate: r.crDate, crHeure: r.crHeure, crSemaine: r.crSemaine, crDu: r.crDu, crAu: r.crAu, objet: r.objet, important: r.important }) : null;
   /* « RDV planifié » seulement s'il y a vraiment un nouveau RDV daté ; sinon le contact repart en suivi avec sa suite */
@@ -2409,6 +2412,135 @@ const estElle = v => /^(mme|madame|mlle|mademoiselle)\b/i.test(String(v.nom || '
 const telHref = t => { const s = String(t || '').trim().replace(/[^\d+]/g, '').replace(/(?!^)\+/g, ''); return s.replace(/\D/g, '').length >= 4 ? s : ''; };
 /* WhatsApp attend le numéro international sans + : 06 12 34 56 78 → 33612345678 */
 const waNumero = t => { let d = String(t || '').replace(/\D/g, ''); if (d.startsWith('00')) d = d.slice(2); else if (/^0\d{9}$/.test(d)) d = '33' + d.slice(1); return d.length >= 8 ? d : ''; };
+/* ---------- Appeler en un geste (T1) ---------- */
+/* Coordonnées d'un client : 'd:id' (dossier), 'a:id' (abonné), 'c:id' (contact) ou l'objet contact lui-même */
+function coordonnees(ref) {
+  let x = null;
+  if (ref && typeof ref === 'object') x = ref;
+  else if (typeof ref === 'string' && ref.includes(':')) {
+    const [k, id] = ref.split(':');
+    x = k === 'd' ? dossier(id) : k === 'a' ? abonne(id) : k === 'c' ? aVoir(id) : null;
+  }
+  if (!x) return { tel: '', email: '', ville: '', nom: '' };
+  return { tel: String(x.tel || '').trim(), email: String(x.email || '').trim(), ville: String(x.ville || '').trim(), nom: String(x.nom || x.contact || x.entreprise || x.restaurant || '').trim() };
+}
+const telNorm = t => telHref(t);
+const telIntl = t => waNumero(t) || String(t || '').replace(/\D/g, '');
+const waLien = (t, texte = '') => 'https://wa.me/' + telIntl(t) + (texte ? '?text=' + encodeURIComponent(texte) : '');
+const itineraire = lieu => 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(lieu);
+const refDe = ref => typeof ref === 'string' ? ref : (ref && ref.id ? 'c:' + ref.id : '');
+/* Boutons icône de 44 px : Appeler, SMS, WhatsApp (seulement si un numéro existe). Un clic retient l'appel pour le noter au retour. */
+function actionsTel(ref, texte = '', seulAppel = false) {
+  const c = coordonnees(ref), n = telNorm(c.tel), r = refDe(ref);
+  if (!n || !/^[acd]:[\w-]+$/.test(r)) return '';
+  const qui = esc(c.nom || 'ce contact');
+  const clic = canal => `onclick="event.stopPropagation();noterAppel('${r}','${canal}')"`;
+  const sms = `sms:${n}${texte ? '?&body=' + encodeURIComponent(texte) : ''}`;
+  const wa = waNumero(c.tel);
+  return `<span class="act-tel">
+    <a class="btn icon tel-btn" href="tel:${esc(n)}" aria-label="Appeler ${qui}" title="Appeler" ${clic('appel')}>${ICONES.tel}</a>${seulAppel ? '' : `
+    <a class="btn icon tel-btn sec" href="${esc(sms)}" aria-label="SMS à ${qui}" title="SMS" ${clic('sms')}>${ICONES.sms}</a>${wa ? `
+    <a class="btn icon tel-btn sec" href="${esc(waLien(c.tel, texte))}" target="_blank" rel="noopener" aria-label="WhatsApp à ${qui}" title="WhatsApp" ${clic('whatsapp')}>${ICONES.bulle}</a>` : ''}`}
+  </span>`;
+}
+const APPEL = 'kgd-appel';
+function noterAppel(ref, canal) {
+  try { sessionStorage.setItem(APPEL, JSON.stringify({ ref, nom: coordonnees(ref).nom, canal, t: Date.now() })); } catch (e) { /* stockage de session indisponible */ }
+}
+function lireAppel() {
+  try { const a = JSON.parse(sessionStorage.getItem(APPEL) || 'null'); return a && Date.now() - a.t < 30 * 60e3 ? a : null; } catch (e) { return null; }
+}
+const effacerAppel = () => { try { sessionStorage.removeItem(APPEL); } catch (e) { /* ignore */ } };
+/* Retour dans l'appli après un appel (ou un SMS, un WhatsApp) : on note en deux touchers */
+function proposerNoteAppel() {
+  const a = lireAppel();
+  if (!a) { effacerAppel(); return; }
+  if (occupe() || modal().open || $('#confirm').open) return; // une saisie en cours : la question attend le prochain retour
+  const verbe = a.canal === 'sms' ? 'SMS à' : a.canal === 'whatsapp' ? 'WhatsApp avec' : 'Appel avec';
+  const opt = (k, l, s) => `<button type="button" class="opt" onclick="appelRetour('${k}')"><b>${l}</b>${s ? `<span>${s}</span>` : ''}</button>`;
+  const absent = a.ref.startsWith('a:') ? '' : `${opt('absent', 'Pas répondu', 'rappel dans 2 jours')}${opt('messagerie', 'Messagerie', 'message laissé, rappel dans 2 jours')}`;
+  showModal(feuille({ titre: `${verbe} ${esc(a.nom || 'ton contact')}`, sous: 'Comment ça s\'est passé ?',
+    corps: `<div class="opts appel-opts">${opt('joint', 'Joint', 'noter ce qui a été dit')}${absent}${opt('rien', 'Rien à noter')}</div>`,
+    pied: '<div class="modal-actions"><span></span><button type="button" class="btn" onclick="appelRetour(\'rien\')">Fermer</button></div>' }), () => {});
+}
+function appelRetour(issue) {
+  const a = lireAppel(); effacerAppel();
+  if (modal().open) modal().close();
+  if (!a || issue === 'rien') return;
+  const [k, id] = a.ref.split(':');
+  if (issue === 'joint') {
+    setTimeout(() => { if (k === 'c' && aVoir(id)) { openContact(id); focusNote(); } else if (k === 'd' && dossier(id)) openDossier(id); else if (k === 'a' && abonne(id)) openAbonne(id); }, 0);
+    return;
+  }
+  const quoi = issue === 'messagerie' ? 'message laissé' : 'pas de réponse';
+  if (k === 'c') {
+    const v = aVoir(id); if (!v) return;
+    v.tentatives = (num(v.tentatives) || 0) + 1;
+    v.rappel = rappelDans(2);
+    if (v.statut === 'clos') v.statut = 'suivi';
+    v.historique = Array.isArray(v.historique) ? v.historique : [];
+    v.historique.push({ date: today(), texte: `Appel · ${quoi} (tentative ${v.tentatives})` });
+    if (save()) { render(); toast(`${nomDe(v)} · ${quoi} · rappel ${fmtDate(v.rappel)}`); }
+  } else if (k === 'd') {
+    const d = dossier(id); if (!d) return;
+    d.dateRelance = rappelDans(2);
+    if (save()) { render(); toast(`${d.entreprise} · ${quoi} · relance ${fmtDate(d.dateRelance)}`); }
+  }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(proposerNoteAppel, 300); });
+
+/* ---------- Bandeau « Maintenant / Ensuite » : le RDV en cours et le suivant du jour, avec l'action utile ---------- */
+function maintenantEnsuite() {
+  const t = today(), d = new Date(), m = d.getHours() * 60 + d.getMinutes();
+  const evs = state.events.filter(e => e.date === t && !e.fait && /^\d{1,2}:\d{2}$/.test(e.heure || '') && !estPeriode(e))
+    .map(e => ({ e, s: minutesDe(e.heure), f: minutesDe(e.heure) + (num(e.duree) || 30) })).sort((a, b) => a.s - b.s);
+  const cours = evs.filter(x => x.s <= m && m < x.f).pop();
+  const suivant = evs.find(x => x.s > m);
+  if (!cours && !suivant) return '';
+  const duree = n => n >= 60 ? `${Math.floor(n / 60)} h${n % 60 ? ' ' + String(n % 60).padStart(2, '0') : ''}` : `${n} min`;
+  let rouge = false, action = '', ligne2 = '';
+  if (suivant) {
+    const e = suivant.e, dans = suivant.s - m;
+    const avant = cours || evs.filter(x => x.f <= suivant.s && x !== suivant).pop();
+    const marge = avant ? suivant.s - avant.f : Infinity;
+    const seuil = (avant && avant.e.mode === 'place') || e.mode === 'place' ? 15 : 10;
+    rouge = dans < 10 || marge < seuil;
+    ligne2 = `<b>Ensuite : ${esc(e.heure)}</b> ${esc(e.titre)} <span class="meta">(${esc((MODES_COURTS[e.mode] || MODES[e.mode] || '').toLowerCase())}) dans ${duree(dans)}</span>`;
+    const fiche = `<button type="button" class="btn small" onclick="openEvent('${e.id}')">Fiche</button>`;
+    if (e.mode === 'place') {
+      const lieu = (e.lieu || coordonnees(e.lien).ville || '').trim();
+      action = lieu ? `<a class="btn small" href="${esc(itineraire(lieu))}" target="_blank" rel="noopener">Itinéraire</a><a class="lien-waze" href="${esc('https://waze.com/ul?q=' + encodeURIComponent(lieu))}" target="_blank" rel="noopener" aria-label="Itinéraire avec Waze">Waze</a>` : fiche;
+    } else if (e.mode === 'tel') {
+      action = actionsTel(e.lien, '', true) || fiche;
+    } else if (e.mode === 'visio') {
+      const url = (String(e.notes || '').match(/https:\/\/[^\s<>"']+/) || [])[0];
+      action = url ? `<a class="btn small" href="${esc(url)}" target="_blank" rel="noopener">Ouvrir la visio</a>` : fiche;
+    } else action = fiche;
+  }
+  const ligne1 = cours ? `<b>Maintenant :</b> ${esc(cours.e.titre)} <span class="meta">· reste ${duree(cours.f - m)}</span>` : '';
+  return `<div class="maintenant-txt">${ligne1 ? `<div class="mt-l">${ligne1}</div>` : ''}${ligne2 ? `<div class="mt-l">${ligne2}</div>` : ''}</div>${action ? `<div class="maintenant-act">${action}</div>` : ''}<!--${rouge ? 'rouge' : ''}-->`;
+}
+/* Rendu du bandeau (accueil ; en tête du planning au téléphone) et rafraîchissement chaque minute tant que la vue reste affichée */
+function bandeauMaintenant() {
+  let h = '';
+  try { h = maintenantEnsuite(); } catch (e) { h = ''; }
+  if (!h) return '<div id="maintenant" class="maintenant" hidden></div>';
+  return `<div id="maintenant" class="maintenant ${h.endsWith('<!--rouge-->') ? 'rouge' : ''}" role="status">${h}</div>`;
+}
+let minuteurMaintenant = null;
+function armerMaintenant() {
+  clearInterval(minuteurMaintenant); minuteurMaintenant = null;
+  if (!$('#maintenant')) return;
+  minuteurMaintenant = setInterval(() => {
+    const box = $('#maintenant');
+    if (!box) { clearInterval(minuteurMaintenant); minuteurMaintenant = null; return; }
+    let h = '';
+    try { h = maintenantEnsuite(); } catch (e) { h = ''; }
+    box.hidden = !h; box.classList.toggle('rouge', h.endsWith('<!--rouge-->'));
+    if (h) box.innerHTML = h;
+  }, 60e3);
+}
+
 const ilYa = ds => { if (!ds) return ''; const n = Math.round((parse(today()) - parse(ds)) / 864e5); return n <= 0 ? 'aujourd\'hui' : n === 1 ? 'hier' : `il y a ${n} j`; };
 /* Ce qui est attendu, repris d'un des derniers échanges par le lecteur local (« je lui envoie le devis » → « le devis ») ; sinon '' */
 function ceQuiEstDu(v) {
@@ -2482,8 +2614,9 @@ function ficheHtml(v) {
   const tel = telHref(v.tel), wa = waNumero(v.tel), h = v.historique || [], n = h.length;
   return `${ficheResume(v)}
     <div class="fiche-actions">
-      ${tel ? `<a class="btn" href="tel:${esc(tel)}">${ICONES.tel}<span>Appeler</span></a>` : ''}
-      ${wa ? `<a class="btn" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener">${ICONES.bulle}<span>WhatsApp</span></a>` : ''}
+      ${tel ? `<a class="btn" href="tel:${esc(tel)}" onclick="noterAppel('c:${v.id}','appel')">${ICONES.tel}<span>Appeler</span></a>` : ''}
+      ${tel ? `<a class="btn" href="sms:${esc(tel)}" onclick="noterAppel('c:${v.id}','sms')">${ICONES.sms}<span>SMS</span></a>` : ''}
+      ${wa ? `<a class="btn" href="https://wa.me/${esc(wa)}" target="_blank" rel="noopener" onclick="noterAppel('c:${v.id}','whatsapp')">${ICONES.bulle}<span>WhatsApp</span></a>` : ''}
       <button type="button" class="btn" onclick="openContact('${v.id}')">${ICONES.noter}<span>+ Prise de contact</span></button>
       <button type="button" class="btn" onclick="planifierAVoir('${v.id}')">${ICONES.rdv}<span>Planifier un RDV</span></button>
     </div>
@@ -2598,7 +2731,7 @@ function aVoirItem(v, compact) {
   const alerte = ouvert && jours !== null && (jours < 0 || (v.attente === 'moi' && jours <= 0));
   const attente = v.attente === 'lui' ? `<span class="status att-lui" title="${esc(ATTENTES.lui)}">↩ ${estElle(v) ? 'Elle' : 'Il'} te doit</span>`
     : v.attente === 'moi' ? `<span class="status att-moi" title="${esc(ATTENTES.moi)}">↪ Tu lui dois</span>` : '';
-  const boutons = `${ouvert || passe ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
+  const boutons = `${v.statut !== 'clos' ? actionsTel(v) : ''}${ouvert || passe ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
     ${ouvert && !compact ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">RDV</button>` : ''}`;
   /* Liste complète : au téléphone, les deux boutons passent sous le texte (le nom et « Il te doit » ne sont plus coupés) */
   return `<li class="${late ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''} ${compact ? '' : 'av-plein'}">
