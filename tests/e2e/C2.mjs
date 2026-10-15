@@ -52,12 +52,12 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
         await p.evaluate(() => { if (document.querySelector('#modal').open) document.querySelector('#modal').close(); });
       }
       const etat = await p.evaluate(() => ({ x: window.__x, img: document.querySelectorAll('img[src="x"]').length }));
-      /* Au téléphone, la vue Semaine liste les RDV sans infobulle de titre : on vérifie alors seulement qu'aucun code ne s'exécute */
-      const attendues = !(largeur <= 760 && vue === 'semaine');
+      /* Au téléphone, les vues Semaine et Jour listent les RDV sans infobulle de titre : on vérifie alors seulement qu'aucun code ne s'exécute */
+      const attendues = !(largeur <= 760 && (vue === 'semaine' || vue === 'jour'));
       verifier(`${ecran} 1. vue ${vue} : titre piégé jamais exécuté, #tip montre le texte littéral`,
         etat.x === undefined && etat.img === 0 && (attendues ? cibles.length > 0 && litteral === Math.min(cibles.length, 4) : true),
         JSON.stringify({ ...etat, cibles: cibles.length, litteral }));
-      if (vue === 'jour') verifier(`${ecran} 1. vue jour : une infobulle multiligne garde ses retours à la ligne`, multiOk === true, String(multiOk));
+      if (vue === 'jour' && attendues) verifier(`${ecran} 1. vue jour : une infobulle multiligne garde ses retours à la ligne`, multiOk === true, String(multiOk));
       if (vue === 'jour' && largeur > 760) await capture(p, `c2-infobulle-${largeur}`);
     }
     verifier(`${ecran} 1. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));

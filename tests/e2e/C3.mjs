@@ -162,7 +162,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
       charge: document.querySelector('.load-head strong').textContent,
       jours: [...document.querySelectorAll('.tg-day em')].map(x => x.textContent),
       blocsPeriode: [...document.querySelectorAll('.tev')].filter(x => x.textContent.includes('Salon pro')).length,
-      bandeaux: [...document.querySelectorAll('.bandeau, .day-card .title-txt')].filter(x => x.textContent.includes('Salon pro')).length,
+      bandeaux: [...document.querySelectorAll('.bandeau, .day-card .title-txt, .periodes-card .title-txt')].filter(x => x.textContent.includes('Salon pro')).length,
     }));
     verifier(`${ecran} 3. Planning semaine : « 2 h planifiées » (1 h CEE + 1 h le 9 oct.), aucune période comptée`, plan.charge === '2 h planifiées' && (largeur <= 760 || JSON.stringify(plan.jours) === JSON.stringify(['1 h', '1 h'])), JSON.stringify(plan));
     verifier(`${ecran} 3. une période avec heure n'est plus dessinée en bloc horaire (seulement en bandeau)`, plan.blocsPeriode === 0 && plan.bandeaux >= 1, JSON.stringify(plan));

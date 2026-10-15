@@ -168,6 +168,7 @@ function migrate(s) {
   /* Migrations nommées : chacune ne tourne qu'une fois (drapeau dans prefs.migrations), dans n'importe quel ordre.
      Ici, les utilitaires (today, iso, estPeriode…) ne sont pas encore définis : code en ligne et jourLocal() seulement. */
   if (!s.prefs.migrations || typeof s.prefs.migrations !== 'object' || Array.isArray(s.prefs.migrations)) s.prefs.migrations = {};
+  if (!(Number(s.prefs.heuresMax) > 0)) s.prefs.heuresMax = 8; // journée pleine : la barre de charge du mois passe au rouge au-delà
   /* Victimes du rappel non enregistré ou du RDV oublié : ils reviennent aujourd'hui. Rien n'est supprimé, les journaux restent. */
   if (!s.prefs.migrations.rappelsRecuperes) {
     const j = jourLocal();
@@ -542,6 +543,7 @@ let avFiltre = 'suivi';
 let filtre = { activite: 'all', statut: 'actifs', q: '' };
 let planFiltre = 'all';
 
+let vueAffichee = null;
 function render() {
   /* #noter (raccourci de l'appli installée, lien) : l'accueil, et l'écran Noter par-dessus ; le retour revient à l'accueil */
   if (location.hash === '#noter') {
@@ -566,6 +568,8 @@ function render() {
       <div class="btn-row">${view !== 'dashboard' ? '<a class="btn" href="#dashboard">Retour à l\'accueil</a>' : ''}<button class="btn primary" onclick="exporter()">Exporter (.json)</button></div></div>`;
   }
   $('#main').innerHTML = (donneesIllisibles ? carteIllisible() : '') + html;
+  /* Une autre vue s'ouvre en haut de page (le défilement de la précédente ne la suit pas) ; un nouveau rendu de la même vue garde sa place */
+  if (view !== vueAffichee) { vueAffichee = view; window.scrollTo(0, 0); }
   armerMaintenant();
   dernierRendu = { jour: today(), t: Date.now() };
   majPastille();
@@ -769,11 +773,11 @@ function itemList(items, showDate) {
   const t = today();
   return `<ul class="list">${items.map(e => {
     const late = !e.fait && !e.contact && (estPeriode(e) ? e.fin < t : e.date < t);
-    const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.contact ? (e.rdvPasse ? (e.rdvDate ? `RDV du ${fmtDate(e.rdvDate)}` : 'RDV retiré') : e.date < t ? `Rappel du ${fmtDate(e.date)}` : 'Rappel') : e.relance ? 'Relance' : 'Dans la journée'));
+    const when = estPeriode(e) ? `${showDate ? fmtDate(e.date) + ' → ' : 'Jusqu\'au '}${fmtDate(e.fin)}` : showDate ? fmtDate(e.date) + (e.heure ? ' · ' + e.heure : '') : (e.heure || (e.contact ? (e.rdvPasse ? (e.rdvDate ? `RDV du ${fmtDate(e.rdvDate)}` : 'RDV retiré') : (e.rappelDu || e.date) < t ? `Rappel du ${fmtDate(e.rappelDu || e.date)}` : 'Rappel') : e.relance ? 'Relance' : 'Dans la journée'));
     const click = e.contact ? `openAVoir('${e.contact}')` : e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
     const client = lienNom(e.lien);
     const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? [e.aPrevoir ? 'Date à prévoir dans la période' : 'Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client, e.lieu && e.lieu !== client ? e.lieu : ''].filter(Boolean).map(esc).join(' · ');
-    return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''}">
+    return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''} ${e.contact ? 'rappel' : ''}">
       ${e.contact ? `${actionsTel('c:' + e.contact, '', true)}<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance && actionsTel(e.lien, '', true) ? `<span class="relance-ico" title="Relance">↻</span>${actionsTel(e.lien, '', true)}` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<label class="case"><input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait"></label>`}
       <div class="grow clickable" onclick="${click}">
         <div class="when ${late || (e.contact && e.retard) ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
@@ -1584,10 +1588,11 @@ function suiteRdvDue(v) {
   return lendemain < t ? lendemain : t;
 }
 /* Rappels dus et RDV passés sans suite : affichés dans « Aujourd'hui » (ou en retard) ; alerte rouge si je dois quelque chose */
+const ligneRappel = (v, date, sousTitre, extra) => ({ id: 'c-' + v.id, contact: v.id, lien: v.lien || '', date, heure: '', activite: v.activite || 'perso', important: v.attente === 'moi',
+  titre: `${nomDe(v)}${v.entreprise ? ' · ' + v.entreprise : ''}${ATTENTES[v.attente] && v.attente ? ' · ' + ATTENTES[v.attente].toLowerCase() : ''}`, sousTitre, ...extra });
 function rappelsContacts() {
   const t = today();
-  const ligne = (v, date, sousTitre, extra) => ({ id: 'c-' + v.id, contact: v.id, lien: v.lien || '', date, heure: '', activite: v.activite || 'perso', important: v.attente === 'moi',
-    titre: `${nomDe(v)}${v.entreprise ? ' · ' + v.entreprise : ''}${ATTENTES[v.attente] && v.attente ? ' · ' + ATTENTES[v.attente].toLowerCase() : ''}`, sousTitre, ...extra });
+  const ligne = ligneRappel;
   const dus = state.aVoir.filter(v => v.statut === 'suivi' && v.rappel && v.rappel <= t).map(v => {
     const d = dernierContact(v);
     return ligne(v, v.rappel, d ? `Dernier contact le ${fmtDate(d.date)} : ${d.texte}` : 'À recontacter');
@@ -1597,6 +1602,21 @@ function rappelsContacts() {
     return ligne(v, suiteRdvDue(v), 'RDV passé · quelle suite ?', { rdvPasse: true, rdvDate: ev?.date || '' });
   });
   return [...dus, ...passes];
+}
+/* Rappels de contacts posés entre deux jours, pour les vues du planning (même format que rappelsContacts).
+   Un rappel dépassé, ou la suite d'un RDV passé, est rattaché à aujourd'hui : on le voit là où on regarde, pas dans le passé. */
+function rappelsContactsEntre(from, to) {
+  const t = today(), out = [];
+  state.aVoir.forEach(v => {
+    if (v.statut === 'suivi' && v.rappel) {
+      const d = dernierContact(v);
+      out.push(ligneRappel(v, v.rappel < t ? t : v.rappel, d ? `Dernier contact le ${fmtDate(d.date)} : ${d.texte}` : 'À recontacter', v.rappel < t ? { retard: true, rappelDu: v.rappel } : {}));
+    } else if (rdvPasse(v)) {
+      const ev = v.eventId && state.events.find(e => e.id === v.eventId), du = suiteRdvDue(v);
+      out.push(ligneRappel(v, du < t ? t : du, 'RDV passé · quelle suite ?', { rdvPasse: true, rdvDate: ev?.date || '', retard: du < t }));
+    }
+  });
+  return out.filter(x => x.date >= from && x.date <= to);
 }
 /* Alertes de l'accueil, triées par date, avec un compte à rebours (Aujourd'hui, Demain, J-N) :
    - un RDV important non fait dans les 30 jours (une période importante déjà commencée compte jusqu'à sa fin) ;

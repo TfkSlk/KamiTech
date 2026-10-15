@@ -95,7 +95,7 @@ function colonnes(data, opts = {}) {
   const max = Math.max(...totals, 0);
   if (!max) return `<div class="empty">${esc(opts.vide || 'Pas encore de données.')}</div>`;
   const step = opts.pas ? opts.pas(max) : pas(max), top = Math.ceil(max / step) * step;
-  const mobile = window.innerWidth < 760;
+  const mobile = mqTel.matches;
   const n = data.length, W = Math.max(60 + n * 56, mobile ? 0 : (opts.minW || 0)), H = 190, pl = 54, pt = 18, pb = 26, ih = H - pt - pb;
   const slot = (W - pl - 10) / n;
   const y = v => pt + ih - (v / top) * ih;
@@ -269,7 +269,25 @@ function dashboard() {
 
 /* ---------- Planning ---------- */
 let planDate = null; // initialisé au premier affichage (app.js est chargé après)
-const H0 = 7, H1 = 21, PH = 52; // heures affichées, hauteur d'une heure en px
+const PH = 44; // hauteur d'une heure dans la grille, en px (les heures affichées sont calculées : 7 h–21 h au moins, élargies aux RDV)
+/* Téléphone ou non : une seule requête média, et la vue se redessine quand la largeur passe le seuil (rotation, fenêtre redimensionnée) */
+const mqTel = window.mqTel || (window.mqTel = window.matchMedia('(max-width: 760px)'));
+mqTel.addEventListener('change', () => { try { render(); } catch (e) { /* premier affichage pas encore fait */ } });
+/* Défilement automatique une fois par visite du planning : jusqu'à aujourd'hui (semaine au téléphone), jusqu'à l'heure utile (grille) */
+let planScrolle = false, grilleCle = '';
+window.addEventListener('hashchange', () => { planScrolle = false; grilleCle = ''; });
+/* Bornes de la vue affichée (les rappels de contacts sont calculés pour ces jours-là) */
+function moisBornes(d) {
+  const premier = new Date(d.getFullYear(), d.getMonth(), 1), dernier = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  const start = monday(premier);
+  return { start, nbSem: Math.ceil((Math.round((dernier - start) / 864e5) + 1) / 7) };
+}
+function bornesVue(v, d) {
+  if (v === 'jour') return [iso(d), iso(d)];
+  if (v === 'semaine') { const l = monday(d); return [iso(l), iso(addDays(l, 6))]; }
+  const { start, nbSem } = moisBornes(d);
+  return [iso(start), iso(addDays(start, nbSem * 7 - 1))];
+}
 const planVue = () => state.prefs.planVue || 'semaine';
 function setPlanVue(v) { state.prefs.planVue = v; save(); render(); }
 function planNav(n) {
@@ -282,86 +300,132 @@ function planNav(n) {
   render();
 }
 function allerAuJour(ds) { planDate = ds; setPlanVue('jour'); }
-const ouvrir = e => e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
+const ouvrir = e => e.contact ? `openAVoir('${e.contact}')` : e.relance ? `openDossier('${e.lien.slice(2)}')` : `openEvent('${e.id}')`;
+const comptePlanning = e => compteHeures(e) && !e.contact; // minutes planifiées : ni période, ni relance, ni rappel de contact
 const minutesDe = h => { const [a, b] = String(h).split(':').map(Number); return a * 60 + (b || 0); };
 
 function planning() {
   tipInit();
   planDate = planDate || today();
   const v = planVue();
-  const all = [...state.events, ...relances()].filter(e => planFiltre === 'all' || e.activite === planFiltre);
   const d = parse(planDate);
+  const [from, to] = bornesVue(v, d);
+  const all = [...state.events, ...relances(), ...rappelsContactsEntre(from, to)].filter(e => planFiltre === 'all' || e.activite === planFiltre);
+  const aPeriodes = all.some(e => estPeriode(e) && e.date <= to && e.fin >= from);
   const lundi = monday(d);
   const label = v === 'jour' ? cap(fmtLong(d))
     : v === 'semaine' ? `${lundi.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} – ${addDays(lundi, 6).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}`
     : cap(d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }));
-  const chips = [['all', 'Tout'], ...Object.entries(SECTEURS).map(([k, s]) => [k, s.label])]
-    .map(([k, l]) => `<button class="chip ${planFiltre === k ? 'on' : ''}" onclick="planFiltre='${k}';render()">${k === 'all' ? '' : `<i style="background:var(--${k})"></i>`}${l}</button>`).join('');
+  const filtres = [['all', 'Tout'], ...Object.entries(SECTEURS).map(([k, s]) => [k, s.label])];
+  const chips = filtres.map(([k, l]) => `<button class="chip ${planFiltre === k ? 'on' : ''}" onclick="planFiltre='${k}';render()">${k === 'all' ? '' : `<i style="background:var(--${k})"></i>`}${l}</button>`).join('');
+  /* Au téléphone, les 7 puces de filtre deviennent une seule liste déroulante */
+  const choix = `<select class="plan-filtre" aria-label="Filtrer par activité" onchange="planFiltre=this.value;render()">${filtres.map(([k, l]) => `<option value="${k}" ${planFiltre === k ? 'selected' : ''}>${k === 'all' ? 'Tout' : esc(l)}</option>`).join('')}</select>`;
   return `
-  <div class="page-head">
-    <div><h1>Planning</h1><p>${esc(label)}</p></div>
+  <div class="page-head plan-head">
+    <div class="plan-titre"><h1>Planning</h1><p>${esc(label)}</p></div>
     <div class="plan-tools">
       <div class="seg" role="group" aria-label="Vue">${[['jour', 'Jour'], ['semaine', 'Semaine'], ['mois', 'Mois']].map(([k, l]) => `<button class="${v === k ? 'on' : ''}" onclick="setPlanVue('${k}')">${l}</button>`).join('')}</div>
-      <div class="week-nav">
-        <button class="btn icon" onclick="planNav(-1)" aria-label="Précédent">‹</button>
-        <button class="btn" onclick="planNav(0)">Aujourd'hui</button>
-        <button class="btn icon" onclick="planNav(1)" aria-label="Suivant">›</button>
+      <div class="plan-nav">
+        <div class="week-nav">
+          <button class="btn icon" onclick="planNav(-1)" aria-label="Précédent">‹</button>
+          <button class="btn" onclick="planNav(0)">Aujourd'hui</button>
+          <button class="btn icon" onclick="planNav(1)" aria-label="Suivant">›</button>
+        </div>
+        ${mqTel.matches ? choix : ''}
       </div>
       <button class="btn primary" onclick="openEvent(null,'${planDate}')">+ RDV</button>
     </div>
   </div>
-  ${window.matchMedia('(max-width: 760px)').matches ? bandeauMaintenant() : ''}
-  <div class="toolbar">${chips}<span class="legende meta"><i class="lg-bandeau"></i>semaine ou moins <i class="lg-fil"></i>période longue <i class="lg-prevoir"></i>date à prévoir</span></div>
+  ${mqTel.matches && v !== 'jour' ? bandeauMaintenant() : ''}
+  ${mqTel.matches ? '' : `<div class="toolbar plan-toolbar">${chips}${aPeriodes ? '<span class="legende meta"><i class="lg-bandeau"></i>semaine ou moins <i class="lg-fil"></i>période longue <i class="lg-prevoir"></i>date à prévoir</span>' : ''}</div>`}
   ${v === 'jour' ? vueJour(all, d) : v === 'mois' ? vueMois(all, d) : vueSemaine(all, lundi)}`;
 }
 
 function vueSemaine(all, lundi) {
   const jours = [...Array(7)].map((_, i) => iso(addDays(lundi, i)));
   const t = today();
-  const sem = state.events.filter(e => e.date >= jours[0] && e.date <= jours[6] && compteHeures(e));
+  const sem = all.filter(e => e.date >= jours[0] && e.date <= jours[6] && comptePlanning(e));
   const totalMin = sem.reduce((s, e) => s + num(e.duree), 0);
   const charge = Object.keys(SECTEURS).map(k => [k, sem.filter(e => e.activite === k).reduce((s, e) => s + num(e.duree), 0)]).filter(([, m]) => m);
-  return `<div class="card load-card">
+  const carteCharge = `<div class="card load-card">
     <div class="load-head"><strong>${esc(hrs(totalMin))} planifiées</strong><span class="meta">${sem.filter(e => e.mode !== 'tache').length} RDV · ${sem.filter(e => e.mode === 'visio').length} en visio · ${sem.filter(e => e.mode === 'place').length} sur place</span></div>
     <div class="stack">${charge.map(([k, m]) => `<span style="flex:${m};background:var(--${k})" data-tip="${tip(`${SECTEURS[k].label} : ${hrs(m)}`)}"></span>`).join('') || '<span class="stack-empty"></span>'}</div>
     <div class="legend">${charge.map(([k, m]) => `<span><i style="background:var(--${k})"></i>${esc(SECTEURS[k].label)} ${esc(hrs(m))}</span>`).join('')}</div>
   </div>
-  ${window.innerWidth < 760 ? jours.map(ds => {
-    const items = all.filter(e => surJour(e, ds)).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-    const min = items.filter(e => !e.relance && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
+`;
+  /* Au téléphone, les jours d'abord : la charge de la semaine vient après */
+  return mqTel.matches ? semaineTel(all, jours) + carteCharge : carteCharge + grilleHeures(jours, all);
+}
+/* Semaine au téléphone : les périodes une seule fois en tête, puis un jour par carte ; un jour vide tient sur une ligne */
+function semaineTel(all, jours) {
+  const t = today();
+  const periodes = all.filter(e => estPeriode(e) && e.date <= jours[6] && e.fin >= jours[0]).sort((a, c) => a.date.localeCompare(c.date));
+  const reste = e => { const n = Math.round((parse(e.fin) - parse(t)) / 864e5); return e.fin < t ? 'terminée' : e.date > t ? `commence ${jourCourt(e.date)}` : n === 0 ? 'dernier jour' : `reste ${n} j`; };
+  const cartePeriodes = periodes.length ? `<div class="card periodes-card"><div class="card-head"><div><h2>Périodes</h2></div></div><ul class="list">${periodes.map(e => `<li class="${e.fait ? 'done' : ''} ${e.important ? 'alerte' : ''}">
+      <label class="case"><input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait"></label>
+      <div class="grow clickable" onclick="openEvent('${e.id}')"><div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${e.aPrevoir ? '<em>à prévoir</em> ' : ''}${esc(e.titre)}</div><div class="meta">${esc(`${fmtDate(e.date)} → ${fmtDate(e.fin)} · ${reste(e)}`)}</div></div>
+      <i class="dot" style="background:var(--${e.activite})" aria-label="${esc(SECTEURS[e.activite]?.label || '')}"></i></li>`).join('')}</ul></div>` : '';
+  const cartes = jours.map(ds => {
+    const items = all.filter(e => surJour(e, ds) && !estPeriode(e)).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
+    const nom = cap(parse(ds).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' }));
+    if (!items.length) return `<div class="card day-card day-libre ${ds === t ? 'today' : ''}"><span><b>${esc(cap(parse(ds).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' })))}</b> · libre</span><button type="button" class="btn icon" onclick="openEvent(null,'${ds}')" aria-label="Ajouter un RDV ${esc(nom.toLowerCase())}">+</button></div>`;
+    const min = items.filter(comptePlanning).reduce((s, e) => s + num(e.duree), 0);
     return `<div class="card day-card ${ds === t ? 'today' : ''}">
-      <div class="card-head"><div><h2>${esc(cap(parse(ds).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' })))}</h2><p class="meta">${min ? esc(hrs(min)) : 'Libre'}</p></div><button class="btn small" onclick="openEvent(null,'${ds}')">+ RDV</button></div>
-      ${itemList(items, false) || ''}</div>`;
-  }).join('') : grilleHeures(jours, all)}`;
+      <div class="card-head"><div><h2>${esc(nom)}</h2><p class="meta">${min ? esc(hrs(min)) : 'Pas de RDV'}</p></div><button class="btn small" onclick="openEvent(null,'${ds}')">+ RDV</button></div>
+      ${itemList(items, false)}</div>`;
+  }).join('');
+  /* Semaine courante : une fois par visite, la carte d'aujourd'hui vient en haut si elle n'est pas déjà en vue */
+  if (!planScrolle && jours.includes(t)) {
+    planScrolle = true;
+    requestAnimationFrame(() => { const c = document.querySelector('.day-card.today'); if (c && c.getBoundingClientRect().bottom > innerHeight - 96) c.scrollIntoView({ block: 'start' }); });
+  }
+  return cartePeriodes + cartes;
 }
 function vueJour(all, d) {
-  const ds = iso(d);
+  const ds = iso(d), t = today();
   const items = all.filter(e => surJour(e, ds)).sort((a, c) => (a.heure || '99').localeCompare(c.heure || '99'));
-  const min = items.filter(e => !e.relance && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
+  const rdv = items.filter(comptePlanning), min = rdv.reduce((s, e) => s + num(e.duree), 0);
+  const titre = `<div class="card-head"><div><h2>${esc(cap(d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })))}</h2><p class="meta">${rdv.length ? `${pluriel(rdv.length, 'RDV', 'RDV')} · ${esc(hrs(min))}` : items.length ? 'Pas de RDV' : 'Journée libre'}</p></div></div>`;
+  /* Au téléphone : la liste dans l'ordre de la journée, sans grille (chaque RDV n'apparaît qu'une fois) */
+  if (mqTel.matches) return `<div class="card jour-liste">${titre}${itemList(items, false) || '<div class="empty">Rien de prévu ce jour-là.</div>'}</div>`;
+  /* À l'ordinateur, la grille montre déjà la journée : la colonne dit ce qui vient, qui rappeler, ce qu'il ne faut pas rater */
+  const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+  const avenir = e => !e.fait && e.heure && comptePlanning(e) && !estPeriode(e);
+  const prochain = ds === t
+    ? state.events.filter(e => avenir(e) && (e.date > t || (e.date === t && minutesDe(e.heure) + (num(e.duree) || 30) > nowMin)) && (planFiltre === 'all' || e.activite === planFiltre)).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure))[0]
+    : items.filter(avenir)[0];
+  const rappels = items.filter(e => e.contact);
+  const al = (typeof alertes === 'function' ? alertes() : []).filter(a => a.date === ds || (ds === t && a.jours <= 1));
+  const blocProchain = prochain ? `<h3 class="side-titre">${ds === t ? 'Prochain RDV' : 'Premier RDV'}</h3>
+      <button type="button" class="prochain" onclick="openEvent('${prochain.id}')" style="--c:var(--${prochain.activite})"><b>${esc(prochain.date === ds ? prochain.heure : jourCourt(prochain.date) + ' · ' + prochain.heure)}</b><span>${esc(prochain.titre)}</span><small class="meta">${esc([MODES[prochain.mode], prochain.duree ? hrs(num(prochain.duree)) : '', lienNom(prochain.lien) || prochain.lieu || ''].filter(Boolean).join(' · '))}</small></button>` : '';
+  const blocRappels = rappels.length ? `<h3 class="side-titre">À rappeler (${rappels.length})</h3>${itemList(rappels, false)}` : '';
+  const blocAlertes = al.length ? `<h3 class="side-titre">Alertes</h3><ul class="alertes-liste">${al.map(a => `<li class="alerte-ligne ${a.niveau}"><button type="button" onclick="${esc(a.action)}"><span class="compte">${esc(a.compte)}</span><span class="a-txt"><span class="a-titre">${esc(a.titre)}</span><span class="a-sous">${esc(a.sous)}</span></span><span class="a-chevron" aria-hidden="true">›</span></button></li>`).join('')}</ul>` : '';
   return `<div class="jour-layout">
     ${grilleHeures([ds], all)}
     <div class="card jour-side">
-      <div class="card-head"><div><h2>${esc(cap(d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })))}</h2><p class="meta">${items.length ? `${items.filter(e => !e.relance).length} RDV · ${esc(hrs(min))}` : 'Journée libre'}</p></div></div>
-      ${itemList(items, false) || '<div class="empty">Rien de prévu. Clique sur un créneau pour ajouter un RDV.</div>'}
+      ${titre}
+      ${blocProchain}${blocRappels}${blocAlertes}
+      ${blocProchain || blocRappels || blocAlertes ? '' : '<div class="empty">Rien de prévu. Clique sur un créneau pour ajouter un RDV.</div>'}
     </div>
   </div>`;
 }
 function vueMois(all, d) {
   const t = today();
-  const premier = new Date(d.getFullYear(), d.getMonth(), 1), dernier = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-  const start = monday(premier);
-  const nbSem = Math.ceil((Math.round((dernier - start) / 864e5) + 1) / 7);
+  const { start, nbSem } = moisBornes(d);
+  const hMax = (Number(state.prefs.heuresMax) > 0 ? Number(state.prefs.heuresMax) : 8) * 60;
   const cellules = [...Array(nbSem * 7)].map((_, i) => {
     const day = addDays(start, i), ds = iso(day);
     const tous = all.filter(e => surJour(e, ds)).sort((a, c) => (estPeriode(a) ? 0 : 1) - (estPeriode(c) ? 0 : 1) || (a.heure || '99').localeCompare(c.heure || '99'));
     const longues = tous.filter(periodeLongue), evs = tous.filter(e => !periodeLongue(e));
-    const min = evs.filter(e => !e.relance && !estPeriode(e)).reduce((s, e) => s + num(e.duree), 0);
+    const min = evs.filter(comptePlanning).reduce((s, e) => s + num(e.duree), 0);
     const visibles = evs.slice(0, 3);
+    const aAlerte = tous.some(e => e.important && !e.fait && !e.contact);
     const traits = longues.map(e => `<div class="mtrait ${e.aPrevoir ? 'prevoir' : ''} ${e.fait ? 'done' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.aPrevoir ? 'À prévoir · ' : ''}${e.titre}\n${fmtDate(e.date)} → ${fmtDate(e.fin)}`)}">${ds === e.date || day.getDay() === 1 ? `<span>${esc(e.titre)}</span>` : ''}</div>`).join('');
-    return `<div class="mcell ${day.getMonth() !== d.getMonth() ? 'hors' : ''} ${ds === t ? 'today' : ''}" onclick="allerAuJour('${ds}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')allerAuJour('${ds}')">
+    return `<div class="mcell ${day.getMonth() !== d.getMonth() ? 'hors' : ''} ${ds === t ? 'today' : ''} ${aAlerte ? 'a-alerte' : ''}" onclick="allerAuJour('${ds}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')allerAuJour('${ds}')">
       <div class="mhead"><b>${day.getDate()}</b>${min ? `<span class="meta">${esc(hrs(min))}</span>` : ''}</div>
+      ${min ? `<i class="mcharge ${min > hMax ? 'trop' : ''}" style="width:${Math.min(100, Math.round(min / hMax * 100))}%" aria-hidden="true"></i>` : ''}
       ${traits}
-      ${visibles.map(e => `<div class="mchip ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${estPeriode(e) ? 'periode' : ''} ${e.aPrevoir ? 'prevoir' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(`${e.heure ? e.heure + ' · ' : ''}${e.titre}${e.relance || estPeriode(e) ? '' : ' · ' + hrs(num(e.duree))}`)}"><i style="background:var(--${e.activite})"></i><span>${e.important ? '⚠ ' : ''}${e.heure ? `<b>${esc(e.heure)}</b> ` : ''}${esc(e.titre)}</span></div>`).join('')}
+      ${visibles.map(e => `<div class="mchip ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${e.contact ? 'rappel' : ''} ${estPeriode(e) ? 'periode' : ''} ${e.aPrevoir ? 'prevoir' : ''} ${e.important && !e.contact ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="event.stopPropagation();${ouvrir(e)}" data-tip="${tip(e.contact ? `Rappel · ${e.titre}` : `${e.heure ? e.heure + ' · ' : ''}${e.titre}${e.relance || estPeriode(e) ? '' : ' · ' + hrs(num(e.duree))}`)}"><i style="background:var(--${e.activite})"></i><span>${e.contact ? '☎ ' : e.important ? '⚠ ' : ''}${e.heure ? `<b>${esc(e.heure)}</b> ` : ''}${esc(e.titre)}</span></div>`).join('')}
       ${evs.length > 3 ? `<div class="mplus">+ ${evs.length - 3}</div>` : ''}
     </div>`;
   }).join('');
@@ -375,14 +439,29 @@ function vueMois(all, d) {
 function grilleHeures(jours, all) {
   const t = today();
   const now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+  /* Heures affichées : 7 h–21 h au moins, élargies pour qu'un RDV à 6 h 30 ou fini à 22 h ne soit jamais coupé */
+  const horaires = all.filter(e => jours.includes(e.date) && e.heure && !e.relance && !e.contact && !estPeriode(e)).map(e => ({ s: minutesDe(e.heure), f: minutesDe(e.heure) + Math.max(15, num(e.duree) || 30) }));
+  const H0 = Math.max(0, Math.min(7, ...horaires.map(x => Math.floor(x.s / 60))));
+  const H1 = Math.min(24, Math.max(21, ...horaires.map(x => Math.ceil(x.f / 60))));
   const heures = [...Array(H1 - H0 + 1)].map((_, i) => H0 + i);
+  /* Ouverture : la ligne de l'heure utile en haut (une heure avant maintenant, ou le premier RDV s'il vient plus tard) ; ensuite, chaque
+     nouveau rendu garde le défilement de l'utilisateur */
+  const cle = jours.join(',') + '|' + H0;
+  const premierRdv = horaires.length ? Math.min(...horaires.map(x => x.s)) : null;
+  const viser = jours.includes(t) ? Math.max(premierRdv ?? 0, nowMin - 60) : (premierRdv ?? 8 * 60);
+  const ancien = document.querySelector('.tg-body');
+  const garde = cle === grilleCle && ancien ? ancien.scrollTop : null;
+  grilleCle = cle;
+  const cible = garde ?? Math.max(0, (Math.floor(viser / 60) - H0) * PH);
+  requestAnimationFrame(() => { const b = document.querySelector('.tg-body'); if (b) b.scrollTop = cible; });
   const head = jours.map(ds => {
-    const d = parse(ds), min = state.events.filter(e => e.date === ds && compteHeures(e)).reduce((s, e) => s + num(e.duree), 0);
+    const d = parse(ds), min = all.filter(e => e.date === ds && comptePlanning(e)).reduce((s, e) => s + num(e.duree), 0);
     return `<div class="tg-day ${ds === t ? 'today' : ''}" onclick="allerAuJour('${ds}')"><span>${esc(d.toLocaleDateString('fr-FR', { weekday: jours.length > 1 ? 'short' : 'long' }).replace('.', ''))}</span><b>${d.getDate()}</b>${min ? `<em>${esc(hrs(min))}</em>` : ''}</div>`;
   }).join('');
   const allday = jours.map(ds => {
-    const items = all.filter(e => e.date === ds && !estPeriode(e) && (!e.heure || e.relance)).sort((a, c) => (a.relance ? 0 : 1) - (c.relance ? 0 : 1));
-    return `<div class="tg-allday-col">${items.map(e => `<div class="ev ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite})" onclick="${ouvrir(e)}" data-tip="${tip(e.relance ? e.titre : `${e.titre} · ${MODES[e.mode] || ''}${e.duree ? ' · ' + hrs(num(e.duree)) : ''}`)}">${e.important ? '⚠ ' : ''}${esc(e.titre)}</div>`).join('')}</div>`;
+    const rang = e => e.relance ? 0 : e.contact ? 1 : 2;
+    const items = all.filter(e => e.date === ds && !estPeriode(e) && (!e.heure || e.relance || e.contact)).sort((a, c) => rang(a) - rang(c));
+    return `<div class="tg-allday-col">${items.map(e => `<div class="ev ${e.fait ? 'done' : ''} ${e.relance ? 'relance' : ''} ${e.contact ? 'rappel' : ''} ${e.important && !e.contact ? 'alerte' : ''} ${e.contact && e.retard ? 'retard' : ''}" style="--c:var(--${e.activite})" onclick="${ouvrir(e)}" data-tip="${tip(e.contact ? `Rappel · ${e.titre}${e.sousTitre ? '\n' + e.sousTitre : ''}` : e.relance ? e.titre : `${e.titre} · ${MODES[e.mode] || ''}${e.duree ? ' · ' + hrs(num(e.duree)) : ''}`)}">${e.contact ? '☎ ' : e.important ? '⚠ ' : ''}${esc(e.titre)}</div>`).join('')}</div>`;
   }).join('');
   // périodes : un bandeau qui s'étale sur les jours couverts
   const periodes = all.filter(e => estPeriode(e) && e.date <= jours[jours.length - 1] && e.fin >= jours[0]).sort((a, c) => a.date.localeCompare(c.date));
@@ -392,7 +471,7 @@ function grilleHeures(jours, all) {
     return `<div class="bandeau ${periodeLongue(e) ? 'fil' : ''} ${e.aPrevoir ? 'prevoir' : ''} ${e.fait ? 'done' : ''} ${e.important ? 'alerte' : ''}" style="--c:var(--${e.activite});grid-column:${debut + 2} / ${fin + 3}" onclick="${ouvrir(e)}" data-tip="${tip(`${e.aPrevoir ? 'À prévoir · ' : ''}${e.titre}\n${fmtDate(e.date)} → ${fmtDate(e.fin)} (${joursPeriode(e)} j)${lienNom(e.lien) ? '\n' + lienNom(e.lien) : ''}`)}">${e.important ? '⚠ ' : ''}${e.aPrevoir ? '<em>à prévoir</em> ' : ''}${esc(e.titre)}<span class="meta"> ${e.date < jours[0] ? esc(fmtDate(e.date)) + ' ' : ''}→ ${esc(fmtDate(e.fin))}</span></div>`;
   }).join('');
   const cols = jours.map(ds => {
-    const evs = all.filter(e => e.date === ds && e.heure && !e.relance && !estPeriode(e)).map(e => ({ e, s: minutesDe(e.heure), f: minutesDe(e.heure) + Math.max(15, num(e.duree) || 30) })).sort((a, c) => a.s - c.s);
+    const evs = all.filter(e => e.date === ds && e.heure && !e.relance && !e.contact && !estPeriode(e)).map(e => ({ e, s: minutesDe(e.heure), f: minutesDe(e.heure) + Math.max(15, num(e.duree) || 30) })).sort((a, c) => a.s - c.s);
     // voies : seuls les RDV qui se chevauchent réellement se partagent la largeur (par groupe)
     let groupe = [], fin = -1; const groupes = [];
     evs.forEach(x => { if (groupe.length && x.s >= fin) { groupes.push(groupe); groupe = []; fin = -1; } groupe.push(x); fin = Math.max(fin, x.f); });
