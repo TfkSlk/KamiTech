@@ -554,10 +554,9 @@ function render() {
   const h = location.hash.slice(1);
   const view = Object.prototype.hasOwnProperty.call(views, h) ? h : 'dashboard';
   majFab(view);
-  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
+  majNav(view);
   $('#brand-name').textContent = state.nom;
-  document.title = state.nom;
-  const nj = document.querySelector('#nav a[data-view="jarvis"]'); if (nj) nj.querySelector('span').textContent = jarvis.nom || 'Kami';
+  document.title = `${titreVue(view)} · KGD`;
   /* Filet de sécurité : une vue qui plante affiche une carte au lieu d'un écran blanc */
   let html;
   try { html = views[view](); }
@@ -571,6 +570,66 @@ function render() {
   majPastille();
 }
 window.addEventListener('hashchange', render);
+
+/* ---------- Navigation : onglet actif, Kami seulement avec un jeton, pastilles de la barre du bas ---------- */
+const HORS_BARRE = ['kamifood', 'dossiers', 'gains', 'jarvis', 'parametres'];
+const titreVue = v => ({ dashboard: 'Accueil', planning: 'Planning', contacts: 'Contacts', kamifood: 'KamiFood', dossiers: 'Apport', gains: 'Gains', jarvis: jarvis.nom || 'Kami', parametres: 'Réglages' })[v] || 'Accueil';
+function majNav(view = (location.hash.slice(1) || 'dashboard')) {
+  document.querySelectorAll('#nav a[data-view]').forEach(a => {
+    const on = a.dataset.view === view;
+    a.classList.toggle('active', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+  const lp = $('#lien-plus');
+  if (lp) { const on = HORS_BARRE.includes(view); lp.classList.toggle('active', on); if (on) lp.setAttribute('aria-current', 'page'); else lp.removeAttribute('aria-current'); }
+  const nj = document.querySelector('#nav a[data-view="jarvis"]');
+  if (nj) { nj.querySelector('span').textContent = jarvis.nom || 'Kami'; nj.hidden = !jarvis.token; }
+  const t = today();
+  const pose = (v, n, titre) => {
+    const b = document.querySelector(`#nav a[data-view="${v}"] .pastille`);
+    if (!b) return;
+    b.hidden = !n; b.textContent = n > 99 ? '99+' : String(n || '');
+    if (n) b.setAttribute('aria-label', titre); else b.removeAttribute('aria-label');
+  };
+  try {
+    const rappels = rappelsContacts().length;
+    const retards = state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t)).length;
+    const alertesJour = alertes().filter(a => a.date <= t).length;
+    pose('contacts', rappels, `${rappels} à rappeler`);
+    pose('planning', retards + alertesJour, `${retards + alertesJour} en retard ou en alerte aujourd'hui`);
+  } catch (e) { /* données en cours de réparation : pas de pastille */ }
+}
+/* Aller à une vue depuis une feuille : la feuille rend d'abord son entrée d'historique, puis on change de vue */
+function allerVue(vue) {
+  const go = () => { if (location.hash !== '#' + vue) location.hash = '#' + vue; else render(); };
+  if (!modal().open) return go();
+  let fait = false;
+  const ensuite = () => { if (fait) return; fait = true; window.removeEventListener('popstate', ensuite); setTimeout(go, 0); };
+  window.addEventListener('popstate', ensuite);
+  modal().close();
+  setTimeout(ensuite, 350);
+}
+/* « Plus » (barre du bas) : les autres espaces, en tuiles vivantes */
+function ouvrirPlus() {
+  const t = today();
+  const b = bilan('mois');
+  const actifs = state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length;
+  const enCours = state.dossiers.filter(d => ACTIFS.includes(d.statut)).length;
+  const dues = relances().filter(r => r.date <= t).length;
+  const exp = state.prefs.dernierExport;
+  const jours = exp ? Math.max(0, Math.round((parse(t) - parse(String(exp).slice(0, 10))) / 864e5)) : null;
+  const sauv = jours === null ? 'Sauvegarde : jamais' : jours === 0 ? "Sauvegardé aujourd'hui" : `Sauvegarde il y a ${jours} j`;
+  const ico = v => document.querySelector(`#nav a[data-view="${v}"] svg`)?.outerHTML || '';
+  const tuile = (v, titre, sous, rouge = false) => `<button type="button" class="tuile ${rouge ? 'rouge' : ''}" onclick="allerVue('${v}')"><b>${ico(v)}${esc(titre)}</b><span>${esc(sous)}</span></button>`;
+  const tuiles = [
+    tuile('gains', 'Gains', `${eur(b.tot.gagne)} ce mois`),
+    tuile('kamifood', 'KamiFood', `${actifs} abonné${actifs > 1 ? 's' : ''} · ${eur(mrr())}/mois`),
+    tuile('dossiers', 'Apport', `${enCours} dossier${enCours > 1 ? 's' : ''} en cours${dues ? ` · ${dues} relance${dues > 1 ? 's' : ''} due${dues > 1 ? 's' : ''}` : ''}`, dues > 0),
+    tuile('parametres', 'Réglages', sauv, jours === null || jours > 14),
+    jarvis.token ? tuile('jarvis', jarvis.nom || 'Kami', 'Parler à ton assistant') : '',
+  ].join('');
+  showModal(feuille({ titre: 'Plus', corps: `<div class="tuiles">${tuiles}</div>`, pied: '<div class="modal-actions"><span></span><button type="button" class="btn" onclick="modal().close()">Fermer</button></div>' }), () => {});
+}
 
 /* ---------- Toujours à jour : l'appli reprise au matin (gardée en mémoire, onglet en arrière-plan) se redessine seule ----------
    Au retour au premier plan, au retour arrière du navigateur (pageshow persisted) et chaque minute : si le jour a changé ou si
@@ -714,7 +773,7 @@ function itemList(items, showDate) {
     const client = lienNom(e.lien);
     const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? [e.aPrevoir ? 'Date à prévoir dans la période' : 'Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client, e.lieu && e.lieu !== client ? e.lieu : ''].filter(Boolean).map(esc).join(' · ');
     return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''}">
-      ${e.contact ? `<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait">`}
+      ${e.contact ? `<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<label class="case"><input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait"></label>`}
       <div class="grow clickable" onclick="${click}">
         <div class="when ${late || (e.contact && e.retard) ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
         <div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
@@ -748,9 +807,9 @@ function kamifood() {
   ${stripeCarte()}
   <div class="grid kpis">
     <div class="card kpi"><div class="label">Abonnés actifs</div><div class="value">${actifs.length}</div><div class="sub">${state.abonnes.filter(a => a.statut === 'essai').length} en période d'essai</div></div>
-    <div class="card kpi"><div class="label">Récurrent mensuel</div><div class="value">${eur(mrr())}</div><div class="sub">HT par mois</div></div>
-    <div class="card kpi"><div class="label">Encaissé cette année</div><div class="value">${eur(g.gagne)}</div><div class="sub">+ ${eur(g.prevu)} d'ici décembre</div></div>
-    <div class="card kpi"><div class="label">RDV clients à venir</div><div class="value">${state.events.filter(e => e.activite === 'kamifood' && e.date >= t && !e.fait).length}</div><div class="sub">installations, formations, suivis</div></div>
+    <div class="card kpi"><div class="label">Récurrent</div><div class="value">${eur(mrr())}</div><div class="sub">HT par mois</div></div>
+    <div class="card kpi"><div class="label">Encaissé ${new Date().getFullYear()}</div><div class="value">${eur(g.gagne)}</div><div class="sub">+ ${eur(g.prevu)} d'ici décembre</div></div>
+    <div class="card kpi"><div class="label">RDV à venir</div><div class="value">${state.events.filter(e => e.activite === 'kamifood' && e.date >= t && !e.fait).length}</div><div class="sub">installations, formations, suivis</div></div>
   </div>
   ${clients ? `<div class="card table-wrap">
     <table class="tab-tel">
@@ -772,13 +831,13 @@ function kamifood() {
 /* ---------- Stripe : lecture des abonnements KamiFood (facturation séparée de KGD Pro) ---------- */
 function stripeCarte() {
   const st = state.stripe;
-  if (!st?.sync) return `<div class="card notice"><div><h2>Stripe</h2><p class="empty">Branche la lecture seule de Stripe pour voir les vrais abonnements et encaissements KamiFood. Clé restreinte à poser sur Vercel (STRIPE_LECTURE_KEY), puis « Connecter Stripe ».</p></div></div>`;
+  if (!st?.sync) return `<p class="meta stripe-off">Stripe non connecté · <a class="link" href="#parametres">Réglages</a></p>`;
   const t = today(), m30 = iso(addDays(new Date(), -30)), a12 = iso(addMonths(new Date(), -12));
   const enc = (du) => st.factures.filter(f => f.date >= du && f.date <= t).reduce((s, f) => s + num(f.ht), 0);
   const quand = new Date(st.sync).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   return `<div class="card stripe-card"><div class="card-head"><div><h2>Stripe · réel</h2><p class="meta">Synchronisé le ${esc(quand)}${st.filtre ? ` · produit « ${esc(st.filtre)} »` : ''} · ${st.factures.length} facture(s) payée(s) sur 13 mois</p></div></div>
     <div class="grid kpis">
-      <div class="kpi"><div class="label">Récurrent mensuel Stripe</div><div class="value">${esc(eur(st.mrr))}</div><div class="sub">${st.abonnes.filter(a => a.statut === 'actif').length} abonnement(s) actif(s)</div></div>
+      <div class="kpi"><div class="label">Récurrent Stripe</div><div class="value">${esc(eur(st.mrr))}</div><div class="sub">${st.abonnes.filter(a => a.statut === 'actif').length} abonnement(s) actif(s)</div></div>
       <div class="kpi"><div class="label">Encaissé 30 jours</div><div class="value">${esc(eur(enc(m30)))}</div><div class="sub">HT, factures payées</div></div>
       <div class="kpi"><div class="label">Encaissé 12 mois</div><div class="value">${esc(eur(enc(a12)))}</div><div class="sub">HT, factures payées</div></div>
       <div class="kpi"><div class="label">Impayés</div><div class="value">${st.abonnes.filter(a => a.impaye).length}</div><div class="sub">abonnement(s) en retard de paiement</div></div>
@@ -840,7 +899,7 @@ function dossiers() {
       <option value="all" ${filtre.statut === 'all' ? 'selected' : ''}>Tous les statuts</option>
       ${Object.entries(STATUTS).map(([k, l]) => `<option value="${k}" ${filtre.statut === k ? 'selected' : ''}>${l}</option>`).join('')}
     </select>
-    <input id="filtre-q" type="search" placeholder="Rechercher une entreprise, un contact…" value="${esc(filtre.q)}" oninput="filtre.q=this.value;refreshTable()">
+    <input id="filtre-q" type="search" aria-label="Rechercher un dossier" placeholder="Rechercher une entreprise, un contact…" value="${esc(filtre.q)}" oninput="filtre.q=this.value;refreshTable()">
   </div>
   <div class="card table-wrap" id="dossiers-table">${rows.length ? `
     <table class="tab-tel">
@@ -893,58 +952,8 @@ function marquerPaye(id) {
 /* ---------- Paramètres ---------- */
 function parametres() {
   return `
-  <div class="page-head"><div><h1>Paramètres</h1><p>Nom, formules KamiFood, RDV inclus et sauvegarde</p></div></div>
+  <div class="page-head"><div><h1>Réglages</h1><p>Sauvegarde, apparence et KamiFood. Tout s'enregistre dès que tu modifies.</p></div></div>
   <div class="settings">
-    <div class="card">
-      <h2>Apparence</h2>
-      <p>Clair par défaut. Le mode sombre reste disponible.</p>
-      <div class="theme-pick">
-        <button class="${state.prefs.theme !== 'dark' ? 'on' : ''}" onclick="state.prefs.theme='light';save();render()"><i style="background:#f3f4f7"></i>Clair</button>
-        <button class="${state.prefs.theme === 'dark' ? 'on' : ''}" onclick="state.prefs.theme='dark';save();render()"><i style="background:#191c23"></i>Sombre</button>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Nom affiché</h2>
-      <div class="toolbar" style="margin:0"><input type="text" id="nom" value="${esc(state.nom)}" style="max-width:320px">
-      <button class="btn primary" onclick="state.nom=$('#nom').value.trim()||'Kami Groupe';save();render();toast('Nom enregistré')">Enregistrer</button></div>
-    </div>
-    <div class="card">
-      <h2>Formules KamiFood</h2>
-      <p>Prix HT par mois, repris par défaut quand tu ajoutes un abonné.</p>
-      <div class="rows" id="formules">${state.formules.map((f, i) => `<div class="row">
-        <input id="fn-${i}" type="text" value="${esc(f.nom)}" aria-label="Nom de la formule">
-        <input id="fp-${i}" type="number" min="0" step="1" value="${esc(f.prix)}" aria-label="Prix mensuel HT" class="short"><span class="meta">€ HT / mois</span>
-      </div>`).join('')}</div>
-      <div class="btn-row"><button class="btn" onclick="ajoutFormule()">+ Formule</button><button class="btn primary" onclick="saveFormules()">Enregistrer les formules</button></div>
-    </div>
-    <div class="card">
-      <h2>RDV inclus dans la souscription KamiFood</h2>
-      <p>Planifiés automatiquement à la création d'un abonné, à partir de sa date de début.</p>
-      <div class="rows">${state.rdvModele.map((r, i) => `<div class="row">
-        <input id="rt-${i}" type="text" value="${esc(r.titre)}" aria-label="Titre du RDV">
-        <span class="meta">J +</span><input id="rj-${i}" type="number" min="0" value="${esc(r.jours)}" class="tiny" aria-label="Jours après le début">
-        <input id="rd-${i}" type="number" min="0" step="5" value="${esc(r.duree)}" class="tiny" aria-label="Durée en minutes"><span class="meta">min</span>
-        <select id="rm-${i}" aria-label="Mode">${Object.entries(MODES).map(([k, l]) => `<option value="${k}" ${r.mode === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        <button class="btn small danger" onclick="state.rdvModele.splice(${i},1);save();render()" aria-label="Retirer">×</button>
-      </div>`).join('')}</div>
-      <div class="btn-row"><button class="btn" onclick="saveModele();state.rdvModele.push({titre:'Nouveau RDV',jours:0,duree:60,mode:'visio'});save();render()">+ RDV</button><button class="btn primary" onclick="saveModele();toast('RDV inclus enregistrés')">Enregistrer</button></div>
-    </div>
-    <div class="card">
-      <h2>${esc(jarvis.nom || 'Kami')}</h2>
-      <p>Le cerveau tourne sur Vercel (<code>/api/jarvis</code>). Le jeton doit être le même que <code>JARVIS_TOKEN</code> dans les variables d'environnement Vercel. Il est enregistré uniquement dans ce navigateur.</p>
-      <div class="rows">
-        <div class="row"><label for="j-nom" class="meta" style="min-width:90px">Son nom</label><input id="j-nom" type="text" value="${esc(jarvis.nom)}" placeholder="Kami" class="short"><span class="meta">= le mot d'activation en mains libres</span></div>
-        <div class="row"><label for="j-token" class="meta" style="min-width:90px">Jeton</label><input id="j-token" type="password" value="${esc(jarvis.token)}" autocomplete="off" placeholder="colle le jeton ici"></div>
-        <div class="row"><label for="j-endpoint" class="meta" style="min-width:90px">Adresse</label><input id="j-endpoint" type="text" value="${esc(jarvis.endpoint)}"></div>
-        <div class="row"><label for="j-voice" class="meta" style="min-width:90px">Voix</label><select id="j-voice">${voixOptions()}</select></div>
-      </div>
-      <div class="btn-row">
-        <button class="btn primary" onclick="jarvis.nom=$('#j-nom').value.trim()||'Kami';jarvis.token=$('#j-token').value.trim();jarvis.endpoint=$('#j-endpoint').value.trim()||'/api/jarvis';jarvis.voixNom=$('#j-voice').value;saveJarvis();toast('Réglages de '+jarvis.nom+' enregistrés')">Enregistrer</button>
-        <button class="btn" onclick="testerJarvis()">Tester la connexion</button>
-        <button class="btn" onclick="parler('Bonjour Toufek, je suis prêt.')">Tester la voix</button>
-        <button class="btn danger" onclick="jarvis.historique=[];saveJarvis();toast('Conversation effacée')">Effacer la conversation</button>
-      </div>
-    </div>
     <div class="card">
       <h2>Sauvegarde</h2>
       <p>Tes données restent dans ce navigateur. Exporte-les régulièrement pour ne rien perdre ou pour les passer sur un autre appareil.</p>
@@ -956,12 +965,72 @@ function parametres() {
       ${etatStockage()}
     </div>
     <div class="card">
+      <h2>Apparence</h2>
+      <p>Clair par défaut. Le mode sombre reste disponible.</p>
+      <div class="theme-pick">
+        <button class="${state.prefs.theme !== 'dark' ? 'on' : ''}" onclick="state.prefs.theme='light';save();render()"><i style="background:#f3f4f7"></i>Clair</button>
+        <button class="${state.prefs.theme === 'dark' ? 'on' : ''}" onclick="state.prefs.theme='dark';save();render()"><i style="background:#191c23"></i>Sombre</button>
+      </div>
+    </div>
+    <div class="card">
       <h2>Sur ton téléphone</h2>
       <p>Le KGD s'installe comme une appli : icône sur l'écran d'accueil, plein écran, et il s'ouvre même sans réseau.</p>
       ${installPrompt ? `<div class="btn-row"><button class="btn primary" onclick="installerAppli()">Installer sur cet appareil</button></div>`
         : estInstalle() ? '<p class="meta">Déjà installé sur cet appareil.</p>'
-        : /iphone|ipad|ipod/i.test(navigator.userAgent) ? '<p class="meta">Sur iPhone : ouvre cette page dans Safari, touche le bouton Partager (le carré avec la flèche), puis « Sur l\'écran d\'accueil ».</p>'
+        : /iphone|ipad|ipod/i.test(navigator.userAgent) ? '<p class="meta">Sur iPhone : ouvre cette page dans Safari, touche le bouton Partager (le carré avec la flèche), puis « Sur l\'écran d\'accueil ». L\'appli installée a ses propres données : exporte depuis Safari, puis importe dans l\'appli.</p>'
         : '<p class="meta">Sur Android : menu ⋮ de Chrome, puis « Installer l\'application » ou « Ajouter à l\'écran d\'accueil ». Sur ordinateur : l\'icône d\'installation à droite de la barre d\'adresse.</p>'}
+    </div>
+    <div class="card">
+      <h2>Nom affiché</h2>
+      <input type="text" id="nom" aria-label="Nom affiché" value="${esc(state.nom)}" style="max-width:320px" onchange="state.nom=this.value.trim()||'Kami Groupe';this.value=state.nom;save();$('#brand-name').textContent=state.nom;toast('Enregistré')">
+    </div>
+    <div class="card">
+      <h2>Formules KamiFood</h2>
+      <p>Prix HT par mois, repris par défaut quand tu ajoutes un abonné. Enregistré dès que tu modifies.</p>
+      <div class="rows" id="formules">${state.formules.map((f, i) => `<div class="row">
+        <input id="fn-${i}" type="text" value="${esc(f.nom)}" aria-label="Nom de la formule" onchange="saveFormules()">
+        <input id="fp-${i}" type="number" min="0" step="1" value="${esc(f.prix)}" aria-label="Prix mensuel HT" class="short" onchange="saveFormules()"><span class="meta">€ HT / mois</span>
+      </div>`).join('')}</div>
+      <div class="btn-row"><button class="btn" onclick="ajoutFormule()">+ Formule</button></div>
+    </div>
+    <div class="card">
+      <h2>RDV inclus dans la souscription KamiFood</h2>
+      <p>Planifiés automatiquement à la création d'un abonné, à partir de sa date de début. Enregistré dès que tu modifies.</p>
+      <div class="rows">${state.rdvModele.map((r, i) => `<div class="row">
+        <input id="rt-${i}" type="text" value="${esc(r.titre)}" aria-label="Titre du RDV" onchange="saveModele(true)">
+        <span class="meta">J +</span><input id="rj-${i}" type="number" min="0" value="${esc(r.jours)}" class="tiny" aria-label="Jours après le début" onchange="saveModele(true)">
+        <input id="rd-${i}" type="number" min="0" step="5" value="${esc(r.duree)}" class="tiny" aria-label="Durée en minutes" onchange="saveModele(true)"><span class="meta">min</span>
+        <select id="rm-${i}" aria-label="Mode" onchange="saveModele(true)">${Object.entries(MODES).map(([k, l]) => `<option value="${k}" ${r.mode === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <button class="btn small danger" onclick="saveModele();state.rdvModele.splice(${i},1);save();render()" aria-label="Retirer ce RDV">×</button>
+      </div>`).join('')}</div>
+      <div class="btn-row"><button class="btn" onclick="saveModele();state.rdvModele.push({titre:'Nouveau RDV',jours:0,duree:60,mode:'visio'});save();render()">+ RDV</button></div>
+    </div>
+    <div class="card">
+      <h2>Données</h2>
+      <p>${state.abonnes.length} abonné(s), ${state.dossiers.length} dossier(s), ${state.events.length} RDV / tâche(s), ${state.aVoir.length} contact(s).</p>
+      ${aDemo() ? '<p class="meta">Des données d\'exemple sont chargées. « Retirer l\'exemple » ne touche qu\'à elles : tes vraies données restent.</p>' : ''}
+      <div class="btn-row">
+        ${aDemo() ? '<button class="btn primary" onclick="retirerExemple()">Retirer l\'exemple</button>' : ''}
+        <button class="btn" onclick="loadDemo()">Charger un exemple</button>
+        <button class="btn danger" onclick="toutEffacer()">Tout effacer</button>
+      </div>
+    </div>
+    <details class="connexions">
+      <summary>Connexions (pour l'installateur) : ${esc(jarvis.nom || 'Kami')} et Stripe</summary>
+    <div class="card">
+      <h2>${esc(jarvis.nom || 'Kami')}</h2>
+      <p>Le cerveau tourne sur Vercel (<code>/api/jarvis</code>). Le jeton doit être le même que <code>JARVIS_TOKEN</code> dans les variables d'environnement Vercel. Il est enregistré uniquement dans ce navigateur.</p>
+      <div class="rows">
+        <div class="row"><label for="j-nom" class="meta" style="min-width:90px">Son nom</label><input id="j-nom" type="text" value="${esc(jarvis.nom)}" placeholder="Kami" class="short" onchange="majReglagesKami()"><span class="meta">= le mot d'activation en mains libres</span></div>
+        <div class="row"><label for="j-token" class="meta" style="min-width:90px">Jeton</label><input id="j-token" type="password" value="${esc(jarvis.token)}" autocomplete="off" placeholder="colle le jeton ici" onchange="majReglagesKami()"></div>
+        <div class="row"><label for="j-endpoint" class="meta" style="min-width:90px">Adresse</label><input id="j-endpoint" type="text" value="${esc(jarvis.endpoint)}" onchange="majReglagesKami()"></div>
+        <div class="row"><label for="j-voice" class="meta" style="min-width:90px">Voix</label><select id="j-voice" onchange="majReglagesKami()">${voixOptions()}</select></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn" onclick="testerJarvis()">Tester la connexion</button>
+        <button class="btn" onclick="parler('Bonjour Toufek, je suis prêt.')">Tester la voix</button>
+        <button class="btn danger" onclick="jarvis.historique=[];saveJarvis();toast('Conversation effacée')">Effacer la conversation</button>
+      </div>
     </div>
     <div class="card">
       <h2>Stripe (KamiFood)</h2>
@@ -970,29 +1039,30 @@ function parametres() {
       <p>${state.stripe?.sync ? `Dernière synchronisation : ${esc(new Date(state.stripe.sync).toLocaleString('fr-FR'))}.` : 'Pas encore synchronisé.'}</p>
       <div class="btn-row"><button class="btn" id="btn-stripe" onclick="synchroniserStripe()">Synchroniser maintenant</button></div>
     </div>
-    <div class="card">
-      <h2>Données</h2>
-      <p>${state.abonnes.length} abonné(s), ${state.dossiers.length} dossier(s), ${state.events.length} RDV / tâche(s), ${state.aVoir.length} personne(s) à voir.</p>
-      ${aDemo() ? '<p class="meta">Des données d\'exemple sont chargées. « Retirer l\'exemple » ne touche qu\'à elles : tes vraies données restent.</p>' : ''}
-      <div class="btn-row">
-        ${aDemo() ? '<button class="btn primary" onclick="retirerExemple()">Retirer l\'exemple</button>' : ''}
-        <button class="btn" onclick="loadDemo()">Charger un exemple</button>
-        <button class="btn danger" onclick="toutEffacer()">Tout effacer</button>
-      </div>
-    </div>
+    </details>
   </div>`;
 }
-function saveFormules() {
-  state.formules.forEach((f, i) => { f.nom = $('#fn-' + i).value.trim() || f.nom; f.prix = num($('#fp-' + i).value); });
-  save(); render(); toast('Formules enregistrées');
+/* Réglages enregistrés au fil de l'eau (événement change) : pas de rendu, le champ suivant garde le focus */
+function saveFormules(silencieux) {
+  state.formules.forEach((f, i) => { const n = $('#fn-' + i), pr = $('#fp-' + i); if (!n || !pr) return; f.nom = n.value.trim() || f.nom; f.prix = num(pr.value); });
+  if (save() && !silencieux) toast('Enregistré');
 }
-function ajoutFormule() { saveFormules(); state.formules.push({ id: uid(), nom: 'Nouvelle formule', prix: 0 }); save(); render(); }
-function saveModele() {
+function ajoutFormule() { saveFormules(true); state.formules.push({ id: uid(), nom: 'Nouvelle formule', prix: 0 }); save(); render(); }
+function saveModele(avecToast) {
   state.rdvModele.forEach((r, i) => {
-    r.titre = $('#rt-' + i).value.trim() || r.titre; r.jours = num($('#rj-' + i).value);
-    r.duree = num($('#rd-' + i).value); r.mode = $('#rm-' + i).value;
+    const t = $('#rt-' + i), j = $('#rj-' + i), d = $('#rd-' + i), m = $('#rm-' + i);
+    if (!t || !j || !d || !m) return;
+    r.titre = t.value.trim() || r.titre; r.jours = num(j.value);
+    r.duree = num(d.value); r.mode = m.value;
   });
-  save();
+  if (save() && avecToast) toast('Enregistré');
+}
+function majReglagesKami() {
+  jarvis.nom = $('#j-nom').value.trim() || 'Kami';
+  jarvis.token = $('#j-token').value.trim();
+  jarvis.endpoint = $('#j-endpoint').value.trim() || '/api/jarvis';
+  jarvis.voixNom = $('#j-voice').value;
+  saveJarvis(); majNav(); toast('Enregistré');
 }
 function exporter() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -1001,10 +1071,12 @@ function exporter() {
   a.download = `kami-sauvegarde-${today()}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  noterSauvegarde();
 }
+function noterSauvegarde() { if (donneesIllisibles) return; state.prefs.dernierExport = new Date().toISOString(); save(); }
 function copier() {
   navigator.clipboard.writeText(JSON.stringify(state))
-    .then(() => toast('Sauvegarde copiée : colle-la dans une note ou un e-mail'))
+    .then(() => { noterSauvegarde(); toast('Sauvegarde copiée : colle-la dans une note ou un e-mail'); })
     .catch(() => toast('Copie impossible ici, utilise Exporter'));
 }
 /* Import : l'état d'avant est gardé (KEY.avant-import et en mémoire) et « Annuler l'import » le rétablit */
@@ -1079,7 +1151,7 @@ const coarse = () => !!(window.matchMedia && window.matchMedia('(pointer: coarse
 /* cls : true ou 'full' (toute la largeur), '' (une colonne sur deux), ou d'autres classes */
 const field = (name, label, input, cls = '') => `<div class="field ${cls === true ? 'full' : cls}"><label for="f-${name}">${label}</label>${input}</div>`;
 const inp = (name, val, type = 'text', extra = '') => `<input id="f-${name}" name="${name}" type="${type}" value="${esc(val ?? '')}" ${extra}>`;
-const sel = (name, opts, val) => `<select id="f-${name}" name="${name}">${Object.entries(opts).map(([k, o]) => `<option value="${esc(k)}" ${k === val ? 'selected' : ''}>${esc(typeof o === 'string' ? o : o.long)}</option>`).join('')}</select>`;
+const sel = (name, opts, val) => `<select id="f-${name}" name="${name}">${Object.entries(opts).map(([k, o]) => `<option value="${esc(k)}" ${k === val ? 'selected' : ''}>${esc(typeof o === 'string' ? o : (o.label || o.long))}</option>`).join('')}</select>`;
 /* Une zone de texte fait au plus 3 lignes (au-delà, elle défile en elle-même, jamais la feuille) */
 const zoneTexte = (name, val) => `<textarea id="f-${name}" name="${name}" rows="3">${esc(val || '')}</textarea>`;
 /* Puces à choix unique : un input caché (name) porte la valeur ; seg = segment plein largeur, couleur = pastille du secteur.
@@ -2723,7 +2795,7 @@ function jarvisView() {
     <div id="chat-log"></div>
     <form id="chat-form" onsubmit="event.preventDefault();const i=$('#chat-in');jarvisEnvoyer(i.value,false);i.value=''">
       ${SR ? `<button type="button" class="btn mic" id="chat-mic" onclick="dicter()" aria-label="Parler">🎤</button>` : ''}
-      <input id="chat-in" type="text" placeholder="${SR ? 'Écris, ou appuie sur le micro et parle…' : `Écris à ${esc(nom)}…`}" autocomplete="off">
+      <input id="chat-in" type="text" aria-label="Message à ${esc(nom)}" placeholder="${SR ? 'Écris, ou appuie sur le micro et parle…' : `Écris à ${esc(nom)}…`}" autocomplete="off">
       <button class="btn primary" id="chat-send" ${jarvisOccupe ? 'disabled' : ''}>Envoyer</button>
     </form>
     ${SR ? '' : `<p class="note">Ton navigateur ne gère pas la reconnaissance vocale. Utilise Chrome ou Edge pour parler à ${esc(nom)}.</p>`}

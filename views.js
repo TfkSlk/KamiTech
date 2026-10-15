@@ -243,7 +243,7 @@ function dashboard() {
   <div class="grid kpis">
     <div class="card kpi"><div class="label">Gagné · ${per}</div><div class="value">${esc(eur(b.tot.gagne))}</div><div class="sub">+ ${esc(eur(b.tot.prevu))} encore attendu</div></div>
     <div class="card kpi"><div class="label">Gagné · année</div><div class="value">${esc(eur(annee.tot.gagne))}</div><div class="sub spark-row">${sparkline(spark)}<span>6 derniers mois</span></div></div>
-    <div class="card kpi"><div class="label">KamiFood · par mois</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${pluriel(state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length, 'abonné actif', 'abonnés actifs')}</div></div>
+    <div class="card kpi"><div class="label">KamiFood / mois</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${pluriel(state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length, 'abonné actif', 'abonnés actifs')}</div></div>
     <a class="card kpi kpi-lien" href="#contacts" onclick="avFiltre='suivi'" aria-label="À rappeler : ${contactsDus}"><div class="label">À rappeler</div><div class="value">${contactsDus}</div><div class="sub">${contactsRetard ? `<span class="late">dont ${contactsRetard} en retard</span>` : contactsDus ? 'aujourd\'hui · voir →' : 'personne aujourd\'hui'}</div></a>
   </div>
   <div class="grid cols-2 charts-row">
