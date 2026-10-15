@@ -356,8 +356,9 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     /* Un clic ailleurs, juste après la fermeture, n'est pas ignoré */
     await p.evaluate(() => openEvent('ev300')); await pause(p, 250);
     await p.click('#modal .sheet-fermer');
-    const nav = telephone ? '#nav a[href="#dossiers"]' : '#nav a[href="#contacts"]';
-    await p.click(nav); await pause(p, 250);
+    /* Au téléphone, Apport est rangé dans « Plus » (barre du bas) : Plus, puis la tuile Apport */
+    if (telephone) { await p.click('#lien-plus'); await pause(p, 250); await p.click('#modal .tuile >> text=Apport'); await pause(p, 600); }
+    else { await p.click('#nav a[href="#contacts"]'); await pause(p, 250); }
     const r3 = await apres();
     verifier(`${ecran} 4 bis. fiche fermée par ✕ puis, aussitôt, un clic ailleurs (onglet) : il est pris en compte`, r3.hash === (telephone ? '#dossiers' : '#contacts') && !r3.fiche, JSON.stringify(r3));
     await p.evaluate(() => { location.hash = '#dashboard'; }); await pause(p, 200);

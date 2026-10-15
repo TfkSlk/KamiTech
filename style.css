@@ -959,3 +959,5 @@ details.connexions .card { margin-bottom: 16px; }
   #modal:has(.tuiles) .sheet-head { padding-top: 12px; }
   #modal:has(.tuiles) #modal-form { height: auto; }
 }
+/* Noter, clavier ouvert : les puces de rappel restent compactes, sur une ligne (la place manque) */
+#rencontre.clavier #r-rappels .chip { min-height: 0; }

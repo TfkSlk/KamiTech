@@ -571,8 +571,8 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
         pos.visible && !pos.note && !pos.jetons && !pos.puces && !pos.pied && pos.bas <= pos.tete + 2, JSON.stringify(pos));
       await capture(p, `n2-toast-noter-${largeur}`);
       await p.evaluate(() => annulerRencontre());
-      const horsNoter = await p.evaluate(() => { toast('essai'); return Math.round(innerHeight - $('#toast').getBoundingClientRect().bottom); });
-      verifier(`${ecran} recette : hors de Noter, le toast reste en bas${tel ? ', au-dessus du bouton +' : ''}`, tel ? horsNoter >= 140 : horsNoter >= 20 && horsNoter < 60, String(horsNoter));
+      const horsNoter = await p.evaluate(() => { toast('essai'); return { marge: Math.round(innerHeight - $('#toast').getBoundingClientRect().bottom), barre: Math.round(innerHeight - $('.sidebar').getBoundingClientRect().top) }; });
+      verifier(`${ecran} recette : hors de Noter, le toast reste en bas${tel ? ', au-dessus de la barre et de son bouton +' : ''}`, tel ? horsNoter.marge >= horsNoter.barre : horsNoter.marge >= 20 && horsNoter.marge < 60, JSON.stringify(horsNoter));
     }
     if (tel) {
 
@@ -584,7 +584,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
         await p.touchscreen.tap(x, y); await pause(p, delai);
         const sous = await p.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest('button')?.textContent.trim(), [x, y]);
         await p.touchscreen.tap(x, y); await pause(p, 150);
-        const r = await p.evaluate(() => ({ ouvert: !$('#rencontre').hidden, rappelJ: renc && renc.rappelJ }));
+        const r = await p.evaluate(() => ({ ouvert: !$('#rencontre').hidden, rappelJ: renc && renc.rappelJ, etape: renc && renc.etape }));
         await p.fill('#r-note', 'croisé Nadia de Nadia Fleurs, CEE'); await pause(p, 200);
         await p.waitForTimeout(400);
         await p.touchscreen.tap(...await p.locator('#r-rappels .chip[data-j="7"]').boundingBox().then(b => [b.x + b.width / 2, b.y + b.height / 2])); await pause(p, 80);
@@ -592,7 +592,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
         await p.click('#r-enregistrer'); await pause(p, 200);
         const nadia = await p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, statut: v.statut, rappel: v.rappel }; });
         verifier(`${ecran} recette : double toucher (${delai} ms) sur + : le second (sur « ${sous} ») ne change rien ; ensuite les puces répondent`,
-          sous === 'Clore' && r.ouvert && r.rappelJ === '3' && puceApres === '7' && nadia.nom === 'Nadia' && nadia.statut === 'suivi' && nadia.rappel === '2026-10-19', JSON.stringify({ sous, r, puceApres, nadia }));
+          ['Clore', 'Ajuster…'].includes(sous) && r.ouvert && r.rappelJ === '3' && r.etape === 0 && puceApres === '7' && nadia.nom === 'Nadia' && nadia.statut === 'suivi' && nadia.rappel === '2026-10-19', JSON.stringify({ sous, r, puceApres, nadia }));
       }
 
       /* Rechargement depuis #contacts (après #planning) avec Noter ouvert : Noter revient ; retour → ferme Noter ; retour → #planning */

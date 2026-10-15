@@ -106,7 +106,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     verifier(`${ecran} 1 bis. Stripe, factures au 1er : année = 1490 + 298 (12 mois, pas 13)`, r.annee.gagne === 1490 && proche(r.annee.prevu, 298), JSON.stringify(r.annee));
     verifier(`${ecran} 1 bis. Stripe : une semaine sans facture = 0 + 149 × 7 / 31 ; un mois passé payé = 149 + 0`, r.semaine.gagne === 0 && proche(r.semaine.prevu, 149 * 7 / 31) && r.septembre.gagne === 149 && r.septembre.prevu === 0, JSON.stringify([r.semaine, r.septembre]));
     await p.evaluate(() => { location.hash = '#kamifood'; }); await pause(p);
-    const kf = await p.evaluate(() => [...document.querySelectorAll('.kpis .kpi')].map(x => x.textContent.replace(/\s+/g, ' ').trim()).find(t => /Encaissé cette année/.test(t)) || '');
+    const kf = await p.evaluate(() => [...document.querySelectorAll('.kpis .kpi')].map(x => x.textContent.replace(/\s+/g, ' ').trim()).find(t => /Encaissé (cette année|\d{4})/.test(t)) || '');
     verifier(`${ecran} 1 bis. KamiFood : « + 298 € d'ici décembre »`, /\+ 298 € d'ici décembre/.test(kf.replace(/\u202f|\u00a0/g, ' ')), kf);
     verifier(`${ecran} 1 bis. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));
     await fermer();
