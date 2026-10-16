@@ -138,7 +138,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   const horizontal = await sansScrollHorizontal(p);
   const nb = await p.evaluate(() => ({ c: state.aVoir.length, e: state.events.length }));
   await continuer(p); // Enregistrer
-  const cree = await p.evaluate(() => { const v = state.aVoir.at(-1); const ev = state.events.find(e => e.id === v.eventId); return { v: { nom: v.nom, entreprise: v.entreprise, activite: v.activite, attente: v.attente, rappel: v.rappel, statut: v.statut, journal: v.historique.at(-1)?.texte }, ev: ev && { date: ev.date, fin: ev.fin, aPrevoir: ev.aPrevoir, lien: ev.lien === 'c:' + v.id }, toast: $('#toast').textContent }; });
+  const cree = await p.evaluate(() => { const v = state.aVoir.at(-1); const ev = state.events.find(e => e.id === v.eventId); return { v: { nom: v.nom, entreprise: v.entreprise, activite: v.activite, attente: v.attente, rappel: v.rappel, statut: v.statut, journal: v.historique.at(-1)?.texte }, ev: ev && { date: ev.date, fin: ev.fin, aPrevoir: ev.aPrevoir, lien: ev.lien === 'c:' + v.id }, toast: ($('#toast').firstChild ? $('#toast').firstChild.textContent : '') }; });
   verifier(`${ecran} Rencontre sans jeton : le texte de l'écran 1 annonce la lecture locale, pas de bouton Kami grisé, rien de rouge`,
     sansJeton && /lus ici, même hors ligne/.test(meta0) && !boutonKami && await p.evaluate(() => !document.querySelector('#rencontre .manque, #rencontre .alerte-donnees')), meta0);
   verifier(`${ecran} Rencontre sans jeton : « Qui ? » pré-rempli (Karim · Karim SARL · KGD Pro)`, e1.t === 'Qui ?' && e1.nom === 'Karim' && e1.entreprise === 'Karim SARL' && e1.chip === 'KGD Pro', JSON.stringify(e1));
@@ -186,7 +186,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
 
   /* ---------- Recette N1 : corrections ---------- */
   const enregistrerNote = async note => { await p.evaluate(() => openContact()); await pause(p); await p.fill('#r-note', note); await pause(p, 200); await p.click('#r-enregistrer'); await pause(p, 120); };
-  const dernier = () => p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, entreprise: v.entreprise, rappel: v.rappel, statut: v.statut, journal: v.historique.at(-1)?.texte, toast: $('#toast').textContent }; });
+  const dernier = () => p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, entreprise: v.entreprise, rappel: v.rappel, statut: v.statut, journal: v.historique.at(-1)?.texte, toast: ($('#toast').firstChild ? $('#toast').firstChild.textContent : '') }; });
 
   /* R1 et R8. Des mesures ne sont pas des dates : « 80m² » ne repousse pas le rappel de 7 ans, « 4m », « 12m », « 20s » ne sont pas des rappels */
   {

@@ -44,7 +44,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     const n0 = await p.evaluate(() => state.aVoir.length);
     await p.click('#r-enregistrer');
     await pause(p, 150);
-    const cree = await p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, entreprise: v.entreprise, activite: v.activite, attente: v.attente, rappel: v.rappel, statut: v.statut, journal: v.historique.at(-1)?.texte, n: state.aVoir.length, toast: $('#toast').textContent, ferme: $('#rencontre').hidden, brouillon: localStorage.getItem('kgd-brouillon') }; });
+    const cree = await p.evaluate(() => { const v = state.aVoir.at(-1); return { nom: v.nom, entreprise: v.entreprise, activite: v.activite, attente: v.attente, rappel: v.rappel, statut: v.statut, journal: v.historique.at(-1)?.texte, n: state.aVoir.length, toast: ($('#toast').firstChild ? $('#toast').firstChild.textContent : ''), ferme: $('#rencontre').hidden, brouillon: localStorage.getItem('kgd-brouillon') }; });
     verifier(`${ecran} 1. UN toucher sur Enregistrer : contact Karim · Karim SARL · cee · moi · rappel 2026-10-15`,
       cree.n === n0 + 1 && cree.nom === 'Karim' && cree.entreprise === 'Karim SARL' && cree.activite === 'cee' && cree.attente === 'moi' && cree.rappel === '2026-10-15' && cree.statut === 'suivi' && cree.ferme, JSON.stringify(cree));
     verifier(`${ecran} 9. le toast dit ce qui a été créé : « Karim · Karim SARL · rappel jeu. 15 oct. »`, cree.toast === 'Karim · Karim SARL · rappel jeu. 15 oct.', cree.toast);
@@ -56,7 +56,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await noter(p);
     await p.fill('#r-note', 'croisé Karim de Karim SARL pour les CEE, je lui envoie le devis, rappelle-moi mardi, rdv jeudi 14h');
     await p.click('#r-enregistrer'); await pause(p, 120);
-    const t9 = await p.evaluate(() => { const v = state.aVoir.at(-1); const ev = state.events.find(e => e.id === v.eventId); return { toast: $('#toast').textContent, ev: ev && ev.date + ' ' + ev.heure, statut: v.statut }; });
+    const t9 = await p.evaluate(() => { const v = state.aVoir.at(-1); const ev = state.events.find(e => e.id === v.eventId); return { toast: ($('#toast').firstChild ? $('#toast').firstChild.textContent : ''), ev: ev && ev.date + ' ' + ev.heure, statut: v.statut }; });
     verifier(`${ecran} 9. toast avec RDV : « Karim · Karim SARL · rappel mar. 13 oct. · RDV jeu. 15 à 14:00 »`, t9.toast === 'Karim · Karim SARL · rappel mar. 13 oct. · RDV jeu. 15 à 14:00' && t9.ev === '2026-10-15 14:00' && t9.statut === 'planifie', JSON.stringify(t9));
 
     /* Ctrl + Entrée enregistre aussi */
@@ -328,7 +328,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     const rattache = await p.evaluate(() => ({ v: renc.v && renc.v.nom, meta: $('#rencontre .r-head .meta').textContent, doublon: !!$('#r-doublon'), note: $('#r-note').value, brouillon: JSON.parse(localStorage.getItem('kgd-brouillon')).contactId }));
     verifier(`${ecran} 7. « Ajouter à sa fiche » : la Rencontre vise Mme Roth, la note est gardée, plus de bandeau`, rattache.v === 'Mme Roth' && /Mme Roth/.test(rattache.meta) && !rattache.doublon && rattache.note === "Mme Roth m'envoie ses avis 2025, rappelle-moi lundi" && rattache.brouillon === avant.id, JSON.stringify(rattache));
     await p.click('#r-enregistrer'); await pause(p, 150);
-    const apres = await p.evaluate(id => { const v = aVoir(id); return { n: state.aVoir.length, journal: v.historique.length, dernier: v.historique.at(-1).texte, rappel: v.rappel, attente: v.attente, toast: $('#toast').textContent }; }, avant.id);
+    const apres = await p.evaluate(id => { const v = aVoir(id); return { n: state.aVoir.length, journal: v.historique.length, dernier: v.historique.at(-1).texte, rappel: v.rappel, attente: v.attente, toast: ($('#toast').firstChild ? $('#toast').firstChild.textContent : '') }; }, avant.id);
     verifier(`${ecran} 7. Enregistrer : nombre de contacts inchangé, journal de Mme Roth +1 (rappel lundi 12)`,
       apres.n === avant.n && apres.journal === avant.journal + 1 && /avis 2025/.test(apres.dernier) && apres.rappel === '2026-10-12' && apres.attente === 'lui', JSON.stringify(apres));
     verifier(`${ecran} 9. toast : « Mme Roth · Pharmacie de la Gare · rappel lun. 12 oct. »`, apres.toast === 'Mme Roth · Pharmacie de la Gare · rappel lun. 12 oct.', apres.toast);
@@ -452,7 +452,8 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
       await noter(p);
       await p.keyboard.type(NOTE_K, { delay: 1 });
       await p.evaluate(() => history.back()); await pause(p, 200);
-      await p.locator('#main button:has-text("Contacté")').first().click(); await pause(p, 120);
+      await p.locator('#main button:has-text("Fait")').first().click(); await pause(p, 150);
+      await p.click('#modal .suite-noter'); await pause(p, 120);
       const qui = await p.$eval('#rencontre .r-head .meta', e => e.textContent);
       await p.click(fin === 'Annuler' ? '#rencontre .r-annuler' : '#r-enregistrer'); await pause(p, 250);
       const b = await brouillon();
@@ -529,7 +530,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await p.evaluate(() => { const t = $('#r-note'); t.value = 'vu Inès de Atelier Sud, rappelle-moi lundi'; noteSaisie(t.value); $('#r-qui').focus(); });
     await pause(p, 250);
     await p.click('#r-enregistrer'); await pause(p, 200);
-    const ines = await p.evaluate(() => ({ nom: state.aVoir.at(-1).nom, ferme: $('#rencontre').hidden, toast: $('#toast').textContent }));
+    const ines = await p.evaluate(() => ({ nom: state.aVoir.at(-1).nom, ferme: $('#rencontre').hidden, toast: ($('#toast').firstChild ? $('#toast').firstChild.textContent : '') }));
     verifier(`${ecran} recette : « Qui ? » vide n'efface pas le nom lu dans la phrase`, ines.nom === 'Inès' && ines.ferme, JSON.stringify(ines));
 
     /* Contact sans nom (ancien stockage) : son entreprise le nomme partout */
@@ -538,9 +539,9 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     await p.fill('#r-note', 'passé à la Boulangerie Martin, le gérant veut un devis'); await pause(p, 250);
     const sn = await p.evaluate(() => ({ bandeau: $('#r-doublon > span')?.textContent, compris: $('#r-jetons').textContent }));
     await p.click('#r-doublon button'); await pause(p, 80);
-    const sn2 = await p.evaluate(() => ({ toast: $('#toast').textContent, entete: $('#rencontre .r-head .meta').textContent }));
+    const sn2 = await p.evaluate(() => ({ toast: ($('#toast').firstChild ? $('#toast').firstChild.textContent : ''), entete: $('#rencontre .r-head .meta').textContent }));
     await p.click('#r-enregistrer'); await pause(p, 200);
-    const sn3 = await p.evaluate(() => $('#toast').textContent);
+    const sn3 = await p.evaluate(() => ($('#toast').firstChild ? $('#toast').firstChild.textContent : ''));
     verifier(`${ecran} recette : contact sans nom → « Boulangerie Martin existe déjà », toast et en-tête à son nom`,
       sn.bandeau === 'Boulangerie Martin existe déjà' && !/Rien de reconnu/.test(sn.compris) && sn2.toast === 'La note ira dans la fiche de Boulangerie Martin' && sn2.entete === 'Prise de contact · Boulangerie Martin' && /^Boulangerie Martin · rappel /.test(sn3), JSON.stringify({ sn, sn2, sn3 }));
 

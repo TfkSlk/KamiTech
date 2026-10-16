@@ -778,7 +778,7 @@ function itemList(items, showDate) {
     const client = lienNom(e.lien);
     const meta = e.contact ? esc(e.sousTitre || '') : e.relance ? (late ? `Relance prévue le ${fmtDate(e.date)}` : 'Relance à faire') : estPeriode(e) ? [e.aPrevoir ? 'Date à prévoir dans la période' : 'Période', client, e.notes].filter(Boolean).map(esc).join(' · ') : [MODES[e.mode], e.duree ? hrs(num(e.duree)) : '', client, e.lieu && e.lieu !== client ? e.lieu : ''].filter(Boolean).map(esc).join(' · ');
     return `<li class="${e.fait ? 'done' : ''} ${e.retard || late ? 'retard' : ''} ${e.important ? 'alerte' : ''} ${e.contact ? 'rappel' : ''}">
-      ${e.contact ? `${actionsTel('c:' + e.contact, '', true)}<button class="btn small" onclick="openContact('${e.contact}')" title="Noter la prise de contact">Contacté</button>` : e.relance && actionsTel(e.lien, '', true) ? `<span class="relance-ico" title="Relance">↻</span>${actionsTel(e.lien, '', true)}` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<label class="case"><input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait"></label>`}
+      ${e.contact ? `${actionsTel('c:' + e.contact, '', true)}<button class="btn small fait-btn" onclick="suiteContact('${e.contact}', true)" title="C'est fait : choisir la suite">✓ Fait</button>` : e.relance && actionsTel(e.lien, '', true) ? `<span class="relance-ico" title="Relance">↻</span>${actionsTel(e.lien, '', true)}` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<label class="case"><input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait"></label>`}
       <div class="grow clickable" onclick="${click}">
         <div class="when ${late || (e.contact && e.retard) ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
         <div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
@@ -2351,7 +2351,9 @@ function enregistrerRencontre() {
   if (target.statut === 'suivi' && !target.rappel) target.rappel = ev ? lendemainOuvre(finRdv(ev)) : today();
   /* Le brouillon de cette rencontre n'est effacé que si l'enregistrement a vraiment eu lieu ; celui d'une autre rencontre reste */
   if (save()) effacerBrouillonDe(r);
-  fermerRencontre(); render(); toast(messageRencontre(target, clore, ev), 4000);
+  fermerRencontre(); render();
+  if (clore) toast(messageRencontre(target, clore, ev), 4000);
+  else toastAction(messageRencontre(target, clore, ev), 'Changer la suite', () => suiteContact(target.id), 6000);
 }
 /* Ce qui a été créé, en une ligne : « Karim · Karim SARL · rappel mar. 13 oct. · RDV jeu. 15 à 14:00 » */
 function messageRencontre(v, clore, ev) {
@@ -2508,6 +2510,50 @@ function appelRetour(issue) {
   }
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(proposerNoteAppel, 300); });
+
+/* ---------- « ✓ Fait » : le rappel est acquitté, et la suite se choisit tout de suite ----------
+   fait = vrai : une ligne « Rappel fait · … » va au journal et les relances sans réponse repartent de zéro.
+   fait = faux (« Changer la suite » après Noter) : seule la suite change. « Annuler » remet tout comme avant. */
+function suiteContact(id, fait = false) {
+  const v = aVoir(id);
+  if (!v) return;
+  const mois = iso(jourOuvre(addMonths(new Date(), 1)));
+  const choix = [[rappelDans(3), 'Dans 3 jours'], [rappelDans(7), 'Dans 1 semaine'], [rappelDans(14), 'Dans 2 semaines'], [mois, 'Dans 1 mois']];
+  const attend = v.attente === 'lui' ? `${estElle(v) ? 'Elle' : 'Il'} te doit : ${ceQuiEstDu(v) || 'des informations'}` : v.attente === 'moi' ? `Tu lui dois : ${ceQuiEstDu(v) || 'des informations'}` : '';
+  showModal(feuille({ titre: `${fait ? 'C\'est fait · ' : 'La suite · '}${esc(nomDe(v))}`, sous: esc(attend || 'Et ensuite ?'),
+    corps: `<div class="suite">
+      ${fait ? `<button type="button" class="opt suite-noter" onclick="fermerModal();openContact('${v.id}')"><b>Noter ce qui s'est dit…</b><span>le journal, ce qu'on attend, la suite</span></button>` : ''}
+      <span class="r-label">Le rappeler</span>
+      <div class="opts quatre">${choix.map(([d, l]) => `<button type="button" class="opt" onclick="choisirSuite('${v.id}','rappel','${d}',${fait})"><b>${l}</b><span>${esc(jourCourt(d))}</span></button>`).join('')}</div>
+      <div class="suite-ligne"><label class="r-label" for="suite-date">Autre date</label><input id="suite-date" type="date" min="${today()}" onchange="if(this.value)choisirSuite('${v.id}','rappel',this.value,${fait})"></div>
+      <div class="opts quatre">
+        <button type="button" class="opt" onclick="choisirSuite('${v.id}','rdv','',${fait})"><b>Planifier un RDV</b><span>date et heure</span></button>
+        <button type="button" class="opt clore" onclick="choisirSuite('${v.id}','clore','',${fait})"><b>Clore</b><span>plus de rappel</span></button>
+      </div>
+    </div>`,
+    pied: '<div class="modal-actions"><span></span><button type="button" class="btn" onclick="fermerModal()">Annuler</button></div>' }), () => {});
+}
+function choisirSuite(id, quoi, quand, fait) {
+  const v = aVoir(id);
+  if (!v || (quoi === 'rappel' && !/^\d{4}-\d{2}-\d{2}$/.test(quand || ''))) return;
+  const avant = JSON.parse(JSON.stringify(v));
+  const libelle = quoi === 'rappel' ? `prochain rappel ${jourCourt(quand)}` : quoi === 'rdv' ? 'RDV à planifier' : 'contact clos';
+  if (fait) {
+    if (!Array.isArray(v.historique)) v.historique = [];
+    v.historique.push({ date: today(), texte: `Rappel fait · ${libelle}` });
+    delete v.tentatives;
+  }
+  if (quoi === 'rappel') { if (rdvPasse(v)) v.eventId = ''; v.statut = 'suivi'; v.rappel = quand; }
+  else if (quoi === 'clore') { v.statut = 'clos'; v.rappel = ''; v.attente = ''; }
+  if (!save()) return;
+  fermerModal();
+  if (quoi === 'rdv') { planifierAVoir(id); return; } // la fiche RDV s'ouvre ; tant qu'il n'est pas posé, le rappel reste
+  render();
+  toastAction(`${nomDe(v)} · ${libelle}`, 'Annuler', () => {
+    const i = state.aVoir.findIndex(x => x.id === id);
+    if (i >= 0) { state.aVoir[i] = avant; if (save()) { render(); toast('Annulé'); } }
+  }, 8000);
+}
 
 /* ---------- Bandeau « Maintenant / Ensuite » : le RDV en cours et le suivant du jour, avec l'action utile ---------- */
 function maintenantEnsuite() {
@@ -2751,10 +2797,11 @@ function aVoirItem(v, compact) {
   const alerte = ouvert && jours !== null && (jours < 0 || (v.attente === 'moi' && jours <= 0));
   const attente = v.attente === 'lui' ? `<span class="status att-lui" title="${esc(ATTENTES.lui)}">↩ ${estElle(v) ? 'Elle' : 'Il'} te doit</span>`
     : v.attente === 'moi' ? `<span class="status att-moi" title="${esc(ATTENTES.moi)}">↪ Tu lui dois</span>` : '';
-  const boutons = `${v.statut !== 'clos' ? actionsTel(v) : ''}${ouvert || passe ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
+  const du = passe || (ouvert && jours !== null && jours <= 0);
+  const boutons = `${v.statut !== 'clos' && (du || !compact) ? actionsTel(v) : ''}${du ? `<button class="btn small fait-btn" onclick="suiteContact('${v.id}', true)" title="C'est fait : choisir la suite">✓ Fait</button>` : ouvert && !compact ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
     ${ouvert && !compact ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">RDV</button>` : ''}`;
   /* Liste complète : au téléphone, les deux boutons passent sous le texte (le nom et « Il te doit » ne sont plus coupés) */
-  return `<li class="${late ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''} ${compact ? '' : 'av-plein'}">
+  return `<li class="${late ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''} ${compact ? '' : 'av-plein'} ${compact && !du ? 'a-venir' : ''}">
     <div class="grow clickable" onclick="openAVoir('${v.id}')">
       <div class="when ${late ? 'late' : passe || (ouvert && jours === 0) ? 'du' : ''}">${esc(when)}</div>
       <div class="title-txt">${alerte ? '<span class="warn-ico" title="À traiter">⚠</span> ' : ''}${esc(nomDe(v))}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>

@@ -1013,3 +1013,14 @@ details.connexions .card { margin-bottom: 16px; }
 .maintenant .mt-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .maintenant-act { display: flex; align-items: center; gap: 6px; flex: none; }
 .lien-waze { font-size: 12.5px; color: var(--muted); text-decoration: none; padding: 0 4px; }
+
+/* « ✓ Fait » et la suite d'un contact ; un rappel à venir reste calme */
+.fait-btn { font-weight: 600; }
+.list li.a-venir .title-txt, .list li.a-venir .when { color: var(--muted); }
+.list li.a-venir .title-txt { font-weight: 500; }
+.suite { display: flex; flex-direction: column; gap: 10px; }
+.suite-noter { width: 100%; border-color: var(--text-2, var(--border-strong)); }
+.suite-ligne { display: flex; align-items: center; gap: 10px; }
+.suite-ligne .r-label { margin: 0; white-space: nowrap; }
+.suite-ligne input { flex: 1; min-width: 0; min-height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 8px 11px; background: var(--surface); color: inherit; font: inherit; }
+.suite .opt.clore b { color: var(--danger); }

@@ -58,7 +58,9 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   const roth0 = await p.evaluate(() => { const v = state.aVoir.find(x => x.nom === 'Mme Roth'); return { id: v.id, n: v.historique.length, rappel: v.rappel, attente: v.attente }; });
   await p.evaluate(() => { location.hash = '#dashboard'; });
   await p.waitForTimeout(100);
-  await p.locator('li', { hasText: 'Mme Roth' }).first().locator('button', { hasText: 'Contacté' }).click();
+  await p.locator('li', { hasText: 'Mme Roth' }).first().locator('button', { hasText: 'Fait' }).click();
+  await p.waitForTimeout(150);
+  await p.click('#modal .suite-noter');
   await p.waitForTimeout(80);
   await jusquAuRecap(p);
   await enregistrer(p);

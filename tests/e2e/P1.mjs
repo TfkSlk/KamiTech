@@ -16,7 +16,7 @@ for (const largeur of [390, 1366]) {
   const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur: largeur > 760 ? 800 : 844, horloge: '2026-10-12T09:00:00', vue: 'planning' });
   await preparerContacts(p);
   await aller(p, 'planning');
-  const lire = () => p.evaluate(() => [...document.querySelectorAll('#main .rappel')].filter(e => e.offsetParent !== null).map(e => ({ txt: e.textContent.replace(/\s+/g, ' ').trim().slice(0, 80), contacte: !!e.querySelector('button') && /Contacté/.test(e.textContent) })));
+  const lire = () => p.evaluate(() => [...document.querySelectorAll('#main .rappel')].filter(e => e.offsetParent !== null).map(e => ({ txt: e.textContent.replace(/\s+/g, ' ').trim().slice(0, 80), contacte: !!e.querySelector('button') && /Fait/.test(e.textContent) })));
   for (const v of ['jour', 'semaine', 'mois']) {
     await vue(p, v, '2026-10-12');
     let r = await lire();
