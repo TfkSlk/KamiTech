@@ -57,7 +57,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
       principal: [...document.querySelectorAll('.page-head .btn.primary')].filter(b => b.getBoundingClientRect().width > 0).map(b => b.textContent.trim()) }));
     if (tel) verifier(`${ecran} 1. en-tête sans bouton au téléphone`, tete.boutons.length === 0, JSON.stringify(tete));
     else {
-      verifier(`${ecran} 1. en-tête : « Noter » (principal) puis « + Ajouter ▾ » (recette)`, JSON.stringify(tete.boutons) === '["Noter","+ Ajouter ▾"]' && JSON.stringify(tete.principal) === '["Noter"]', JSON.stringify(tete));
+      verifier(`${ecran} 1. en-tête : « Noter » (principal) puis « + Ajouter ▾ » (recette)`, JSON.stringify(tete.boutons) === '["Noter","+ Ajouter ▾","Ta journée"]' && JSON.stringify(tete.principal) === '["Noter"]', JSON.stringify(tete));
       await p.click('.page-head .btn.primary'); await pause(p, 200);
       const noter = await p.evaluate(() => ({ ouverte: !document.querySelector('#rencontre').hidden, focus: document.activeElement?.id }));
       verifier(`${ecran} 1. « Noter » de l'en-tête ouvre l'écran Noter, curseur dans la note`, noter.ouverte && noter.focus === 'r-note', JSON.stringify(noter));
@@ -121,7 +121,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
     verifier(`${ecran} 5. notice d'exemple : une ligne « Données d'exemple affichées · Retirer »`, mini && mini.txt === 'Données d\'exemple affichées · Retirer' && mini.h <= 40 && !mini.carte, JSON.stringify(mini));
     await p.click('.notice.mini button'); await pause(p);
     await p.evaluate(() => document.querySelector('#confirm-ok')?.click()); await pause(p, 200);
-    verifier(`${ecran} 5. « Retirer » retire l'exemple (le RDV important ajouté reste)`, await p.evaluate(() => !aDemo() && state.events.some(e => e.id === 'imp15') && !document.querySelector('.notice.mini')));
+    verifier(`${ecran} 5. « Retirer » retire l'exemple (le RDV important ajouté reste)`, await p.evaluate(() => !aDemo() && state.events.some(e => e.id === 'imp15') && !document.querySelector('.notice.mini:not(.sauvegarde-mini)')));
 
     verifier(`${ecran} accueil sans défilement horizontal`, await sansScrollHorizontal(p));
     verifier(`${ecran} 1. aucune erreur JS`, erreurs.length === 0, erreurs.join(' | '));

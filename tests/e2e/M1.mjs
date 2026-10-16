@@ -46,7 +46,7 @@ for (const largeur of [320, 360, 390]) {
   await aller(p, 'dashboard');
   await p.click('#lien-plus'); await p.waitForTimeout(250);
   const plus = await p.evaluate(() => ({ ouvert: $('#modal').open, tuiles: [...document.querySelectorAll('#modal .tuile b')].map(b => b.textContent.trim()), defile: (() => { const b = document.querySelector('#modal .sheet-body'); return b ? b.scrollHeight > b.clientHeight + 1 : true; })() }));
-  verifier(`Plus ouvre 4 tuiles (sans Kami sans jeton) : ${plus.tuiles.join(', ')}`, plus.ouvert && JSON.stringify(plus.tuiles) === JSON.stringify(['Gains', 'KamiFood', 'Apport', 'Réglages']));
+  verifier(`Plus ouvre 4 tuiles (sans Kami sans jeton) : ${plus.tuiles.join(', ')}`, plus.ouvert && JSON.stringify(plus.tuiles) === JSON.stringify(['Gains', 'KamiFood', 'Apport', 'Réglages', 'Ta journée', 'Ta semaine']));
   verifier('Feuille Plus sans défilement', !plus.defile);
   await p.click('#modal .tuile >> text=Réglages'); await p.waitForTimeout(600);
   const apres = await p.evaluate(() => ({ hash: location.hash, ouvert: $('#modal').open, h1: document.querySelector('#main h1')?.textContent }));

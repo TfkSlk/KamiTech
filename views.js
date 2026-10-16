@@ -165,6 +165,24 @@ function alertesHtml(liste) {
   </section>`;
 }
 
+/* Carte « Ton argent » (commissions) : encaissé sur la période, attendu, en retard ; une ligne par partenaire en retard */
+function carteArgent(p) {
+  const a = argent(p);
+  if (!a.encaisse && !a.attendu && !a.retard) return '';
+  const tot = a.encaisse + a.attendu + a.retard;
+  let x = 0;
+  const seg = (v, c) => { if (!v) return ''; const w = v / tot * 100, r = `<rect x="${x.toFixed(2)}" y="0" width="${Math.max(0.5, w - (x + w < 99.9 ? 0.6 : 0)).toFixed(2)}" height="10" fill="${c}"/>`; x += w; return r; };
+  const barre = `<svg class="argent-barre" viewBox="0 0 100 10" preserveAspectRatio="none" role="img" aria-label="${esc(`Encaissé ${eur(a.encaisse)}, attendu ${eur(a.attendu)}, en retard ${eur(a.retard)}`)}">${seg(a.encaisse, 'var(--text)')}${seg(a.attendu, 'color-mix(in srgb, var(--muted) 45%, var(--surface))')}${seg(a.retard, 'var(--danger)')}</svg>`;
+  const lignes = a.parPartenaire.map(g => `<li><div class="grow"><b>${esc(g.nom)}</b> te doit <b>${esc(eur(g.total))}</b><div class="meta">${g.n > 1 ? g.n + ' dossiers' : '1 dossier'} · le plus ancien <span class="late">+${g.plusAncienJours} j</span></div></div>
+      <div class="argent-act"><button type="button" class="btn small" onclick="relancerPartenaire('${g.ids.join(',')}')">Relancer</button><button type="button" class="btn small" onclick="marquerPaye('${g.plusAncien}')">Marquer payé</button></div></li>`).join('');
+  return `<section class="card argent" aria-labelledby="argent-titre">
+    <div class="card-head"><div><h2 id="argent-titre">Ton argent</h2><p class="meta">Commissions d'apport · encaissé ${esc(PERIODES[p].toLowerCase())}</p></div><a class="link" href="#dossiers" onclick="filtre.activite='all';filtre.statut='signe'">Commissions →</a></div>
+    ${barre}
+    <div class="argent-leg"><span><i style="background:var(--text)"></i>Encaissé <b>${esc(eur(a.encaisse))}</b></span><span><i style="background:color-mix(in srgb, var(--muted) 45%, var(--surface))"></i>Attendu <b>${esc(eur(a.attendu))}</b></span>${a.retard ? `<span class="late"><i style="background:var(--danger)"></i>En retard <b>${esc(eur(a.retard))}</b></span>` : ''}</div>
+    ${lignes ? `<ul class="list argent-retards">${lignes}</ul>` : ''}
+  </section>`;
+}
+
 /* Premier lancement : trois gestes guidés plutôt qu'une page de zéros */
 function videAccueil() {
   const action = (ico, titre, aide, js) => `<button type="button" class="vide-action" onclick="${js}"><span class="va-ico">${ICONES[ico]}</span><span class="va-txt"><b>${titre}</b><small>${aide}</small></span></button>`;
@@ -206,6 +224,7 @@ function dashboard() {
     <div class="tete-actions hide-sm">
       <button type="button" class="btn primary" onclick="openContact();focusNote()">Noter</button>
       <button type="button" class="btn" id="btn-ajout" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-ajout" onclick="menuAjout()">+ Ajouter <span class="caret" aria-hidden="true">▾</span></button>
+      <button type="button" class="btn" onclick="ouvrirBrief()">Ta journée</button>
       <div class="menu-ajout" id="menu-ajout" role="menu" aria-label="Ajouter" hidden>
         ${[['rdv', 'Nouveau RDV', 'rdv'], ['dossier', 'Nouveau dossier', 'dossier'], ['abonne', 'Nouvel abonné', 'abonne']].map(([k, l, i]) => `<button type="button" role="menuitem" onclick="choixAjout('${k}')"><span class="mp-ico">${ICONES[i]}</span>${l}</button>`).join('')}
       </div>
@@ -215,7 +234,11 @@ function dashboard() {
     <span class="noter-ico">${ICONES.noter}</span><span class="noter-txt">Noter quelqu'un…</span><span class="noter-aide">Une phrase : nom, service, rappel</span>
   </button>
   ${bandeauMaintenant()}
+  ${empty ? '' : carteClotureHtml()}
+  ${empty ? '' : carteRevueHtml()}
+  ${empty ? '' : objectifsSemaineHtml()}
   ${!empty && aDemo() ? `<div class="notice mini"><span>Données d'exemple affichées</span> <span aria-hidden="true">·</span> <button type="button" onclick="retirerExemple()">Retirer</button></div>` : ''}
+  ${!empty && !aDemo() ? rappelSauvegardeHtml() : ''}
   ${alertesHtml(alertes())}`;
   if (empty) return tete + videAccueil();
 
@@ -224,7 +247,7 @@ function dashboard() {
   const jourVis = accueilDeplie.jour ? jourListe : jourListe.slice(0, 5);
   /* À rappeler : en cours, plus les « RDV planifié » dont le RDV est passé (ils attendent une suite) */
   const contactsSuivis = state.aVoir.filter(v => v.statut === 'suivi' || rdvPasse(v)).sort(aVoirTri);
-  const annee = bilan('annee'), semaine = bilan('semaine');
+  const annee = bilan('annee'), semaine = bilan('semaine'), argentP = argent(state.prefs.periode), nTour = fileTournee().length;
   const spark = serieMois(6).map(m => m.parts.reduce((s, x) => s + x.value, 0));
   const next7 = state.events.filter(e => e.date > t && e.date <= iso(addDays(new Date(), 7))).sort((a, c) => (a.date + a.heure).localeCompare(c.date + c.heure));
   const donutParts = b.rows.map(r => ({ k: r.k, label: SECTEURS[r.k].label, value: r.gagne }));
@@ -238,15 +261,17 @@ function dashboard() {
       ${plusAutres(jourListe.length - 5, accueilDeplie.jour, 'jour')}</div>
     <div class="card rappel-card"><div class="card-head"><div><h2>À rappeler</h2><p class="meta">${contactsDus ? `${pluriel(contactsDus, 'contact')} à rappeler aujourd'hui` : contactsSuivis.length ? `${contactsSuivis.length} en cours, personne à rappeler aujourd'hui` : 'Personne en suivi'}</p></div><a class="link" href="#contacts" onclick="avFiltre='suivi'">Tous →</a></div>
       ${contactsSuivis.length ? `<ul class="list">${contactsSuivis.slice(0, 5).map(v => aVoirItem(v, true)).join('')}</ul>${contactsSuivis.length > 5 ? `<a class="lien-btn plus-autres" href="#contacts" onclick="avFiltre='suivi'">+${contactsSuivis.length - 5} ${contactsSuivis.length > 6 ? 'autres' : 'autre'} →</a>` : ''}`
-        : '<div class="empty">Tu croises quelqu\'un, vous parlez d\'un service : note-le en 10 secondes, avec un rappel.</div>'}</div>
+        : '<div class="empty">Tu croises quelqu\'un, vous parlez d\'un service : note-le en 10 secondes, avec un rappel.</div>'}
+      ${nTour ? `<button type="button" class="btn t-lancer" onclick="lancerTournee()">Lancer la tournée (${nTour})</button>` : ''}</div>
   </div>
   <div class="rang-tete"><h2>Tes chiffres</h2>${periodeSwitch()}</div>
   <div class="grid kpis">
-    <div class="card kpi"><div class="label">Gagné · ${per}</div><div class="value">${esc(eur(b.tot.gagne))}</div><div class="sub">+ ${esc(eur(b.tot.prevu))} encore attendu</div></div>
-    <div class="card kpi"><div class="label">Gagné · année</div><div class="value">${esc(eur(annee.tot.gagne))}</div><div class="sub spark-row">${sparkline(spark)}<span>6 derniers mois</span></div></div>
+    <div class="card kpi"><div class="label">Gagné · ${per}</div><div class="value">${esc(eur(b.tot.gagne))}${pastilleVariation(state.prefs.periode)}</div><div class="sub">+ ${esc(eur(b.tot.prevu))} attendus d'ici ${esc(finPeriode(state.prefs.periode))}${argentP.retard ? ` · <span class="late">${esc(eur(argentP.retard))} en retard</span>` : ''}</div></div>
+    <div class="card kpi"><div class="label">Gagné · année</div><div class="value">${esc(eur(annee.tot.gagne))}${pastilleVariation('annee')}</div><div class="sub spark-row">${sparkline(spark)}<span>6 derniers mois</span></div></div>
     <div class="card kpi"><div class="label">KamiFood / mois</div><div class="value">${esc(eur(mrr()))}</div><div class="sub">${pluriel(state.abonnes.filter(a => a.statut === 'actif' && !a.interne).length, 'abonné actif', 'abonnés actifs')}</div></div>
     <a class="card kpi kpi-lien" href="#contacts" onclick="avFiltre='suivi'" aria-label="À rappeler : ${contactsDus}"><div class="label">À rappeler</div><div class="value">${contactsDus}</div><div class="sub">${contactsRetard ? `<span class="late">dont ${contactsRetard} en retard</span>` : contactsDus ? 'aujourd\'hui · voir →' : 'personne aujourd\'hui'}</div></a>
   </div>
+  ${carteArgent(state.prefs.periode)}
   <div class="grid cols-2 charts-row">
     <div class="card">
       <div class="card-head"><div><h2>Gains par secteur</h2><p class="meta">Encaissé · ${per}</p></div></div>
@@ -333,6 +358,7 @@ function planning() {
         </div>
         ${mqTel.matches ? choix : ''}
       </div>
+      <button class="btn hide-sm" onclick="exporterSemaine()" title="Les 7 prochains jours, avec alarmes, dans l'agenda du téléphone ou de l'ordinateur">Agenda (.ics)</button>
       <button class="btn primary" onclick="openEvent(null,'${planDate}')">+ RDV</button>
     </div>
   </div>
@@ -354,7 +380,7 @@ function vueSemaine(all, lundi) {
   </div>
 `;
   /* Au téléphone, les jours d'abord : la charge de la semaine vient après */
-  return mqTel.matches ? semaineTel(all, jours) + carteCharge : carteCharge + grilleHeures(jours, all);
+  return mqTel.matches ? semaineTel(all, jours) + carteCharge + '<button type="button" class="btn agenda-tel" onclick="exporterSemaine()">Mettre les 7 prochains jours dans mon agenda</button>' : carteCharge + grilleHeures(jours, all);
 }
 /* Semaine au téléphone : les périodes une seule fois en tête, puis un jour par carte ; un jour vide tient sur une ligne */
 function semaineTel(all, jours) {
@@ -508,14 +534,16 @@ function gainsView() {
   const donutParts = b.rows.map(r => ({ k: r.k, label: SECTEURS[r.k].label, value: r.gagne }));
   const tempsParts = [...b.rows.map(r => ({ k: r.k, label: SECTEURS[r.k].label, value: r.total })), { k: 'perso', label: SECTEURS.perso.label, value: b.perso.total }];
   const mois = serieMois(6);
+  const retardG = argent(p).retard;
   return `
   <div class="page-head">
     <div><h1>Gains et temps</h1><p>Ce que tu gagnes par secteur, et ce que ça te coûte en heures</p></div>
     ${periodeSwitch()}
   </div>
+  ${carteArgent(p)}
   <div class="grid kpis">
-    <div class="card kpi"><div class="label">Gagné</div><div class="value">${esc(eur(b.tot.gagne))}</div><div class="sub">${PERIODES[p].toLowerCase()}</div></div>
-    <div class="card kpi"><div class="label">Encore attendu</div><div class="value">${esc(eur(b.tot.prevu))}</div><div class="sub">commissions signées + abonnements</div></div>
+    <div class="card kpi"><div class="label">Gagné</div><div class="value">${esc(eur(b.tot.gagne))}${pastilleVariation(p)}</div><div class="sub">${PERIODES[p].toLowerCase()}</div></div>
+    <div class="card kpi"><div class="label">Encore attendu</div><div class="value">${esc(eur(b.tot.prevu))}</div><div class="sub">d'ici ${esc(finPeriode(p))}${retardG ? ` · <span class="late">${esc(eur(retardG))} en retard</span>` : ' · commissions et abonnements'}</div></div>
     <div class="card kpi"><div class="label">Temps planifié</div><div class="value">${esc(hrs(b.tot.total + b.perso.total))}</div><div class="sub">${esc(hrs(b.tot.total))} pro · ${esc(hrs(b.perso.total))} perso · ${esc(hrs(b.tot.fait))} réalisées</div></div>
     <div class="card kpi"><div class="label">Gain par heure</div><div class="value">${esc(parHeure(b.tot.gagne, b.tot.total))}</div><div class="sub">sur ${esc(hrs(b.tot.total))} d'heures pro</div></div>
   </div>

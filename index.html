@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Kami Groupe</title>
-  <meta name="theme-color" content="#000000">
+  <meta name="theme-color" content="#f3f4f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)">
   <meta name="description" content="Tableau de bord Kami Groupe : planning, KamiFood, apport d'affaires, gains.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="icon" href="icons/favicon-32.png" type="image/png" sizes="32x32">
@@ -12,10 +13,9 @@
   <link rel="manifest" href="manifest.json">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="KGD">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="fonts/inter-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -52,6 +52,10 @@
   </dialog>
 
   <div id="rencontre" role="dialog" aria-modal="true" aria-labelledby="r-titre" hidden></div>
+  <div id="tournee" role="dialog" aria-modal="true" aria-labelledby="t-titre" hidden></div>
+  <div id="brief" class="rituel" role="dialog" aria-modal="true" aria-labelledby="b-titre" hidden></div>
+  <div id="cloture" class="rituel" role="dialog" aria-modal="true" aria-labelledby="b-titre" hidden></div>
+  <div id="revue" class="rituel" role="dialog" aria-modal="true" aria-labelledby="b-titre" hidden></div>
 
   <div id="menu-plus" class="menu-plus" role="menu" aria-label="Ajouter" hidden></div>
 

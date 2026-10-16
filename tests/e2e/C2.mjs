@@ -17,7 +17,7 @@ const etatSain = (extra = {}) => ({
   aVoir: [],
   formules: [{ id: 'f1', nom: 'Essentiel', prix: 79 }, { id: 'f2', nom: 'Pro', prix: 149 }, { id: 'f3', nom: 'Premium', prix: 249 }],
   rdvModele: [{ titre: 'Installation', jours: 7, duree: 60, mode: 'place' }],
-  prefs: { periode: 'mois', theme: 'light', planVue: 'semaine', migrations: { rappelsRecuperes: true, dureesPeriodes: true, resilieSansFin: true, dedoublonMoi: true }, persistDemande: true, jourCopie: '2026-10-10' },
+  prefs: { periode: 'mois', theme: 'light', planVue: 'semaine', migrations: { rappelsRecuperes: true, dureesPeriodes: true, resilieSansFin: true, dedoublonMoi: true, paiementPrevu: true, historiqueDossiers: true }, persistDemande: true, jourCopie: '2026-10-10' },
   stripe: null, rev: 3,
   ...extra,
 });

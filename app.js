@@ -169,6 +169,25 @@ function migrate(s) {
      Ici, les utilitaires (today, iso, estPeriode…) ne sont pas encore définis : code en ligne et jourLocal() seulement. */
   if (!s.prefs.migrations || typeof s.prefs.migrations !== 'object' || Array.isArray(s.prefs.migrations)) s.prefs.migrations = {};
   if (!(Number(s.prefs.heuresMax) > 0)) s.prefs.heuresMax = 8; // journée pleine : la barre de charge du mois passe au rouge au-delà
+  /* Délais de paiement des commissions, en jours après la signature (réglables dans Réglages) */
+  if (!s.prefs.delais || typeof s.prefs.delais !== 'object' || Array.isArray(s.prefs.delais)) s.prefs.delais = { cee: 90, energie: 45, foncier: 120 };
+  /* Dossiers déjà signés : leur paiement prévu est posé une fois (signature + délai du secteur ; sans date de signature, sa création).
+     Rien n'est effacé : une date déjà posée reste. */
+  if (!s.revues || typeof s.revues !== 'object' || Array.isArray(s.revues)) s.revues = {};
+  if (!s.prefs.migrations.historiqueDossiers) {
+    s.dossiers.forEach(d => { if (!Array.isArray(d.historique)) d.historique = []; });
+    s.prefs.migrations.historiqueDossiers = true;
+  }
+  if (!s.prefs.migrations.paiementPrevu) {
+    const plus = (ds, n) => { const [y, m, d] = ds.split('-').map(Number); return jourLocal(new Date(y, m - 1, d + n).getTime()); };
+    const delai = k => Number(s.prefs.delais[k]) > 0 ? Number(s.prefs.delais[k]) : ({ cee: 90, energie: 45, foncier: 120 }[k] || 60);
+    s.dossiers.forEach(d => {
+      if (d.statut !== 'signe' || d.datePaiementPrevue) return;
+      const base = /^\d{4}-\d{2}-\d{2}$/.test(d.dateSignature || '') ? d.dateSignature : jourLocal(d.createdAt == null ? undefined : d.createdAt);
+      d.datePaiementPrevue = plus(base, delai(d.activite));
+    });
+    s.prefs.migrations.paiementPrevu = true;
+  }
   /* Victimes du rappel non enregistré ou du RDV oublié : ils reviennent aujourd'hui. Rien n'est supprimé, les journaux restent. */
   if (!s.prefs.migrations.rappelsRecuperes) {
     const j = jourLocal();
@@ -256,7 +275,7 @@ function assainir(s) {
   const maj = (x, k, v) => { if (x[k] !== v) { x[k] = v; n++; } };
   /* Dates : AAAA-MM-JJ ; un horodatage ISO est ramené à son jour ; une date française JJ/MM/AAAA est retournée ;
      sinon la date est vidée */
-  const DATES = ['date', 'fin', 'rappel', 'debut', 'dateRelance', 'dateSignature', 'datePaiement'];
+  const DATES = ['date', 'fin', 'rappel', 'debut', 'dateRelance', 'dateSignature', 'datePaiement', 'datePaiementPrevue'];
   const FR = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/;
   const jourFr = v => {
     const m = FR.exec(v.trim());
@@ -319,7 +338,7 @@ function assainir(s) {
 }
 /* Enregistre. Rien n'est écrit si les données stockées sont illisibles (en attente d'un choix),
    ni si une autre fenêtre a écrit une version plus récente (on recharge plutôt que d'écraser). */
-function save() {
+function save(compter = true) {
   if (donneesIllisibles) {
     /* Après le toast de l'action (« Dossier créé »…), qui sinon le recouvrirait : chaque saisie non enregistrée est signalée */
     setTimeout(() => toastAction('Pas enregistré : tes données illisibles attendent ton choix', 'Choisir', voirCarteIllisible, 8000), 0);
@@ -333,6 +352,7 @@ function save() {
     return false;
   }
   copieVeille(state, brut);
+  if (compter) state.prefs.modifsDepuisExport = (num(state.prefs.modifsDepuisExport) || 0) + 1;
   const rev = revCourant + 1;
   try { localStorage.setItem(KEY, serialiser(state, rev)); revCourant = rev; return true; }
   catch (e) {
@@ -354,7 +374,7 @@ function remplacerEtat(data) {
   revCourant = Math.max(revStocke(), revCourant);
   state = migrate({ ...blank(), ...data });
   if (jc) state.prefs.jourCopie = jc; else delete state.prefs.jourCopie;
-  const ok = save(); render();
+  const ok = save(false); render();
   return ok;
 }
 /* Une autre fenêtre (ou l'appli rouverte sur iPhone) a écrit : on suit, sauf pendant une saisie */
@@ -407,6 +427,18 @@ const abBadge = s => `<span class="status ${s === 'actif' ? 'paye' : s === 'resi
 const dossier = id => state.dossiers.find(d => d.id === id);
 /* Un RDV avec une date de fin est une période (bandeau sur plusieurs jours) ; important = alerte */
 const estPeriode = e => !!(e.fin && e.fin > e.date);
+/* Commissions : délai de paiement du secteur, date où l'argent doit arriver, ce qui reste dû */
+const DELAIS_DEFAUT = { cee: 90, energie: 45, foncier: 120 };
+const delaiPaiement = k => { const v = Number((state.prefs.delais || {})[k]); return v > 0 ? v : (DELAIS_DEFAUT[k] || 60); };
+function echeance(d) {
+  if (d.datePaiementPrevue) return d.datePaiementPrevue;
+  const base = d.dateSignature || (d.createdAt ? jourLocal(d.createdAt) : today());
+  return iso(addDays(parse(base), delaiPaiement(d.activite)));
+}
+const resteDu = d => Math.max(0, num(d.commEstimee) - num(d.commRecue));
+const fmtDateAn = s => s ? parse(s).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', ...(s.slice(0, 4) !== String(new Date().getFullYear()) ? { year: 'numeric' } : {}) }) : '';
+/* « d'ici dimanche », « d'ici fin octobre », « d'ici fin 2026 » */
+const finPeriode = p => p === 'semaine' ? 'dimanche' : p === 'annee' ? `fin ${new Date().getFullYear()}` : `fin ${new Date().toLocaleDateString('fr-FR', { month: 'long' })}`;
 const surJour = (e, ds) => estPeriode(e) ? (e.date <= ds && ds <= e.fin) : e.date === ds;
 const abonne = id => state.abonnes.find(a => a.id === id);
 const aVoir = id => state.aVoir.find(v => v.id === id);
@@ -451,7 +483,7 @@ function toastAction(msg, label, fn, ms = 8000) {
   t.appendChild(b);
   t.classList.add('show');
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => t.classList.remove('show'), ms);
+  if (ms > 0) toast.t = setTimeout(() => t.classList.remove('show'), ms); // 0 : reste affiché jusqu'au toucher (ou au toast suivant)
 }
 
 /* ---------- Calculs : périodes, gains, temps ---------- */
@@ -503,8 +535,36 @@ function gainsPeriode(secteur, from, to) {
   }
   const ds = state.dossiers.filter(d => d.activite === secteur);
   const gagne = ds.filter(d => d.datePaiement >= from && d.datePaiement <= to).reduce((s, d) => s + num(d.commRecue), 0);
-  const prevu = ds.filter(d => d.statut === 'signe').reduce((s, d) => s + Math.max(0, num(d.commEstimee) - num(d.commRecue)), 0);
+  const debut = from > t ? from : t;
+  const prevu = ds.filter(d => d.statut === 'signe' && echeance(d) >= debut && echeance(d) <= to).reduce((s, d) => s + resteDu(d), 0);
   return { gagne, prevu };
+}
+/* L'argent des commissions : encaissé sur la période, attendu (signé, paiement pas encore dû), en retard (dû, pas payé),
+   et qui doit quoi (les retards regroupés par partenaire) */
+function argent(p = state.prefs.periode) {
+  const t = today(), [from, to] = range(p);
+  const encaisse = APPORT.reduce((s, k) => s + gainsPeriode(k, from, to).gagne, 0);
+  const signes = state.dossiers.filter(d => d.statut === 'signe' && resteDu(d) > 0);
+  const attendus = signes.filter(d => echeance(d) >= t), retards = signes.filter(d => echeance(d) < t);
+  const groupes = {};
+  retards.forEach(d => {
+    const nom = String(d.partenaire || '').trim().replace(/\s+/g, ' ') || 'Sans partenaire', cle = nom.toLowerCase();
+    const g = groupes[cle] || (groupes[cle] = { nom, total: 0, n: 0, plusAncienJours: 0, ids: [], plusAncien: null });
+    const jours = Math.round((parse(t) - parse(echeance(d))) / 864e5);
+    g.total += resteDu(d); g.n++; g.ids.push(d.id);
+    if (jours >= g.plusAncienJours) { g.plusAncienJours = jours; g.plusAncien = d.id; }
+  });
+  return {
+    encaisse, attendu: attendus.reduce((s, d) => s + resteDu(d), 0), retard: retards.reduce((s, d) => s + resteDu(d), 0),
+    parPartenaire: Object.values(groupes).sort((a, b) => b.plusAncienJours - a.plusAncienJours || b.total - a.total),
+  };
+}
+/* « Relancer » un partenaire en retard : ses dossiers remontent dans « Aujourd'hui » */
+function relancerPartenaire(ids) {
+  const ds = String(ids).split(',').map(dossier).filter(Boolean);
+  if (!ds.length) return;
+  ds.forEach(d => { d.dateRelance = today(); });
+  if (save()) { render(); toast(ds.length > 1 ? `${ds.length} dossiers à relancer aujourd'hui` : `${ds[0].entreprise} : à relancer aujourd'hui`); }
 }
 function gains(secteur, p) { return gainsPeriode(secteur, ...range(p)); }
 /* Temps planifié : la durée des RDV et tâches. Une période (plusieurs jours) et une relance ne comptent pas d'heures. */
@@ -571,6 +631,7 @@ function render() {
   /* Une autre vue s'ouvre en haut de page (le défilement de la précédente ne la suit pas) ; un nouveau rendu de la même vue garde sa place */
   if (view !== vueAffichee) { vueAffichee = view; window.scrollTo(0, 0); }
   armerMaintenant();
+  if (view === 'dashboard') briefAuto();
   dernierRendu = { jour: today(), t: Date.now() };
   majPastille();
 }
@@ -631,6 +692,8 @@ function ouvrirPlus() {
     tuile('kamifood', 'KamiFood', `${actifs} abonné${actifs > 1 ? 's' : ''} · ${eur(mrr())}/mois`),
     tuile('dossiers', 'Apport', `${enCours} dossier${enCours > 1 ? 's' : ''} en cours${dues ? ` · ${dues} relance${dues > 1 ? 's' : ''} due${dues > 1 ? 's' : ''}` : ''}`, dues > 0),
     tuile('parametres', 'Réglages', sauv, jours === null || jours > 14),
+    `<button type="button" class="tuile" onclick="fermerModal();ouvrirBrief()"><b><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></svg>Ta journée</b><span>retards, aujourd'hui, qui rappeler</span></button>`,
+    `<button type="button" class="tuile" onclick="fermerModal();ouvrirRevue()"><b><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Ta semaine</b><span>temps, argent, 3 objectifs</span></button>`,
     jarvis.token ? tuile('jarvis', jarvis.nom || 'Kami', 'Parler à ton assistant') : '',
   ].join('');
   showModal(feuille({ titre: 'Plus', corps: `<div class="tuiles">${tuiles}</div>`, pied: '<div class="modal-actions"><span></span><button type="button" class="btn" onclick="modal().close()">Fermer</button></div>' }), () => {});
@@ -781,7 +844,8 @@ function itemList(items, showDate) {
       ${e.contact ? `${actionsTel('c:' + e.contact, '', true)}<button class="btn small fait-btn" onclick="suiteContact('${e.contact}', true)" title="C'est fait : choisir la suite">✓ Fait</button>` : e.relance && actionsTel(e.lien, '', true) ? `<span class="relance-ico" title="Relance">↻</span>${actionsTel(e.lien, '', true)}` : e.relance ? '<span class="relance-ico" title="Relance">↻</span>' : `<label class="case"><input type="checkbox" ${e.fait ? 'checked' : ''} onchange="toggleEvent('${e.id}')" aria-label="Fait"></label>`}
       <div class="grow clickable" onclick="${click}">
         <div class="when ${late || (e.contact && e.retard) ? 'late' : ''}">${esc(when)}${late ? ' · en retard' : ''}</div>
-        <div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${esc(e.titre)}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
+        <div class="title-txt">${e.important ? '<span class="warn-ico" title="Alerte">⚠</span> ' : ''}${esc(e.titre)}${num(e.reports) >= 1 && !e.contact && !e.relance ? ` <span class="badge-report">reporté ×${num(e.reports)}</span>` : ''}</div>${meta ? `<div class="meta">${meta}</div>` : ''}
+        ${num(e.reports) >= 3 && !e.fait && !e.contact && !e.relance ? `<div class="reports-act" onclick="event.stopPropagation()"><button type="button" class="btn small" onclick="supprimerEvent('${e.id}')">Abandonner</button><button type="button" class="btn small" onclick="garderEvent('${e.id}')">Garder</button></div>` : ''}
       </div>
       <i class="dot" style="background:var(--${e.activite})" data-tip="${esc(SECTEURS[e.activite]?.label || '')}" aria-label="${esc(SECTEURS[e.activite]?.label || '')}"></i>
     </li>`;
@@ -818,7 +882,7 @@ function kamifood() {
   </div>
   ${clients ? `<div class="card table-wrap">
     <table class="tab-tel">
-      <thead><tr><th>Restaurant</th><th>Formule</th><th class="num">Prix / mois</th><th>Statut</th><th class="num hide-sm">Fin d'engagement</th><th class="hide-sm">Prochain RDV</th></tr></thead>
+      <thead><tr><th>Restaurant</th><th>Formule</th><th class="num">Prix / mois</th><th>Statut</th><th class="num">Fin d'engagement</th><th class="hide-sm">Prochain RDV</th></tr></thead>
       <tbody>${ab.map(a => {
         const n = prochain(a.id);
         const finEng = a.debut ? iso(addMonths(parse(a.debut), num(a.engagement) || 12)) : '';
@@ -827,7 +891,7 @@ function kamifood() {
         <td class="c-sous">${esc(a.formuleNom || formule(a.formule)?.nom || '—')}</td>
         <td class="num c-montant" ${a.interne ? '' : 'data-s="/ mois"'}>${a.interne ? '<span class="meta">licence</span>' : eur(a.prix)}</td>
         <td class="c-sous c-droite">${abBadge(a.statut)}</td>
-        <td class="num hide-sm">${fmtDate(finEng)}</td>
+        <td class="num c-sous ${!a.interne && a.statut !== 'resilie' && finEng && finEng >= t && finEng <= iso(addDays(new Date(), 60)) ? 'late' : ''}" data-l="Fin d'engagement">${a.interne || !finEng ? '—' : esc(fmtDateAn(finEng))}</td>
         <td class="hide-sm">${n ? `${fmtDate(n.date)} · ${esc(n.titre)}` : '<span class="meta">—</span>'}</td>
       </tr>`; }).join('')}</tbody>
     </table></div>` : ''}`;
@@ -926,30 +990,54 @@ function refreshTable() {
   $('#dossiers-table').replaceWith($('#dossiers-table', tmp));
 }
 function commissionsTable() {
+  const t = today();
   const rows = state.dossiers.filter(d => d.statut === 'signe' || d.statut === 'paye')
     .sort((a, b) => (a.statut === 'paye') - (b.statut === 'paye') || (b.dateSignature || '').localeCompare(a.dateSignature || ''));
   if (!rows.length) return '';
   const tot = rows.reduce((s, d) => ({ e: s.e + num(d.commEstimee), r: s.r + num(d.commRecue) }), { e: 0, r: 0 });
   return `<div class="section-head"><h2>Commissions signées</h2></div>
   <div class="card table-wrap"><table class="tab-tel">
-    <thead><tr><th>Entreprise</th><th>Secteur</th><th class="num hide-sm">Signé le</th><th class="num">Prévue</th><th class="num">Reçue</th><th></th></tr></thead>
+    <thead><tr><th>Entreprise</th><th>Secteur</th><th class="num hide-sm">Signé le</th><th class="num">Prévue</th><th class="num">Reçue</th><th class="num">Paiement</th><th></th></tr></thead>
     <tbody>${rows.map(d => `<tr>
       <td class="clickable c-nom" onclick="openDossier('${d.id}')"><strong>${esc(d.entreprise)}</strong></td>
       <td class="c-sous">${tag(d.activite)}</td>
       <td class="num hide-sm">${fmtDate(d.dateSignature)}</td>
       <td class="num c-sous c-droite" data-l="Prévue">${eur(d.commEstimee)}</td>
       <td class="num c-sous" data-l="Reçue">${eur(d.commRecue)}</td>
+      <td class="num c-sous ${d.statut === 'signe' && echeance(d) < t ? 'late' : ''}" data-l="${d.statut === 'paye' ? 'Payé le' : 'Paiement prévu'}">${d.statut === 'paye' ? fmtDateAn(d.datePaiement) || '—' : fmtDateAn(echeance(d))}</td>
       <td class="num c-montant">${d.statut === 'paye' ? statusBadge('paye') : `<button class="btn small" onclick="marquerPaye('${d.id}')">Marquer payé</button>`}</td>
     </tr>`).join('')}</tbody>
-    <tfoot><tr><td colspan="2" class="c-nom">Total</td><td class="hide-sm"></td><td class="num c-sous c-droite" data-l="Prévue">${eur(tot.e)}</td><td class="num c-sous" data-l="Reçue">${eur(tot.r)}</td><td></td></tr></tfoot>
+    <tfoot><tr><td colspan="2" class="c-nom">Total</td><td class="hide-sm"></td><td class="num c-sous c-droite" data-l="Prévue">${eur(tot.e)}</td><td class="num c-sous" data-l="Reçue">${eur(tot.r)}</td><td></td><td></td></tr></tfoot>
   </table></div>`;
 }
 function marquerPaye(id) {
   const d = dossier(id);
+  if (!d) return;
   d.statut = 'paye';
   if (!num(d.commRecue)) d.commRecue = d.commEstimee;
   d.datePaiement = d.datePaiement || today();
-  save(); render(); toast('Commission marquée comme payée');
+  if (!save()) return;
+  render();
+  toast(`+${eur(num(d.commRecue))} · ce mois ${eur(bilan('mois').tot.gagne)}`, 2600);
+  clearTimeout(marquerPaye.suite);
+  marquerPaye.suite = setTimeout(() => toastAction('Prévoir la prochaine affaire ?', 'Oui', () => prochaineAffaire(id), 10000), 2700);
+}
+/* Après un paiement : le client redevient un contact à rappeler au bon moment (CEE dans 12 mois, Énergie dans 10, Foncier au 1er août suivant) */
+function prochaineAffaire(id) {
+  const d = dossier(id);
+  if (!d) return;
+  const n = new Date();
+  const quand = d.activite === 'energie' ? addMonths(n, 10) : d.activite === 'foncier' ? new Date(n >= new Date(n.getFullYear(), 7, 1) ? n.getFullYear() + 1 : n.getFullYear(), 7, 1) : addMonths(n, 12);
+  const rappel = iso(jourOuvre(quand));
+  let v = state.aVoir.find(x => x.lien === 'd:' + id);
+  if (!v) {
+    v = { id: uid(), createdAt: Date.now(), nom: d.contact || d.entreprise, entreprise: d.contact ? d.entreprise || '' : '', tel: d.tel || '', activite: d.activite, priorite: 'normale', attente: '', lien: 'd:' + id, notes: '', historique: [] };
+    state.aVoir.push(v);
+  }
+  v.statut = 'suivi'; v.rappel = rappel; v.attente = '';
+  if (!Array.isArray(v.historique)) v.historique = [];
+  v.historique.push({ date: today(), texte: `Commission payée : ${eur(num(d.commRecue))}` });
+  if (save()) { render(); toast(`${nomDe(v)} · rappel le ${fmtDateAn(rappel)}`); }
 }
 
 /* ---------- Gains et temps ---------- */
@@ -959,11 +1047,12 @@ function parametres() {
   return `
   <div class="page-head"><div><h1>Réglages</h1><p>Sauvegarde, apparence et KamiFood. Tout s'enregistre dès que tu modifies.</p></div></div>
   <div class="settings">
-    <div class="card">
+    <div class="card carte-sauvegarde ${etatSauvegarde().rouge ? 'rouge' : ''}">
       <h2>Sauvegarde</h2>
-      <p>Tes données restent dans ce navigateur. Exporte-les régulièrement pour ne rien perdre ou pour les passer sur un autre appareil.</p>
+      <p class="etat-sauvegarde"><b>${esc(etatSauvegarde().texte)}</b>${etatSauvegarde().modifs ? ` · ${etatSauvegarde().modifs} modification${etatSauvegarde().modifs > 1 ? 's' : ''} depuis` : ''}</p>
+      <p>Tes données restent sur cet appareil. Un toucher sur « Sauvegarder » les envoie où tu veux (Fichiers, iCloud Drive, WhatsApp à toi-même, Mail).</p>
       <div class="btn-row">
-        <button class="btn primary" onclick="exporter()">Exporter (.json)</button>
+        <button class="btn primary" onclick="sauvegarder()">Sauvegarder</button>
         <button class="btn" onclick="copier()">Copier la sauvegarde</button>
         <label class="btn">Importer…<input type="file" accept="application/json,.json" hidden onchange="importer(this.files[0]);this.value=''"></label>
       </div>
@@ -1011,6 +1100,17 @@ function parametres() {
       <div class="btn-row"><button class="btn" onclick="saveModele();state.rdvModele.push({titre:'Nouveau RDV',jours:0,duree:60,mode:'visio'});save();render()">+ RDV</button></div>
     </div>
     <div class="card">
+      <h2>Ta journée</h2>
+      <p>La journée pleine sert de repère à la jauge du matin et à la barre de charge du mois.</p>
+      <div class="rows"><div class="row"><span class="delai-lab">Journée pleine</span><input id="heures-max" type="number" min="1" max="16" step="0.5" inputmode="decimal" class="short" value="${esc(state.prefs.heuresMax || 8)}" aria-label="Journée pleine, en heures" onchange="majHeuresMax(this.value)"><span class="meta">heures</span></div></div>
+      <label class="check"><input type="checkbox" id="rituel-matin" ${state.prefs.rituelMatin === false ? '' : 'checked'} onchange="state.prefs.rituelMatin=this.checked;save();toast('Enregistré')"><span>Ouvrir « Ta journée » le matin<small>retards, journée, qui rappeler : à la première ouverture, entre 5 h et 14 h</small></span></label>
+    </div>
+    <div class="card">
+      <h2>Délais de paiement</h2>
+      <p>Jours entre la signature et le paiement de la commission, par secteur : la date prévue d'un dossier signé en découle (tu peux la changer dans le dossier).</p>
+      <div class="rows delais">${APPORT.map(k => `<div class="row"><span class="delai-lab">${esc(SECTEURS[k].label)}</span><input id="delai-${k}" type="number" min="1" step="1" inputmode="numeric" class="short" value="${delaiPaiement(k)}" aria-label="Délai de paiement ${esc(SECTEURS[k].label)}, en jours" onchange="majDelai('${k}', this.value)"><span class="meta">jours</span></div>`).join('')}</div>
+    </div>
+    <div class="card">
       <h2>Données</h2>
       <p>${state.abonnes.length} abonné(s), ${state.dossiers.length} dossier(s), ${state.events.length} RDV / tâche(s), ${state.aVoir.length} contact(s).</p>
       ${aDemo() ? '<p class="meta">Des données d\'exemple sont chargées. « Retirer l\'exemple » ne touche qu\'à elles : tes vraies données restent.</p>' : ''}
@@ -1048,6 +1148,18 @@ function parametres() {
   </div>`;
 }
 /* Réglages enregistrés au fil de l'eau (événement change) : pas de rendu, le champ suivant garde le focus */
+function majHeuresMax(v) {
+  const n = Math.round(num(v) * 2) / 2;
+  if (!(n >= 1 && n <= 16)) { toast('Entre 1 et 16 heures'); render(); return; }
+  state.prefs.heuresMax = n;
+  if (save()) toast('Enregistré');
+}
+function majDelai(k, v) {
+  const n = Math.round(num(v));
+  if (!(n >= 1 && n <= 730)) { toast('Un nombre de jours entre 1 et 730'); render(); return; }
+  state.prefs.delais = { ...DELAIS_DEFAUT, ...(state.prefs.delais || {}), [k]: n };
+  if (save()) toast('Enregistré');
+}
 function saveFormules(silencieux) {
   state.formules.forEach((f, i) => { const n = $('#fn-' + i), pr = $('#fp-' + i); if (!n || !pr) return; f.nom = n.value.trim() || f.nom; f.prix = num(pr.value); });
   if (save() && !silencieux) toast('Enregistré');
@@ -1078,7 +1190,7 @@ function exporter() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   noterSauvegarde();
 }
-function noterSauvegarde() { if (donneesIllisibles) return; state.prefs.dernierExport = new Date().toISOString(); save(); }
+function noterSauvegarde() { if (donneesIllisibles) return; state.prefs.dernierExport = new Date().toISOString(); state.prefs.modifsDepuisExport = 0; delete state.prefs.snoozeSauvegarde; save(false); }
 function copier() {
   navigator.clipboard.writeText(JSON.stringify(state))
     .then(() => { noterSauvegarde(); toast('Sauvegarde copiée : colle-la dans une note ou un e-mail'); })
@@ -1370,6 +1482,7 @@ function openDossier(id, prefill) {
       ${field('partenaire', 'Partenaire (fournisseur, délégataire, cabinet)', inp('partenaire', d.partenaire), 'full')}
       ${field('commRecue', 'Commission reçue (€)', inp('commRecue', d.commRecue, 'number', nombre), 'full')}
       ${field('dateSignature', 'Signé le', inp('dateSignature', d.dateSignature, 'date'))}
+      ${field('datePaiementPrevue', 'Paiement prévu le', inp('datePaiementPrevue', d.statut === 'signe' ? echeance(d) : d.datePaiementPrevue, 'date'))}
       ${field('datePaiement', 'Payé le', inp('datePaiement', d.datePaiement, 'date'))}
       ${field('notes', 'Notes', zoneTexte('notes', d.notes), 'full')}
     </div>`;
@@ -1379,6 +1492,7 @@ function openDossier(id, prefill) {
     const target = id ? d : { id: uid(), createdAt: Date.now() };
     Object.assign(target, f);
     if (f.statut === 'signe' && !target.dateSignature) target.dateSignature = today();
+    if (target.statut === 'signe' && !target.datePaiementPrevue) target.datePaiementPrevue = iso(addDays(parse(target.dateSignature || today()), delaiPaiement(target.activite)));
     if (f.statut === 'paye') {
       if (!target.dateSignature) target.dateSignature = today();
       if (!target.datePaiement) target.datePaiement = today();
@@ -1495,7 +1609,7 @@ function openEvent(id, date, lien, heure, apres, prefill) {
       ${field('lieu', 'Lieu', inp('lieu', e.lieu, 'text', `autocomplete="off" placeholder="Adresse ou ville" data-auto="${esc(villeDe(e.lien))}"`), 'full')}
       ${field('notes', 'Notes', zoneTexte('notes', e.notes), 'full')}
     </div>`;
-  showModal(feuille({ titre: id ? 'Modifier le RDV' : 'Nouveau RDV / tâche', sous: id ? esc(jourLong(e.date) + (e.heure ? ' · ' + e.heure : '')) : '', menu: id ? itemMenu('Supprimer', `supprimerEvent('${id}')`, true) : '', corps: volets([{ titre: 'Essentiel', html: essentiel }, { titre: 'Plus d\'options', html: plus }]) }),
+  showModal(feuille({ titre: id ? 'Modifier le RDV' : 'Nouveau RDV / tâche', sous: id ? esc(jourLong(e.date) + (e.heure ? ' · ' + e.heure : '')) : '', menu: id ? itemMenu('Mettre dans mon agenda', `agendaEvent('${id}')`) + itemMenu('Supprimer', `supprimerEvent('${id}')`, true) : '', corps: volets([{ titre: 'Essentiel', html: essentiel }, { titre: 'Plus d\'options', html: plus }]) }),
   f => {
     /* Pas de secteur par défaut : sans choix, rien n'est créé */
     if (!secteurConnu(f.activite)) { voletAller(0); $('#f-activite')?.closest('.field')?.classList.add('manque'); toast('Choisis le secteur'); return; }
@@ -1655,6 +1769,10 @@ function alertes() {
       out.push(ligne(e, d, [quand.charAt(0).toUpperCase() + quand.slice(1), lienNom(e.lien) || e.lieu || ''].filter(Boolean).join(' · ')));
     }
   });
+  /* Commissions en retard : une ligne forte par partenaire (le toucher ouvre les commissions signées) */
+  argent().parPartenaire.forEach(g => out.push({ date: t, heure: '', jours: 0, compte: 'Impayé', titre: `${g.nom} te doit ${eur(g.total)}`,
+    sous: `${g.n > 1 ? g.n + ' dossiers' : '1 dossier'} · le plus ancien +${g.plusAncienJours} j`, niveau: 'fort', id: 'arg-' + g.ids[0],
+    action: `filtre.activite='all';filtre.statut='signe';location.hash='#dossiers'` }));
   return out.sort((a, b) => a.date.localeCompare(b.date) || (a.heure || '99').localeCompare(b.heure || '99'));
 }
 /* Dates lisibles : « mardi 13 oct. » et « jeu. 15 oct. » */
@@ -2477,6 +2595,7 @@ const effacerAppel = () => { try { sessionStorage.removeItem(APPEL); } catch (e)
 function proposerNoteAppel() {
   const a = lireAppel();
   if (!a) { effacerAppel(); return; }
+  if (tour) return; // pendant une tournée, l'issue se choisit sur la carte
   if (occupe() || modal().open || $('#confirm').open) return; // une saisie en cours : la question attend le prochain retour
   const verbe = a.canal === 'sms' ? 'SMS à' : a.canal === 'whatsapp' ? 'WhatsApp avec' : 'Appel avec';
   const opt = (k, l, s) => `<button type="button" class="opt" onclick="appelRetour('${k}')"><b>${l}</b>${s ? `<span>${s}</span>` : ''}</button>`;
@@ -2498,18 +2617,134 @@ function appelRetour(issue) {
   if (k === 'c') {
     const v = aVoir(id); if (!v) return;
     v.tentatives = (num(v.tentatives) || 0) + 1;
-    v.rappel = rappelDans(2);
+    v.rappel = rappelSansReponse(v.tentatives);
     if (v.statut === 'clos') v.statut = 'suivi';
     v.historique = Array.isArray(v.historique) ? v.historique : [];
     v.historique.push({ date: today(), texte: `Appel · ${quoi} (tentative ${v.tentatives})` });
     if (save()) { render(); toast(`${nomDe(v)} · ${quoi} · rappel ${fmtDate(v.rappel)}`); }
   } else if (k === 'd') {
     const d = dossier(id); if (!d) return;
-    d.dateRelance = rappelDans(2);
+    d.tentatives = (num(d.tentatives) || 0) + 1;
+    d.dateRelance = rappelSansReponse(d.tentatives);
+    d.historique = Array.isArray(d.historique) ? d.historique : [];
+    d.historique.push({ date: today(), texte: `Appel · ${quoi} (tentative ${d.tentatives})` });
     if (save()) { render(); toast(`${d.entreprise} · ${quoi} · relance ${fmtDate(d.dateRelance)}`); }
   }
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(proposerNoteAppel, 300); });
+
+/* ---------- Le lundi : ta semaine passée, temps contre argent, et 3 objectifs ----------
+   Comparaison à date égale : la période en cours jusqu'à aujourd'hui contre la précédente jusqu'au même jour. */
+function bornesComparees(p, n = new Date()) {
+  const t = iso(n), y = n.getFullYear(), m = n.getMonth(), j = n.getDate();
+  const borne = (yy, mm, jj) => iso(new Date(yy, mm, Math.min(jj, new Date(yy, mm + 1, 0).getDate())));
+  if (p === 'semaine') { const l = monday(n); return { cur: [iso(l), t], prev: [iso(addDays(l, -7)), iso(addDays(n, -7))] }; }
+  if (p === 'annee') return { cur: [`${y}-01-01`, t], prev: [`${y - 1}-01-01`, borne(y - 1, m, j)] };
+  return { cur: [iso(new Date(y, m, 1)), t], prev: [iso(new Date(y, m - 1, 1)), borne(y, m - 1, j)] };
+}
+function variation(secteur, p) {
+  const { cur, prev } = bornesComparees(p), ks = secteur === 'tot' ? PRO : [secteur];
+  const a = ks.reduce((s, k) => s + gainsPeriode(k, cur[0], cur[1]).gagne, 0), b = ks.reduce((s, k) => s + gainsPeriode(k, prev[0], prev[1]).gagne, 0);
+  return { a, b, diff: a - b, pct: b ? (a - b) / b : null, depuis: prev[1] };
+}
+/* « +420 € vs au 10 sept. » : noire en hausse (> 5 %), rouge en baisse (< -10 %), argent sinon ; rien sans point de comparaison */
+function pastilleVariation(p, secteur = 'tot') {
+  const v = variation(secteur, p);
+  if (!v.b) return '';
+  const cls = v.pct > 0.05 ? 'hausse' : v.pct < -0.10 ? 'baisse' : 'stable';
+  return `<span class="variation ${cls}" title="${esc(`${eur(v.a)} contre ${eur(v.b)} à la même date`)}">${v.diff >= 0 ? '+' : '−'}${esc(eur(Math.abs(v.diff)))} vs au ${esc(fmtDate(v.depuis))}</span>`;
+}
+const lundiCourant = () => iso(monday(new Date()));
+const revueDue = () => state.prefs.derniereRevue !== lundiCourant();
+function carteRevueHtml() {
+  if (!revueDue() || !rituelsAuto() || estVide()) return '';
+  return `<button type="button" class="carte-cloture carte-revue" id="carte-revue" onclick="ouvrirRevue()"><b>Ta semaine passée</b><span>temps, argent, contacts et 3 objectifs · 2 minutes</span><span class="a-chevron" aria-hidden="true">›</span></button>`;
+}
+function objectifsSemaineHtml() {
+  const o = (state.revues?.[lundiCourant()]?.objectifs || []).filter(x => String(x || '').trim());
+  if (!o.length) return '';
+  return `<div class="objectifs-semaine" id="objectifs-semaine"><span class="meta">Cette semaine</span><ul>${o.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+}
+/* Les chiffres d'une semaine (lundi → dimanche) par secteur : heures planifiées et réalisées, € encaissés, € par heure */
+function chiffresSemaine(lundi) {
+  const from = iso(lundi), to = iso(addDays(lundi, 6));
+  return ['cee', 'energie', 'foncier', 'kamifood'].map(k => {
+    const evs = state.events.filter(e => e.activite === k && e.date >= from && e.date <= to && compteHeures(e));
+    const min = tempsEntre(k, from, to), fait = evs.filter(e => e.fait).reduce((s, e) => s + num(e.duree), 0), g = gainsEntre(k, from, to);
+    return { k, min, fait, g, parH: min && g ? g / (min / 60) : 0 };
+  });
+}
+function ouvrirRevue() {
+  if (rituel) fermerRituel(true);
+  if (renc) fermerRencontre();
+  if (tour) fermerTournee();
+  fermerModal();
+  const lundi = addDays(monday(new Date()), -7);
+  rituel = { nom: 'revue', etape: 0, lundi, objectifs: [...(state.revues?.[lundiCourant()]?.objectifs || []), '', '', ''].slice(0, 3) };
+  const el = $('#revue');
+  el.hidden = false; document.body.classList.add('no-scroll');
+  ['#main', '.sidebar', '#fab'].forEach(s => $(s)?.setAttribute('inert', ''));
+  coucheOuvrir('revue', () => fermerRituel(true));
+  revueRender();
+}
+function revueRender() {
+  const el = $('#revue'); if (!rituel || !el) return;
+  const e = rituel.etape, lundi = rituel.lundi, from = iso(lundi), to = iso(addDays(lundi, 6));
+  const dots = [0, 1, 2].map(i => `<i class="${i <= e ? 'on' : ''}"></i>`).join('');
+  const periode = `du ${fmtDate(from)} au ${fmtDate(to)}`;
+  let titre, corps;
+  if (e === 0) {
+    titre = 'Temps et argent';
+    const c = chiffresSemaine(lundi), avant = chiffresSemaine(addDays(lundi, -7));
+    const lignes = c.map((x, i) => { const d = x.g - avant[i].g; return `<tr><td>${tag(x.k)}</td><td class="num">${esc(hrs(x.min))}<small>${x.min ? esc(hrs(x.fait)) + ' faites' : ''}</small></td><td class="num"><b>${esc(eur(x.g))}</b><small class="${d < 0 ? 'late' : ''}">${d ? (d > 0 ? '+' : '−') + esc(eur(Math.abs(d))) : '='}</small></td><td class="num">${x.parH ? esc(eur(x.parH)) : '—'}</td></tr>`; }).join('');
+    const utiles = c.filter(x => x.min >= 60 && x.g > 0).sort((a, b) => b.parH - a.parH);
+    const phrase = utiles.length >= 2 ? `Ton heure ${SECTEURS[utiles[0].k].label} vaut ${(utiles[0].parH / utiles[utiles.length - 1].parH).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}× ton heure ${SECTEURS[utiles[utiles.length - 1].k].label}.` : '';
+    corps = `<table class="r-table"><thead><tr><th></th><th class="num">Heures</th><th class="num">Encaissé</th><th class="num">€ / h</th></tr></thead><tbody>${lignes}</tbody></table>
+      ${phrase ? `<p class="r-phrase" id="r-phrase">${esc(phrase)}</p>` : '<p class="meta">Le prix de ton heure se compare dès que deux secteurs ont au moins une heure et des gains dans la semaine.</p>'}`;
+  } else if (e === 1) {
+    titre = 'Tes contacts';
+    const dansSemaine = d => d && d >= from && d <= to;
+    const notes = state.aVoir.filter(v => { const premier = (v.historique || []).map(h => h.date).filter(Boolean).sort()[0] || (v.createdAt ? jourLocal(v.createdAt) : ''); return dansSemaine(premier); }).length;
+    /* Un rappel traité = un suivi noté dans la semaine (pas la première rencontre) ; oublié = un rappel dû sans suivi noté */
+    const suivi = v => (v.historique || []).some((h, i) => i > 0 && dansSemaine(h.date));
+    const traites = state.aVoir.filter(suivi).length;
+    const oublies = state.aVoir.filter(v => v.statut === 'suivi' && v.rappel && v.rappel <= to && !suivi(v)).length;
+    const part = traites + oublies ? Math.round(traites / (traites + oublies) * 100) : null;
+    const attente = state.aVoir.filter(v => v.statut === 'suivi').map(v => ({ v, d: (dernierContact(v) || {}).date || '' })).sort((a, b) => a.d.localeCompare(b.d)).slice(0, 3);
+    corps = `<div class="r-stats"><div><b>${notes}</b><span>nouvelle${notes > 1 ? 's' : ''} personne${notes > 1 ? 's' : ''} notée${notes > 1 ? 's' : ''}</span></div><div><b>${part === null ? '—' : part + ' %'}</b><span>des rappels traités à temps${part === null ? '' : ` (${traites} sur ${traites + oublies})`}</span></div></div>
+      ${attente.length ? `<span class="r-label">Ils attendent depuis le plus longtemps</span><div class="b-liste">${attente.map(({ v, d }) => `<div class="b-item"><div class="b-txt"><b>${esc(nomDe(v))}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''}</b><span class="meta">${d ? `dernier échange ${esc(ilYa(d))}` : 'aucun échange noté'}</span></div>${telHref(v.tel) ? `<div class="b-act"><a class="btn small" href="tel:${esc(telHref(v.tel))}">Appeler</a><button type="button" class="btn small" onclick="fermerRituel();openAVoir('${v.id}')">Fiche</button></div>` : `<div class="b-act"><button type="button" class="btn small" onclick="fermerRituel();openAVoir('${v.id}')">Fiche</button></div>`}</div>`).join('')}</div>` : '<p class="b-vide">Personne en attente.</p>'}`;
+  } else {
+    titre = 'Tes 3 objectifs';
+    corps = `<p class="meta">Courts et concrets : « appeler les 5 contacts CEE », « signer Garage Central ». Ils restent sur l'accueil toute la semaine.</p>
+      ${rituel.objectifs.map((o, i) => `<input class="r-objectif" id="obj-${i}" value="${esc(o)}" maxlength="80" placeholder="Objectif ${i + 1}" aria-label="Objectif ${i + 1}" oninput="rituel.objectifs[${i}]=this.value">`).join('')}
+      <button type="button" class="btn" onclick="partagerRevue()">Partager le récap</button>`;
+  }
+  const pied = `<button type="button" class="btn r-annuler" onclick="${e ? 'rituel.etape--;revueRender()' : 'quitterRituel()'}">${e ? 'Retour' : 'Plus tard'}</button>${e < 2 ? '<button type="button" class="btn primary" onclick="rituel.etape++;revueRender()">Suivant</button>' : '<button type="button" class="btn primary" onclick="terminerRevue()">Terminer</button>'}`;
+  el.innerHTML = cadreRituel(`Ta semaine passée · ${esc(periode)}`, titre, dots, corps, pied);
+}
+function recapRevue() {
+  const lundi = rituel ? rituel.lundi : addDays(monday(new Date()), -7), c = chiffresSemaine(lundi);
+  const tot = c.reduce((s, x) => ({ min: s.min + x.min, g: s.g + x.g }), { min: 0, g: 0 });
+  const obj = (rituel ? rituel.objectifs : []).map(x => String(x || '').trim()).filter(Boolean);
+  return [`Ma semaine du ${fmtDate(iso(lundi))} : ${hrs(tot.min)} planifiées, ${eur(tot.g)} encaissés.`,
+    ...c.filter(x => x.min || x.g).map(x => `· ${SECTEURS[x.k].label} : ${hrs(x.min)}, ${eur(x.g)}${x.parH ? ` (${eur(x.parH)} / h)` : ''}`),
+    ...(obj.length ? ['Objectifs de la semaine :', ...obj.map(o => `· ${o}`)] : [])].join('\n');
+}
+async function partagerRevue() {
+  const text = recapRevue();
+  try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(text); toast('Copié'); } catch (e) { toast('Copie impossible ici'); }
+}
+function terminerRevue() {
+  if (!rituel) return;
+  const l = lundiCourant(), c = chiffresSemaine(rituel.lundi);
+  state.revues = state.revues || {};
+  state.revues[l] = { objectifs: rituel.objectifs.map(x => String(x || '').trim()).filter(Boolean).slice(0, 3), chiffres: { minutes: c.reduce((s, x) => s + x.min, 0), euros: c.reduce((s, x) => s + x.g, 0), parSecteur: Object.fromEntries(c.map(x => [x.k, { min: x.min, fait: x.fait, euros: x.g }])) } };
+  state.prefs.derniereRevue = l;
+  save();
+  quitterRituel();
+  toast('Bonne semaine !');
+}
 
 /* ---------- « ✓ Fait » : le rappel est acquitté, et la suite se choisit tout de suite ----------
    fait = vrai : une ligne « Rappel fait · … » va au journal et les relances sans réponse repartent de zéro.
@@ -2553,6 +2788,632 @@ function choisirSuite(id, quoi, quand, fait) {
     const i = state.aVoir.findIndex(x => x.id === id);
     if (i >= 0) { state.aVoir[i] = avant; if (save()) { render(); toast('Annulé'); } }
   }, 8000);
+}
+
+/* ---------- Ne rien perdre, même appli fermée : l'agenda du téléphone (.ics) et la sauvegarde en un geste ---------- */
+/* Envoi d'un fichier : la feuille de partage du téléphone (Fichiers, iCloud Drive, WhatsApp, Mail…), sinon un téléchargement */
+async function envoyerFichier(nom, texte, type) {
+  let f = null;
+  try { f = new File([texte], nom, { type }); } catch (e) { /* très vieux navigateur : téléchargement */ }
+  if (f && navigator.canShare && navigator.share) {
+    try { if (navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: nom }); return 'partage'; } }
+    catch (e) { if (e && e.name === 'AbortError') return 'annule'; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(f || new Blob([texte], { type }));
+  a.download = nom; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  return 'telecharge';
+}
+/* iCalendar (RFC 5545) : CRLF, lignes pliées à 75 octets, texte échappé ; heures locales « flottantes », alarmes en UTC */
+const icsEchap = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+function icsPlier(ligne) {
+  const enc = new TextEncoder(), out = [];
+  let cur = '', taille = 0;
+  for (const ch of ligne) {
+    const n = enc.encode(ch).length;
+    if (taille + n > 75) { out.push(cur); cur = ' ' + ch; taille = 1 + n; } else { cur += ch; taille += n; }
+  }
+  out.push(cur);
+  return out.join('\r\n');
+}
+const icsJour = ds => ds.replace(/-/g, '');
+const icsLocal = (ds, min) => { const [y, m, d] = ds.split('-').map(Number), x = new Date(y, m - 1, d, 0, min); return `${iso(x).replace(/-/g, '')}T${pad(x.getHours())}${pad(x.getMinutes())}00`; };
+const icsUTC = x => x.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+const alarme = (trigger, texte) => ['BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEchap(texte)}`, trigger, 'END:VALARM'];
+function ics(items) {
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//KGD//FR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'X-WR-CALNAME:KGD'];
+  const stamp = icsUTC(new Date()), url = location.origin + location.pathname;
+  items.forEach(e => {
+    const v = e.contact ? aVoir(e.contact) : contactDe(e);
+    const d = e.lien && e.lien.startsWith('d:') ? dossier(e.lien.slice(2)) : null;
+    const der = v ? dernierContact(v) : null, tel = (v && v.tel) || (d && d.tel) || '';
+    const desc = [e.contact ? e.sousTitre : e.notes, der && !e.contact ? `Dernier échange : ${der.texte}` : '', tel ? `Tél. ${tel}` : ''].filter(Boolean).join('\n');
+    const titre = e.contact ? `☎ Rappeler ${e.titre}` : e.titre || 'RDV';
+    L.push('BEGIN:VEVENT', `UID:${e.id}@kgd`, `DTSTAMP:${stamp}`);
+    const rdv = !e.contact && !e.relance && !estPeriode(e) && /^\d{1,2}:\d{2}$/.test(e.heure || '');
+    if (estPeriode(e)) L.push(`DTSTART;VALUE=DATE:${icsJour(e.date)}`, `DTEND;VALUE=DATE:${icsJour(iso(addDays(parse(e.fin), 1)))}`);
+    else if (rdv) { const s = minutesDe(e.heure); L.push(`DTSTART:${icsLocal(e.date, s)}`, `DTEND:${icsLocal(e.date, s + Math.max(15, num(e.duree) || 30))}`); }
+    else L.push(`DTSTART:${icsLocal(e.date, 540)}`, `DTEND:${icsLocal(e.date, 555)}`); // sans heure, rappel, relance : 9 h – 9 h 15
+    L.push(`SUMMARY:${icsEchap(titre)}`);
+    if (desc) L.push(`DESCRIPTION:${icsEchap(desc)}`);
+    if (e.lieu) L.push(`LOCATION:${icsEchap(e.lieu)}`);
+    L.push(`URL:${url}`);
+    if (e.important && !e.contact) {
+      const [y, m, j] = e.date.split('-').map(Number);
+      L.push(...alarme(`TRIGGER;VALUE=DATE-TIME:${icsUTC(new Date(y, m - 1, j - 1, 18, 0))}`, `Demain : ${titre}`), ...alarme('TRIGGER:-PT1H', titre));
+    } else L.push(...alarme(rdv ? 'TRIGGER:-PT15M' : 'TRIGGER:PT0M', titre));
+    L.push('END:VEVENT');
+  });
+  L.push('END:VCALENDAR');
+  return L.map(icsPlier).join('\r\n') + '\r\n';
+}
+/* Les 7 prochains jours : RDV et périodes non faits, relances (une en retard tombe aujourd'hui), rappels de contacts */
+function sept() {
+  const t = today(), fin = iso(addDays(parse(t), 7));
+  const evs = state.events.filter(e => !e.fait && (estPeriode(e) ? e.date <= fin && e.fin >= t : e.date >= t && e.date <= fin));
+  const rel = relances().filter(r => r.date <= fin).map(r => r.date < t ? { ...r, date: t } : r);
+  return [...evs, ...rel, ...rappelsContactsEntre(t, fin)];
+}
+async function exporterSemaine() {
+  const items = sept();
+  if (!items.length) { toast('Rien de prévu dans les 7 prochains jours'); return; }
+  const r = await envoyerFichier(`kgd-${today()}.ics`, ics(items), 'text/calendar');
+  if (r !== 'annule') toast(`${items.length} élément${items.length > 1 ? 's' : ''} pour ton agenda : ouvre le fichier pour les ajouter`, 4000);
+}
+async function agendaEvent(id) {
+  const e = state.events.find(x => x.id === id);
+  if (!e) return;
+  const r = await envoyerFichier(`kgd-${e.date}.ics`, ics([e]), 'text/calendar');
+  if (r !== 'annule') toast('Ouvre le fichier pour l\'ajouter à ton agenda');
+}
+async function agendaContact(id) {
+  const v = aVoir(id);
+  if (!v || !v.rappel) { toast('Pas de rappel posé pour ce contact'); return; }
+  const d = dernierContact(v);
+  const x = ligneRappel(v, v.rappel, d ? `Dernier contact le ${fmtDate(d.date)} : ${d.texte}` : 'À recontacter');
+  const r = await envoyerFichier(`kgd-rappel-${v.rappel}.ics`, ics([x]), 'text/calendar');
+  if (r !== 'annule') toast('Ouvre le fichier pour mettre le rappel dans ton agenda');
+}
+/* Sauvegarde en un geste : KGD-AAAA-MM-JJ.json, partagé (Fichiers, iCloud, WhatsApp à soi-même, Mail) ou téléchargé */
+async function sauvegarder() {
+  if (donneesIllisibles) { voirCarteIllisible(); return; }
+  const nom = `KGD-${today()}.json`;
+  const r = await envoyerFichier(nom, JSON.stringify(state, null, 2), 'application/json');
+  if (r === 'annule') return;
+  noterSauvegarde(); render();
+  toast(r === 'partage' ? 'Sauvegarde envoyée' : `Sauvegarde téléchargée : ${nom}`);
+}
+/* Relance douce : jamais sauvegardé, plus de 7 jours, ou plus de 25 modifications depuis ; masquable 24 h */
+function etatSauvegarde() {
+  const p = state.prefs, der = p.dernierExport ? Date.parse(p.dernierExport) : NaN;
+  const jours = isNaN(der) ? null : Math.floor((Date.now() - der) / 864e5), modifs = num(p.modifsDepuisExport);
+  return { jours, modifs, due: jours === null || jours > 7 || modifs > 25, rouge: jours === null || jours > 14,
+    texte: jours === null ? 'Jamais sauvegardé' : jours === 0 ? 'Dernière sauvegarde aujourd\'hui' : jours === 1 ? 'Dernière sauvegarde hier' : `Dernière sauvegarde il y a ${jours} j` };
+}
+function rappelSauvegardeHtml() {
+  if (donneesIllisibles || estVide()) return '';
+  const s = etatSauvegarde(), snooze = Date.parse(state.prefs.snoozeSauvegarde || '');
+  if (!s.due || (!isNaN(snooze) && Date.now() - snooze < 864e5)) return '';
+  return `<p class="notice mini sauvegarde-mini ${s.rouge ? 'rouge' : ''}" id="rappel-sauvegarde"><span>${esc(s.texte)}${s.modifs > 25 ? ` · ${s.modifs} modifications depuis` : ''}</span><button type="button" onclick="sauvegarder()">Sauvegarder</button><button type="button" class="masquer" onclick="masquerRappelSauvegarde()" aria-label="Masquer 24 heures">Plus tard</button></p>`;
+}
+function masquerRappelSauvegarde() { state.prefs.snoozeSauvegarde = new Date().toISOString(); save(false); render(); }
+
+/* ---------- Rituels : « Ta journée » le matin, « Clôturer » le soir. Jamais bloquants : Passer est toujours là. ----------
+   Sous automate (tests), ils ne s'ouvrent seuls que sur demande (localStorage kgd-rituels = 1). */
+const rituelsAuto = () => !navigator.webdriver || lireCle('kgd-rituels') === '1';
+let rituel = null;
+const capaciteMin = () => (Number(state.prefs.heuresMax) > 0 ? Number(state.prefs.heuresMax) : 8) * 60;
+/* Ce qui est en retard : RDV non cochés, relances, rappels de contacts dépassés (le plus ancien d'abord) */
+function itemsRetard() {
+  const t = today();
+  const evs = state.events.filter(e => !e.fait && (estPeriode(e) ? e.fin < t : e.date < t)).map(e => ({ type: 'e', id: e.id, date: estPeriode(e) ? e.fin : e.date,
+    titre: e.titre || 'Sans titre', sous: [estPeriode(e) ? `Période finie le ${fmtDate(e.fin)}` : `${jourCourt(e.date)}${e.heure ? ' à ' + e.heure : ''}`, lienNom(e.lien)].filter(Boolean).join(' · ') }));
+  const rel = relances().filter(r => r.date < t).map(r => ({ type: 'r', id: r.lien.slice(2), date: r.date, titre: r.titre, sous: `Relance prévue le ${fmtDate(r.date)}` }));
+  const cts = state.aVoir.filter(v => v.statut === 'suivi' && v.rappel && v.rappel < t).map(v => ({ type: 'c', id: v.id, date: v.rappel, titre: nomDe(v) + (v.entreprise ? ' · ' + v.entreprise : ''), sous: `Rappel du ${fmtDate(v.rappel)}` }));
+  return [...evs, ...rel, ...cts].sort((a, b) => a.date.localeCompare(b.date));
+}
+/* Reporter : un RDV change de jour (une période voit sa fin repoussée) et compte ses reports ; une relance, un rappel changent de date */
+function reporterItem(item, quand) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(quand || '')) return false;
+  if (item.type === 'e') {
+    const e = state.events.find(x => x.id === item.id); if (!e) return false;
+    if (estPeriode(e)) { if (quand > e.date) e.fin = quand; } else e.date = quand;
+    e.reports = (num(e.reports) || 0) + 1;
+  } else if (item.type === 'r') { const d = dossier(item.id); if (!d) return false; d.dateRelance = quand; }
+  else { const v = aVoir(item.id); if (!v) return false; v.rappel = quand; if (v.statut === 'clos') v.statut = 'suivi'; }
+  return save();
+}
+/* Fait : un RDV est coché ; une relance revient dans 7 jours ; un contact s'ouvre pour noter l'échange */
+function faitItem(item) {
+  if (item.type === 'e') {
+    const e = state.events.find(x => x.id === item.id); if (!e) return false;
+    e.fait = true; libererContact(e);
+    return save();
+  }
+  if (item.type === 'r') {
+    const d = dossier(item.id); if (!d) return false;
+    d.dateRelance = rappelDans(7);
+    if (save()) { toast(`Prochaine relance le ${jourCourt(d.dateRelance)}`); return true; }
+    return false;
+  }
+  fermerRituel(); openContact(item.id);
+  return true;
+}
+/* La carte touchée s'efface (150 ms, sans animation si l'on préfère) ; l'écran n'est pas redessiné en entier */
+function retirerCarte(el) {
+  const c = el && el.closest('.b-item');
+  if (!c) return;
+  const fin = () => { const liste = c.parentElement; c.remove(); if (liste && !liste.querySelector('.b-item')) liste.innerHTML = '<p class="b-vide">Tout est à jour.</p>'; };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return fin();
+  c.classList.add('part'); setTimeout(fin, 150);
+}
+function ouvrirRituel(nom) {
+  if (rituel) fermerRituel(true);
+  if (renc) fermerRencontre();
+  if (tour) fermerTournee();
+  fermerModal();
+  rituel = { nom, etape: 0, page: 0, retards: itemsRetard() };
+  const el = $('#' + nom);
+  el.hidden = false; document.body.classList.add('no-scroll');
+  ['#main', '.sidebar', '#fab'].forEach(s => $(s)?.setAttribute('inert', ''));
+  coucheOuvrir(nom, () => fermerRituel(true));
+  nom === 'brief' ? briefRender() : nom === 'revue' ? revueRender() : clotureRender();
+}
+const ouvrirBrief = () => ouvrirRituel('brief');
+const ouvrirCloture = () => ouvrirRituel('cloture');
+/* Fermer « Ta journée » (✕, retour, Passer, Terminer) : elle ne revient pas aujourd'hui. « Clôturer » ne s'arrête qu'avec « Bonne soirée ». */
+function fermerRituel(depuisHistorique) {
+  if (!rituel) return;
+  const nom = rituel.nom, el = $('#' + nom);
+  if (nom === 'brief') { state.prefs.dernierBrief = today(); save(false); }
+  if (!depuisHistorique) coucheQuittee(nom);
+  rituel = null;
+  el.hidden = true; el.innerHTML = '';
+  document.body.classList.remove('no-scroll');
+  ['#main', '.sidebar', '#fab'].forEach(s => $(s)?.removeAttribute('inert'));
+  render();
+}
+function quitterRituel() { if (!rituel) return; if (couches.some(c => c.nom === rituel.nom)) coucheFermer(); else fermerRituel(); }
+const cadreRituel = (meta, titre, etapes, corps, pied) => `<div class="r-card b-card">
+    <div class="r-head">
+      <div><div class="meta">${meta}</div><h2 id="b-titre">${titre}</h2></div>
+      ${etapes ? `<div class="r-dots" aria-hidden="true">${etapes}</div>` : ''}
+      <button type="button" class="btn icon" onclick="quitterRituel()" aria-label="Fermer">✕</button>
+    </div>
+    <div class="r-body b-body">${corps}</div>
+    <div class="r-foot">${pied}</div>
+  </div>`;
+/* Une ligne d'action : Fait / Demain / +3 j / Date… (44 px chacun) */
+function ligneAction(it, i, prefixe) {
+  return `<div class="b-item" data-i="${i}">
+      <div class="b-txt"><b>${esc(it.titre)}</b><span class="meta">${esc(it.sous)}</span></div>
+      <div class="b-act">
+        <button type="button" class="btn small" onclick="${prefixe}Fait(this,${i})">${it.type === 'c' ? 'Noter' : 'Fait'}</button>
+        <button type="button" class="btn small" onclick="${prefixe}Reporter(this,${i},rappelDans(1))">Demain</button>
+        <button type="button" class="btn small" onclick="${prefixe}Reporter(this,${i},rappelDans(3))">+3 j</button>
+        <label class="btn small b-date">Date…<input type="date" min="${today()}" onchange="${prefixe}Reporter(this,${i},this.value)" aria-label="Reporter à une date"></label>
+      </div>
+    </div>`;
+}
+function briefFait(b, i) { const it = rituel && rituel.retards[i]; if (it && faitItem(it) && rituel) retirerCarte(b); }
+function briefReporter(b, i, quand) { const it = rituel && rituel.retards[i]; if (it && reporterItem(it, quand)) { it.fait = true; retirerCarte(b); } }
+function toutReporterDemain() {
+  if (!rituel) return;
+  const reste = rituel.retards.slice(4).filter(it => !it.fait), quand = rappelDans(1);
+  reste.forEach(it => { if (reporterItem(it, quand)) it.fait = true; });
+  toast(`${reste.length} élément${reste.length > 1 ? 's' : ''} reporté${reste.length > 1 ? 's' : ''} à ${jourCourt(quand)}`);
+  const b = $('#b-tout'); if (b) b.remove();
+}
+/* Les 3 contacts les plus urgents : ceux à qui je dois quelque chose, puis le rappel le plus ancien, puis ce qu'il y a en jeu */
+function aRappelerMatin() {
+  return rappelsContacts().map(x => aVoir(x.contact)).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i)
+    .sort((a, b) => (b.attente === 'moi') - (a.attente === 'moi') || (a.rappel || '').localeCompare(b.rappel || '') || valeurEnJeu({ type: 'c', id: b.id }) - valeurEnJeu({ type: 'c', id: a.id })).slice(0, 3);
+}
+function briefRender() {
+  const el = $('#brief'); if (!rituel || !el) return;
+  const e = rituel.etape, t = today();
+  const dots = [0, 1, 2].map(i => `<i class="${i <= e ? 'on' : ''}"></i>`).join('');
+  let titre, corps;
+  if (e === 0) {
+    const it = rituel.retards;
+    titre = 'En retard';
+    corps = it.length ? `<div class="b-liste">${it.slice(0, 4).map((x, i) => ligneAction(x, i, 'brief')).join('')}</div>
+      ${it.length > 4 ? `<button type="button" class="btn b-tout" id="b-tout" onclick="toutReporterDemain()">Tout reporter à demain (${it.length - 4})</button>` : ''}`
+      : '<p class="b-vide">Rien en retard. Belle journée qui commence.</p>';
+  } else if (e === 1) {
+    titre = 'Aujourd\'hui';
+    const al = alertes().slice(0, 3);
+    const jour = state.events.filter(x => x.date === t && !x.fait && !estPeriode(x)).sort((a, b) => (a.heure || '99').localeCompare(b.heure || '99'));
+    const min = jour.filter(compteHeures).reduce((s, x) => s + num(x.duree), 0), cap = capaciteMin();
+    const obj = (state.revues && state.revues[iso(monday(new Date()))]?.objectifs || []).filter(Boolean);
+    corps = `${al.length ? `<ul class="b-alertes">${al.map(a => `<li class="${a.niveau}"><span class="compte">${esc(a.compte)}</span><span>${esc(a.titre)}</span></li>`).join('')}</ul>` : ''}
+      <div class="b-jauge"><div class="meta">${esc(hrs(min))} prévues sur ${esc(hrs(cap))}</div><div class="b-barre ${min > cap ? 'trop' : ''}"><i style="width:${Math.min(100, Math.round(min / cap * 100))}%"></i></div></div>
+      ${jour.length ? `<ul class="b-jour">${jour.slice(0, 5).map(x => `<li><b>${esc(x.heure || '—')}</b><span>${esc(x.titre || 'Sans titre')}</span></li>`).join('')}${jour.length > 5 ? `<li class="meta">+${jour.length - 5} autres</li>` : ''}</ul>` : '<p class="b-vide">Aucun RDV aujourd\'hui.</p>'}
+      ${obj.length ? `<div class="b-obj"><span class="meta">Tes objectifs de la semaine</span><ul>${obj.map(o => `<li>${esc(o)}</li>`).join('')}</ul></div>` : ''}`;
+  } else {
+    titre = 'Qui rappeler';
+    const vs = aRappelerMatin(), n = fileTournee().length;
+    corps = vs.length ? `<div class="b-liste">${vs.map(v => {
+      const tel = telHref(v.tel);
+      return `<div class="b-item"><div class="b-txt"><b>${esc(nomDe(v))}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''}</b><span class="meta ${v.attente === 'moi' ? 'late' : ''}">${esc(v.attente === 'moi' ? 'Tu lui dois des informations' : v.attente === 'lui' ? 'Attend ses informations' : `Rappel ${v.rappel < t ? 'du ' + fmtDate(v.rappel) : 'aujourd\'hui'}`)}</span></div>
+        <div class="b-act">${tel ? `<a class="btn small" href="tel:${esc(tel)}">Appeler</a><a class="btn small" href="${esc('sms:' + tel + '?&body=' + encodeURIComponent(modeleMessage(v).texte))}">SMS</a>` : ''}<button type="button" class="btn small" onclick="if(reporterItem({type:'c',id:'${v.id}'},rappelDans(1)))retirerCarte(this)">Demain</button></div></div>`;
+    }).join('')}</div>${n ? `<button type="button" class="btn b-tout" onclick="fermerRituel();lancerTournee()">Lancer la tournée (${n})</button>` : ''}` : '<p class="b-vide">Personne à rappeler aujourd\'hui.</p>';
+  }
+  const pied = `<button type="button" class="btn r-annuler" onclick="briefPasser()">Passer</button>${e < 2 ? `<button type="button" class="btn primary" onclick="briefPasser()">Suivant</button>` : `<button type="button" class="btn primary" onclick="quitterRituel()">Terminer</button>`}`;
+  el.innerHTML = cadreRituel(`Ta journée · ${esc(jourLong(t))}`, titre, dots, corps, pied);
+}
+function briefPasser() { if (!rituel) return; if (rituel.etape >= 2) return quitterRituel(); rituel.etape++; briefRender(); }
+/* Le matin, à la première ouverture de l'accueil (5 h–14 h) s'il y a du retard, un RDV ou un rappel aujourd'hui */
+function briefAuto() {
+  const p = state.prefs, h = new Date().getHours(), t = today();
+  if (rituel || p.rituelMatin === false || p.dernierBrief === t || h < 5 || h >= 14 || !rituelsAuto() || donneesIllisibles || estVide()) return;
+  if (renc || tour || modal().open || couches.length) return;
+  if (!itemsRetard().length && !state.events.some(e => e.date === t && !e.fait) && !rappelsContacts().length) return;
+  setTimeout(() => { if (!rituel && location.hash.replace('#', '') in { '': 1, dashboard: 1 }) ouvrirBrief(); }, 0);
+}
+
+/* ---------- Clôturer la journée (à partir de 18 h) : chaque RDV du jour, fait ou pas, en deux touchers ---------- */
+const rdvDuJourOuverts = () => state.events.filter(e => e.date === today() && !e.fait && !estPeriode(e)).sort((a, b) => (a.heure || '99').localeCompare(b.heure || '99'));
+function clotureDue() { return new Date().getHours() >= 18 && state.prefs.derniereCloture !== today() && rdvDuJourOuverts().length > 0; }
+function carteClotureHtml() {
+  if (!clotureDue() || !rituelsAuto()) return '';
+  const n = rdvDuJourOuverts().length;
+  return `<button type="button" class="carte-cloture" id="carte-cloture" onclick="ouvrirCloture()"><b>Clôturer la journée</b><span>${n > 1 ? n + ' RDV' : '1 RDV'} à cocher, deux minutes</span><span class="a-chevron" aria-hidden="true">›</span></button>`;
+}
+function clotureRender() {
+  const el = $('#cloture'); if (!rituel || !el) return;
+  const t = today(), demain = iso(addDays(parse(t), 1));
+  const tous = state.events.filter(e => e.date === t && !estPeriode(e)).sort((a, b) => (a.heure || '99').localeCompare(b.heure || '99'));
+  rituel.liste = rituel.liste || tous.filter(e => !e.fait).map(e => e.id);
+  const pages = Math.max(1, Math.ceil(rituel.liste.length / 6)), pg = Math.min(rituel.page, pages - 1);
+  const ligne = id => {
+    const e = state.events.find(x => x.id === id); if (!e) return '';
+    const etat = rituel.etats?.[id] || '';
+    const lien = String(e.lien || ''), k = lien[0];
+    let act;
+    if (etat === 'fait' && k === 'd' && dossier(lien.slice(2))) act = `<button type="button" class="btn small" onclick="clotureSuite('${id}','signe')">Signé</button><button type="button" class="btn small" onclick="clotureSuite('${id}','relancer')">À relancer</button><button type="button" class="btn small" onclick="clotureSuite('${id}','perdu')">Perdu</button>`;
+    else if (etat === 'fait' && k === 'c' && aVoir(lien.slice(2))) act = `<button type="button" class="btn small" onclick="clotureSuite('${id}','3j')">Rappel 3 j</button><button type="button" class="btn small" onclick="clotureSuite('${id}','1sem')">1 sem.</button><button type="button" class="btn small" onclick="clotureSuite('${id}','clore')">Clore</button>`;
+    else if (etat === 'pasfait') act = `<button type="button" class="btn small" onclick="clotureReporter('${id}',rappelDans(1))">Demain</button><label class="btn small b-date">Date…<input type="date" min="${today()}" onchange="clotureReporter('${id}',this.value)" aria-label="Reporter à une date"></label>`;
+    else if (etat) act = `<span class="b-ok">${esc(etat)}</span>`;
+    else act = `<button type="button" class="btn small" onclick="clotureFait('${id}')">Fait</button><button type="button" class="btn small" onclick="clotureEtat('${id}','pasfait')">Pas fait</button>`;
+    return `<div class="b-item ${etat && !['fait', 'pasfait'].includes(etat) ? 'traite' : ''}"><div class="b-txt"><b>${esc(e.heure ? e.heure + ' · ' : '')}${esc(e.titre || 'Sans titre')}</b><span class="meta">${esc(lienNom(e.lien) || MODES[e.mode] || '')}</span></div><div class="b-act">${act}</div></div>`;
+  };
+  /* Bilan : heures faites, contacts notés aujourd'hui, € signés aujourd'hui, premier RDV de demain */
+  const faitesMin = tous.filter(e => e.fait && compteHeures(e)).reduce((s, e) => s + num(e.duree), 0);
+  const notes = state.aVoir.reduce((s, v) => s + (v.historique || []).filter(h => h.date === t).length, 0);
+  const signes = state.dossiers.filter(d => d.dateSignature === t && (d.statut === 'signe' || d.statut === 'paye')).reduce((s, d) => s + num(d.commEstimee), 0);
+  const prem = state.events.filter(e => e.date === demain && e.heure && !estPeriode(e)).sort((a, b) => a.heure.localeCompare(b.heure))[0];
+  const corps = `<div class="b-liste">${rituel.liste.slice(pg * 6, pg * 6 + 6).map(ligne).join('') || '<p class="b-vide">Tous les RDV du jour sont cochés.</p>'}</div>
+    ${pages > 1 ? `<div class="b-pages"><button type="button" class="btn small" ${pg ? '' : 'disabled'} onclick="rituel.page=${pg - 1};clotureRender()" aria-label="Précédents">‹</button><span>${pg + 1} / ${pages}</span><button type="button" class="btn small" ${pg < pages - 1 ? '' : 'disabled'} onclick="rituel.page=${pg + 1};clotureRender()" aria-label="Suivants">›</button></div>` : ''}
+    <dl class="b-bilan" id="b-bilan"><dt>Fait aujourd'hui</dt><dd>${esc(hrs(faitesMin))}</dd><dt>Contacts notés</dt><dd>${notes}</dd><dt>Signé</dt><dd>${esc(eur(signes))}</dd><dt>Demain</dt><dd>${prem ? esc(prem.heure + ' · ' + (prem.titre || 'RDV')) : 'rien de prévu'}</dd></dl>`;
+  el.innerHTML = cadreRituel(`Clôturer · ${esc(jourLong(t))}`, 'Ta journée, en deux touchers', '', corps, `<button type="button" class="btn r-annuler" onclick="quitterRituel()">Plus tard</button><button type="button" class="btn primary" onclick="bonneSoiree()">Bonne soirée</button>`);
+}
+function clotureEtat(id, etat) { if (!rituel) return; rituel.etats = { ...(rituel.etats || {}), [id]: etat }; clotureRender(); }
+function clotureFait(id) {
+  const e = state.events.find(x => x.id === id); if (!e) return;
+  e.fait = true; libererContact(e);
+  if (!save()) return;
+  const k = String(e.lien || '')[0];
+  clotureEtat(id, (k === 'd' && dossier(e.lien.slice(2))) || (k === 'c' && aVoir(e.lien.slice(2))) ? 'fait' : 'Fait');
+}
+function clotureSuite(id, choix) {
+  const e = state.events.find(x => x.id === id); if (!e) return;
+  const cle = e.lien.slice(2);
+  if (e.lien.startsWith('d:')) {
+    const d = dossier(cle); if (!d) return;
+    if (choix === 'signe') { d.statut = 'signe'; d.dateSignature = today(); if (!d.datePaiementPrevue && typeof delaiPaiement === 'function') d.datePaiementPrevue = iso(addDays(parse(d.dateSignature), delaiPaiement(d.activite))); }
+    else if (choix === 'relancer') d.dateRelance = rappelDans(3);
+    else if (choix === 'perdu') d.statut = 'perdu';
+  } else {
+    const v = aVoir(cle); if (!v) return;
+    if (choix === 'clore') { v.statut = 'clos'; v.rappel = ''; v.attente = ''; v.eventId = ''; }
+    else { v.statut = 'suivi'; v.eventId = ''; v.rappel = rappelDans(choix === '3j' ? 3 : 7); }
+  }
+  if (save()) clotureEtat(id, { signe: 'Signé', relancer: 'À relancer', perdu: 'Perdu', '3j': 'Rappel dans 3 j', '1sem': 'Rappel dans 1 sem.', clore: 'Clos' }[choix] || 'Fait');
+}
+function clotureReporter(id, quand) { if (reporterItem({ type: 'e', id }, quand)) clotureEtat(id, `Reporté au ${jourCourt(quand)}`); }
+function bonneSoiree() { state.prefs.derniereCloture = today(); save(false); quitterRituel(); toast('Bonne soirée !'); }
+/* Planning : un RDV reporté 3 fois ou plus propose Abandonner ou Garder */
+function garderEvent(id) { const e = state.events.find(x => x.id === id); if (!e) return; e.reports = 0; if (save()) render(); }
+
+/* ---------- Tournée de relances : la file du jour, une carte à la fois, le message déjà écrit, une issue en un toucher ----------
+   La file : les contacts à rappeler (rappelsContacts) et les relances de dossiers dues. Tri : ceux à qui je dois quelque chose,
+   puis le rappel le plus ancien, puis ce qu'il y a en jeu. Chaque issue écrit exactement une ligne au journal. */
+const rappelSansReponse = n => rappelDans(n <= 1 ? 2 : n === 2 ? 5 : 10);
+/* N jours ouvrés plus tard (samedi et dimanche ne comptent pas) */
+function ouvresDans(n) { const d = new Date(); let k = 0; while (k < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) k++; } return iso(d); }
+const lundiProchain = () => iso(monday(addDays(new Date(), 7)));
+function valeurEnJeu(x) {
+  if (x.type === 'd') return num(dossier(x.id)?.commEstimee);
+  const l = aVoir(x.id)?.lien || '';
+  if (l.startsWith('d:')) return num(dossier(l.slice(2))?.commEstimee);
+  if (l.startsWith('a:')) return num(abonne(l.slice(2))?.prix) * 12;
+  return 0;
+}
+function fileTournee() {
+  const t = today(), vus = new Set();
+  const contacts = rappelsContacts().filter(x => !vus.has(x.contact) && vus.add(x.contact)).map(x => ({ type: 'c', id: x.contact, date: x.date, moi: aVoir(x.contact)?.attente === 'moi' ? 1 : 0 }));
+  const dossiersDus = relances().filter(r => r.date <= t).map(r => ({ type: 'd', id: r.lien.slice(2), date: r.date, moi: 0 }));
+  return [...contacts, ...dossiersDus].sort((a, b) => b.moi - a.moi || a.date.localeCompare(b.date) || valeurEnJeu(b) - valeurEnJeu(a));
+}
+/* Messages prêts, en tutoiement : {prenom}, {entreprise} (« pour Pharmacie de la Gare » ou rien), {sujet} (ce qui est attendu) */
+const MODELES = {
+  cee: {
+    apres_rencontre: "Bonjour {prenom}, ravi de notre échange ! Comme convenu, tes travaux d'économie d'énergie peuvent être financés en bonne partie par les CEE. Tu peux m'envoyer une facture d'énergie récente et la surface concernée ? Je te fais une estimation{entreprise}. Toufek",
+    relance1: "Bonjour {prenom}, je reviens vers toi pour le financement CEE{entreprise}. As-tu pu retrouver une facture d'énergie ? Je prépare l'estimation dès que je l'ai. Toufek",
+    relance2: "Bonjour {prenom}, dernière relance de ma part pour les CEE{entreprise}. Si ce n'est plus d'actualité, dis-le moi simplement et je ne t'embête plus. Toufek",
+    envoi_dossier: "Bonjour {prenom}, comme promis je t'envoie {sujet} pour le financement CEE{entreprise}. Dis-moi si tu as la moindre question. Toufek",
+  },
+  energie: {
+    apres_rencontre: "Bonjour {prenom}, ravi de notre échange ! Pour comparer tes contrats d'électricité et de gaz{entreprise}, peux-tu m'envoyer ta dernière facture ? Je te dis vite ce que tu peux économiser. Toufek",
+    relance1: "Bonjour {prenom}, je reviens vers toi pour tes contrats d'énergie{entreprise}. Une photo de ta dernière facture me suffit pour lancer la comparaison. Toufek",
+    relance2: "Bonjour {prenom}, dernière relance pour la comparaison de tes contrats d'énergie. Si le moment n'est pas bon, dis-le moi, je reviendrai plus tard. Toufek",
+    envoi_dossier: "Bonjour {prenom}, comme promis voici {sujet} pour tes contrats d'énergie{entreprise}. On en parle quand tu veux. Toufek",
+  },
+  foncier: {
+    apres_rencontre: "Bonjour {prenom}, ravi de notre échange ! Pour vérifier ta taxe foncière{entreprise}, envoie-moi tes deux derniers avis de taxe foncière : je regarde s'il y a un trop-payé à récupérer. Toufek",
+    relance1: "Bonjour {prenom}, je reviens vers toi pour la taxe foncière{entreprise}. As-tu pu retrouver tes avis de taxe foncière ? Une photo suffit. Toufek",
+    relance2: "Bonjour {prenom}, dernière relance pour tes avis de taxe foncière{entreprise}. Si ce n'est plus d'actualité, dis-le moi simplement. Toufek",
+    envoi_dossier: "Bonjour {prenom}, comme promis je t'envoie {sujet} au sujet de ta taxe foncière{entreprise}. Dis-moi si c'est clair. Toufek",
+  },
+  kamifood: {
+    apres_rencontre: "Bonjour {prenom}, ravi de notre échange ! KamiFood, c'est la commande et la gestion de ton restaurant au même endroit. Je te propose une démo de 20 minutes cette semaine, quel jour t'arrange ? Toufek",
+    relance1: "Bonjour {prenom}, je reviens vers toi pour la démo KamiFood{entreprise}. Tu as 20 minutes cette semaine ? Toufek",
+    relance2: "Bonjour {prenom}, dernière relance pour KamiFood. Si ce n'est pas le moment, dis-le moi et je reviendrai plus tard. Toufek",
+    envoi_dossier: "Bonjour {prenom}, comme promis voici {sujet} pour KamiFood{entreprise}. On cale l'installation quand tu veux. Toufek",
+  },
+  kgdpro: {
+    apres_rencontre: "Bonjour {prenom}, ravi de notre échange ! KGD Pro, c'est ton planning, tes contacts et tes chiffres dans une seule appli. Je te montre en 15 minutes ? Toufek",
+    relance1: "Bonjour {prenom}, je reviens vers toi pour KGD Pro{entreprise}. Tu as 15 minutes cette semaine pour une démo ? Toufek",
+    relance2: "Bonjour {prenom}, dernière relance pour KGD Pro. Si ce n'est pas le moment, dis-le moi simplement. Toufek",
+    envoi_dossier: "Bonjour {prenom}, comme promis voici {sujet} pour KGD Pro{entreprise}. Toufek",
+  },
+  perso: {
+    apres_rencontre: "Bonjour {prenom}, ravi de notre échange ! Je reviens vers toi comme convenu. Toufek",
+    relance1: "Bonjour {prenom}, je me permets de te relancer suite à notre échange. Tu as un moment cette semaine ? Toufek",
+    relance2: "Bonjour {prenom}, dernière relance de ma part. Dis-moi simplement si ce n'est plus d'actualité. Toufek",
+    envoi_dossier: "Bonjour {prenom}, comme promis je t'envoie {sujet}. Toufek",
+  },
+};
+const LIBELLES_MODELES = { apres_rencontre: 'Message après rencontre', relance1: 'Relance 1', relance2: 'Relance 2', envoi_dossier: 'Envoi promis' };
+/* Prénom d'appel : « Mme Roth » reste entier, « Karim Benali » devient « Karim » */
+const prenomDe = nom => { const n = String(nom || '').trim(); return /^(m\.|mme|mlle|mr|dr|me|maître)\b/i.test(n) ? n : n.split(/\s+/)[0] || ''; };
+function modeleMessage(v) {
+  const k = MODELES[v.activite] ? v.activite : 'perso', n = num(v.tentatives);
+  const cle = v.attente === 'moi' ? 'envoi_dossier' : n === 0 ? 'apres_rencontre' : n === 1 ? 'relance1' : 'relance2';
+  const sujet = (v.historique ? ceQuiEstDu(v) : '') || 'les éléments dont on a parlé';
+  const texte = MODELES[k][cle].replace(/\{prenom\}/g, prenomDe(v.nom) || '').replace(/\{entreprise\}/g, v.entreprise ? ` pour ${v.entreprise}` : '').replace(/\{sujet\}/g, sujet).replace(/Bonjour ,/, 'Bonjour,');
+  return { cle, texte, libelle: `${LIBELLES_MODELES[cle]} ${SECTEURS[v.activite]?.label || ''}`.trim() };
+}
+
+let tour = null;
+/* La carte du moment, avec tout ce qu'il faut pour l'afficher (contact ou dossier) */
+function tourElement(x) {
+  if (!x) return null;
+  if (x.type === 'c') {
+    const v = aVoir(x.id);
+    if (!v) return null;
+    return { ...x, v, cible: v, nom: nomDe(v), entreprise: v.entreprise || '', activite: v.activite || 'perso', tel: v.tel || '', der: dernierContact(v), tentatives: num(v.tentatives), valeur: valeurEnJeu(x), msg: modeleMessage(v) };
+  }
+  const d = dossier(x.id);
+  if (!d) return null;
+  const h = Array.isArray(d.historique) ? d.historique : [];
+  const pseudo = { nom: d.contact || d.entreprise, entreprise: d.contact ? d.entreprise : '', activite: d.activite, attente: '', tentatives: d.tentatives };
+  return { ...x, d, cible: d, nom: pseudo.nom, entreprise: pseudo.entreprise, activite: d.activite, tel: d.tel || '', der: h[h.length - 1] || (d.notes ? { date: '', texte: d.notes } : null), tentatives: num(d.tentatives), valeur: valeurEnJeu(x), msg: modeleMessage(pseudo) };
+}
+function lancerTournee() {
+  const file = fileTournee();
+  if (!file.length) { toast('Personne à relancer aujourd\'hui'); return; }
+  if (renc) fermerRencontre();
+  if (rituel) fermerRituel();
+  fermerModal();
+  tour = { file, i: 0, debut: Date.now(), stats: { traites: 0, joints: 0, rdv: 0, sans: 0, reportes: 0, clos: 0 }, mode: '', canal: '' };
+  const el = $('#tournee');
+  el.hidden = false; document.body.classList.add('no-scroll');
+  ['#main', '.sidebar', '#fab'].forEach(s => $(s)?.setAttribute('inert', ''));
+  coucheOuvrir('tournee', () => fermerTournee(true));
+  tourRender();
+}
+function fermerTournee(depuisHistorique) {
+  const el = $('#tournee');
+  if (!tour && el.hidden) return;
+  if (!depuisHistorique) coucheQuittee('tournee');
+  tour = null;
+  el.hidden = true; el.innerHTML = '';
+  document.body.classList.remove('no-scroll');
+  ['#main', '.sidebar', '#fab'].forEach(s => $(s)?.removeAttribute('inert'));
+  render();
+}
+function quitterTournee() { if (couches.some(c => c.nom === 'tournee')) coucheFermer(); else fermerTournee(); }
+function tourRender() {
+  const el = $('#tournee');
+  if (!tour || !el) return;
+  if (tour.i >= tour.file.length) return tourFin();
+  const x = tourElement(tour.file[tour.i]);
+  if (!x) { tour.i++; return tourRender(); }
+  const n = tour.file.length, tel = telHref(x.tel), wa = waNumero(x.tel);
+  const canal = c => `onclick="tourCanal('${c}')"`;
+  const contacter = tel ? `<div class="t-contact">
+      <a class="btn" href="tel:${esc(tel)}" ${canal('Appel')}>${ICONES.tel}<span>Appeler</span></a>
+      <a class="btn" href="${esc('sms:' + tel + '?&body=' + encodeURIComponent(x.msg.texte))}" ${canal('SMS')}>${ICONES.sms}<span>SMS</span></a>
+      ${wa ? `<a class="btn" href="${esc(waLien(x.tel, x.msg.texte))}" target="_blank" rel="noopener" ${canal('WhatsApp')}>${ICONES.bulle}<span>WhatsApp</span></a>` : ''}
+    </div>` : `<p class="meta t-sans-tel">Pas de numéro : ${x.type === 'c' ? `<button type="button" class="lien-btn" onclick="openAVoir('${x.id}')">ajoute-le dans sa fiche</button>` : `<button type="button" class="lien-btn" onclick="openDossier('${x.id}')">ajoute-le dans le dossier</button>`}</p>`;
+  const opt = (js, b, s = '', cls = '') => `<button type="button" class="opt ${cls}" onclick="${js}"><b>${b}</b>${s ? `<span>${s}</span>` : ''}</button>`;
+  const retour = `<button type="button" class="lien-btn t-retour" onclick="tourMode('')">‹ Retour</button>`;
+  let issues;
+  if (tour.mode === 'joint') issues = `<div class="opts quatre t-issues">${opt("tourJoint('3j')", 'Rappel dans 3 j')}${opt("tourJoint('1sem')", 'Dans 1 semaine')}${opt("tourJoint('rdv')", 'Planifier un RDV')}${x.type === 'c' && !String(x.v.lien || '').startsWith('d:') ? opt("tourJoint('dossier')", 'Intéressé', 'ouvrir un dossier') : opt("tourJoint('clore')", x.type === 'c' ? 'Clore' : 'Plus de relance')}</div>${x.type === 'c' && !String(x.v.lien || '').startsWith('d:') ? `<div class="t-ligne">${retour}<button type="button" class="lien-btn" onclick="tourJoint('clore')">Clore</button></div>` : retour}`;
+  else if (tour.mode === 'reporter') issues = `<div class="opts quatre t-issues">${opt(`tourReporter('${rappelDans(1)}')`, 'Demain', jourCourt(rappelDans(1)))}${opt(`tourReporter('${ouvresDans(3)}')`, '+3 j ouvrés', jourCourt(ouvresDans(3)))}${opt(`tourReporter('${lundiProchain()}')`, 'Lundi prochain', jourCourt(lundiProchain()))}${opt(`tourReporter('${rappelDans(14)}')`, 'Dans 2 semaines', jourCourt(rappelDans(14)))}</div>${retour}`;
+  else if (tour.mode === 'clore') issues = `<div class="opts quatre t-issues">${opt("tourClore(3)", 'Dans 3 mois', 'recontacter')}${opt("tourClore(6)", 'Dans 6 mois', 'recontacter')}${opt("tourClore(0)", 'Jamais', x.type === 'c' ? 'contact clos' : 'plus de relance', 'clore')}</div>${retour}`;
+  else {
+    const sansRep = opt("tourClore('sans')", 'Clore : sans réponse', `${x.tentatives} relance${x.tentatives > 1 ? 's' : ''} restée${x.tentatives > 1 ? 's' : ''} sans réponse`, 'clore');
+    const base = [opt("tourMode('joint')", 'Joint', 'on a parlé'), opt('tourSansReponse()', 'Pas répondu', `rappel ${jourCourt(rappelSansReponse(x.tentatives + 1))}`), opt("tourMode('reporter')", 'Reporter', 'pas maintenant')];
+    issues = `<div class="opts quatre t-issues">${x.tentatives >= 2 ? sansRep + base.join('') : base.join('') + opt("tourMode('clore')", 'Clore', 'plus maintenant')}</div>`;
+  }
+  const attente = x.type === 'd' ? `Relance du dossier · ${STATUTS[x.d.statut] || ''}`
+    : x.v.attente === 'lui' ? `${estElle(x.v) ? 'Elle' : 'Il'} te doit : ${ceQuiEstDu(x.v) || 'des informations'}` : x.v.attente === 'moi' ? `Tu lui dois : ${ceQuiEstDu(x.v) || 'des informations'}` : '';
+  el.innerHTML = `<div class="r-card t-card">
+      <div class="r-head">
+        <div><div class="meta">Tournée de relances</div><h2 id="t-titre">${tour.i + 1}/${n}</h2></div>
+        <div class="t-prog" aria-hidden="true"><i style="width:${Math.round(tour.i / n * 100)}%"></i></div>
+        <button type="button" class="btn icon" onclick="quitterTournee()" aria-label="Arrêter la tournée">✕</button>
+      </div>
+      <div class="r-body t-body">
+        <div class="t-carte" id="t-carte">
+          <div class="t-fond t-fond-d" aria-hidden="true">Joint</div><div class="t-fond t-fond-g" aria-hidden="true">Reporter</div>
+          <div class="t-contenu">
+            <div class="t-nom">${esc(x.nom)}</div>
+            <div class="t-sous">${x.entreprise ? `<span>${esc(x.entreprise)}</span>` : ''}${tag(x.activite)}</div>
+            ${attente ? `<p class="t-attente ${x.type === 'c' && x.v.attente === 'moi' ? 'doit' : ''}">${esc(attente)}</p>` : ''}
+            <p class="t-der">${x.der ? `<span class="meta">${esc(x.der.date ? fmtDate(x.der.date) : 'Note')} :</span> ${esc(x.der.texte || '')}` : '<span class="meta">Aucun échange noté</span>'}</p>
+            ${x.tentatives || x.valeur ? `<p class="t-meta">${[x.tentatives ? `Relance ${x.tentatives}` : '', x.valeur ? `${eur(x.valeur)} en jeu` : ''].filter(Boolean).map(esc).join(' · ')}</p>` : ''}
+          </div>
+        </div>
+        ${contacter}
+        ${issues}
+      </div>
+      <div class="r-foot"><button type="button" class="btn r-annuler" onclick="quitterTournee()">Arrêter</button><button type="button" class="btn" onclick="tourPasser()">Passer</button></div>
+    </div>`;
+  tourGeste($('#t-carte'));
+}
+function tourMode(m) { if (!tour) return; tour.mode = m; tourRender(); }
+/* Message envoyé (SMS, WhatsApp) ou appel lancé : l'issue notée ensuite le dira (« WhatsApp · Relance 1 Foncier & CFE · pas de réponse ») */
+function tourCanal(c) {
+  if (!tour) return;
+  const x = tourElement(tour.file[tour.i]);
+  tour.canal = c === 'Appel' ? 'Appel' : `${c} · ${x ? x.msg.libelle : ''}`.trim();
+}
+/* Une issue : la fiche (contact ou dossier) est modifiée et reçoit une ligne de journal, puis la carte suivante */
+function tourEcrire(x, texte, maj) {
+  const o = x.cible;
+  maj(o);
+  if (!Array.isArray(o.historique)) o.historique = [];
+  o.historique.push({ date: today(), texte: (tour.canal ? tour.canal + ' · ' : '') + texte });
+  tour.canal = '';
+  return save();
+}
+function tourSuivant(...stats) {
+  tour.stats.traites++;
+  stats.forEach(s => { tour.stats[s]++; });
+  tour.mode = ''; tour.i++;
+  tourRender();
+}
+const tourCourant = () => tour && tourElement(tour.file[tour.i]);
+function tourSansReponse() {
+  const x = tourCourant(); if (!x) return;
+  const n = x.tentatives + 1, quand = rappelSansReponse(n);
+  tourEcrire(x, `Relance ${n} · pas de réponse`, o => {
+    o.tentatives = n;
+    if (x.type === 'c') { o.rappel = quand; if (o.statut === 'clos') o.statut = 'suivi'; } else o.dateRelance = quand;
+  });
+  tourSuivant('sans');
+}
+function tourReporter(quand) {
+  const x = tourCourant(); if (!x || !/^\d{4}-\d{2}-\d{2}$/.test(quand)) return;
+  tourEcrire(x, `Reporté au ${jourCourt(quand)}`, o => {
+    if (x.type === 'c') { o.rappel = quand; if (o.statut === 'clos') o.statut = 'suivi'; } else o.dateRelance = quand;
+  });
+  tourSuivant('reportes');
+}
+function tourJoint(choix) {
+  const x = tourCourant(); if (!x) return;
+  const c = x.type === 'c';
+  const suite = { '3j': rappelDans(3), '1sem': rappelDans(7) }[choix];
+  if (suite) {
+    tourEcrire(x, `Joint · ${choix === '3j' ? 'rappel dans 3 jours' : 'rappel dans 1 semaine'}`, o => { o.tentatives = 0; if (c) { o.rappel = suite; if (o.statut === 'clos') o.statut = 'suivi'; } else o.dateRelance = suite; });
+    return tourSuivant('joints');
+  }
+  if (choix === 'clore') {
+    tourEcrire(x, c ? 'Joint · contact clos' : 'Joint · plus de relance', o => { o.tentatives = 0; if (c) { o.statut = 'clos'; o.rappel = ''; o.attente = ''; } else o.dateRelance = ''; });
+    return tourSuivant('joints', 'clos');
+  }
+  if (choix === 'rdv') {
+    tourEcrire(x, 'Joint · RDV à planifier', o => { o.tentatives = 0; });
+    tourSuivant('joints', 'rdv');
+    if (c) planifierAVoir(x.id); else openEvent(null, null, 'd:' + x.id);
+    return;
+  }
+  if (choix === 'dossier' && c) {
+    tourEcrire(x, 'Joint · intéressé, dossier ouvert', o => { o.tentatives = 0; });
+    tourSuivant('joints');
+    const v = x.v, avant = new Set(state.dossiers.map(d => d.id));
+    openDossier(null, { entreprise: v.entreprise || nomDe(v), contact: v.entreprise ? nomDe(v) : '', tel: v.tel || '', ville: v.ville || '', activite: APPORT.includes(v.activite) ? v.activite : 'cee', statut: 'prospect', notes: x.der ? x.der.texte || '' : '' });
+    /* Le dossier enregistré est rattaché au contact */
+    modal().addEventListener('close', () => {
+      const nouveau = state.dossiers.find(d => !avant.has(d.id));
+      const w = aVoir(v.id);
+      if (nouveau && w) { w.lien = 'd:' + nouveau.id; save(); }
+    }, { once: true });
+  }
+}
+function tourClore(mois) {
+  const x = tourCourant(); if (!x) return;
+  const c = x.type === 'c';
+  if (mois === 3 || mois === 6) {
+    const quand = iso(jourOuvre(addMonths(new Date(), mois)));
+    tourEcrire(x, `Pas maintenant · recontacter dans ${mois} mois`, o => { o.tentatives = 0; if (c) { o.statut = 'suivi'; o.attente = ''; o.rappel = quand; } else o.dateRelance = quand; });
+    return tourSuivant('reportes');
+  }
+  tourEcrire(x, mois === 'sans' ? 'Clos : sans réponse' : 'Clos', o => { if (c) { o.statut = 'clos'; o.rappel = ''; o.attente = ''; } else o.dateRelance = ''; });
+  tourSuivant('clos');
+}
+function tourPasser() { if (!tour) return; tour.mode = ''; tour.canal = ''; tour.i++; tourRender(); }
+function tourFin() {
+  const s = tour.stats, min = Math.max(1, Math.round((Date.now() - tour.debut) / 60000));
+  const p = (n, un, plusieurs = un + 's') => `${n} ${n > 1 ? plusieurs : un}`;
+  const detail = [s.joints && p(s.joints, 'joint'), s.rdv && `${s.rdv} RDV`, s.sans && `${s.sans} sans réponse`, s.reportes && p(s.reportes, 'reporté'), s.clos && p(s.clos, 'clos', 'clos')].filter(Boolean);
+  $('#tournee').innerHTML = `<div class="r-card t-card">
+      <div class="r-head"><div><div class="meta">Tournée de relances</div><h2 id="t-titre">C'est fait</h2></div><button type="button" class="btn icon" onclick="quitterTournee()" aria-label="Fermer">✕</button></div>
+      <div class="r-body t-fin">
+        <p class="t-fin-gros" id="t-bilan">${esc(`${p(s.traites, 'traité')} en ${min} min`)}${detail.length ? ' · ' + esc(detail.join(' · ')) : ''}</p>
+        <p class="meta">Chaque issue est notée dans le journal ; les rappels reviendront le bon jour.</p>
+      </div>
+      <div class="r-foot"><span></span><button type="button" class="btn primary" onclick="quitterTournee()">Terminer</button></div>
+    </div>`;
+}
+/* Glisser la carte : à droite = Joint, à gauche = Reporter (7 jours ouvrés). Les boutons restent là. */
+function tourGeste(el) {
+  if (!el) return;
+  let x0 = null, dx = 0, id = null;
+  const remettre = () => { x0 = null; el.classList.remove('glisse'); el.style.transform = ''; el.dataset.sens = ''; };
+  el.addEventListener('pointerdown', e => {
+    if (e.button > 0 || (e.target.closest && e.target.closest('button, a, input'))) return;
+    x0 = e.clientX; dx = 0; id = e.pointerId;
+    try { el.setPointerCapture(id); } catch (err) { /* ignore */ }
+    el.classList.add('glisse');
+  });
+  el.addEventListener('pointermove', e => {
+    if (x0 === null || e.pointerId !== id) return;
+    dx = e.clientX - x0;
+    el.style.transform = `translateX(${dx}px) rotate(${(dx / 40).toFixed(2)}deg)`;
+    el.dataset.sens = dx > 24 ? 'd' : dx < -24 ? 'g' : '';
+  });
+  el.addEventListener('pointerup', () => {
+    if (x0 === null) return;
+    const seuil = Math.min(90, el.offsetWidth * 0.35), d = dx;
+    remettre();
+    if (d > seuil) { navigator.vibrate?.(10); tourMode('joint'); }
+    else if (d < -seuil) { navigator.vibrate?.(10); tourReporter(ouvresDans(7)); }
+  });
+  el.addEventListener('pointercancel', remettre);
+}
+
+/* ---------- Reporter un contact (liste Contacts) : 4 raccourcis ou une date ---------- */
+function reporterAVoir(id) {
+  const v = aVoir(id); if (!v) return;
+  const choix = [[rappelDans(1), 'Demain'], [ouvresDans(3), '+3 j ouvrés'], [lundiProchain(), 'Lundi prochain'], [rappelDans(14), 'Dans 2 semaines']];
+  showModal(feuille({ titre: `Reporter ${esc(nomDe(v))}`, sous: v.rappel ? `Rappel actuel : ${esc(jourCourt(v.rappel))}` : 'Pas de rappel posé',
+    corps: `<div class="opts quatre">${choix.map(([d, l]) => `<button type="button" class="opt" onclick="reporterContact('${v.id}','${d}')"><b>${l}</b><span>${esc(jourCourt(d))}</span></button>`).join('')}</div>
+      <label class="r-label" for="rep-date">Autre date</label><input id="rep-date" type="date" min="${today()}" value="" onchange="if(this.value)reporterContact('${v.id}',this.value)">`,
+    pied: '<div class="modal-actions"><span></span><button type="button" class="btn" onclick="fermerModal()">Annuler</button></div>' }), () => {});
+}
+function reporterContact(id, quand) {
+  const v = aVoir(id);
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(quand)) return;
+  v.rappel = quand;
+  if (v.statut === 'clos') v.statut = 'suivi';
+  if (save()) { fermerModal(); render(); toast(`${nomDe(v)} · rappel ${jourCourt(quand)}`); }
 }
 
 /* ---------- Bandeau « Maintenant / Ensuite » : le RDV en cours et le suivant du jour, avec l'action utile ---------- */
@@ -2728,7 +3589,7 @@ function openAVoir(id) {
       ${field('notes', 'Notes', zoneTexte('notes', v.notes), 'full')}
     </div>`;
   const sous = [v.entreprise, SECTEURS[v.activite]?.label].filter(Boolean).map(esc).join(' · ');
-  showModal(feuille({ titre: esc(nomDe(v)), sous, menu: itemMenu('Supprimer', `supprimerAVoir('${v.id}')`, true),
+  showModal(feuille({ titre: esc(nomDe(v)), sous, menu: (v.rappel ? itemMenu('Mettre le rappel dans mon agenda', `agendaContact('${v.id}')`) : '') + itemMenu('Supprimer', `supprimerAVoir('${v.id}')`, true),
     corps: volets([{ titre: 'Fiche', html: `<div id="fiche-vue">${ficheHtml(v)}</div>` }, { titre: 'Coordonnées', html: coord }, { titre: 'Suivi', html: suivi }]), pied: piedFeuille('Fermer') }),
   f => {
     /* Clore à la main : plus de rappel ni d'attente, le contact sort des alertes */
@@ -2799,11 +3660,11 @@ function aVoirItem(v, compact) {
     : v.attente === 'moi' ? `<span class="status att-moi" title="${esc(ATTENTES.moi)}">↪ Tu lui dois</span>` : '';
   const du = passe || (ouvert && jours !== null && jours <= 0);
   const boutons = `${v.statut !== 'clos' && (du || !compact) ? actionsTel(v) : ''}${du ? `<button class="btn small fait-btn" onclick="suiteContact('${v.id}', true)" title="C'est fait : choisir la suite">✓ Fait</button>` : ouvert && !compact ? `<button class="btn small" onclick="openContact('${v.id}')" title="Noter une nouvelle prise de contact">Contacté</button>` : ''}
-    ${ouvert && !compact ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">RDV</button>` : ''}`;
+    ${ouvert && !compact ? `<button class="btn small" onclick="planifierAVoir('${v.id}')">RDV</button><button class="btn small" onclick="reporterAVoir('${v.id}')">Reporter</button>` : ''}`;
   /* Liste complète : au téléphone, les deux boutons passent sous le texte (le nom et « Il te doit » ne sont plus coupés) */
   return `<li class="${late ? 'retard' : ''} ${v.statut === 'clos' ? 'done' : ''} ${alerte ? 'alerte' : ''} ${compact ? '' : 'av-plein'} ${compact && !du ? 'a-venir' : ''}">
     <div class="grow clickable" onclick="openAVoir('${v.id}')">
-      <div class="when ${late ? 'late' : passe || (ouvert && jours === 0) ? 'du' : ''}">${esc(when)}</div>
+      <div class="when-ligne"><div class="when ${late ? 'late' : passe || (ouvert && jours === 0) ? 'du' : ''}">${esc(when)}</div>${!compact && d && d.date ? `<span class="anciennete">· dernier échange ${esc(ilYa(d.date))}</span>` : ''}</div>
       <div class="title-txt">${alerte ? '<span class="warn-ico" title="À traiter">⚠</span> ' : ''}${esc(nomDe(v))}${v.entreprise ? ` <span class="meta">· ${esc(v.entreprise)}</span>` : ''} ${attente}</div>
       <div class="meta">${d ? `${esc(fmtDate(d.date))} : ${esc(d.texte)}` : 'Aucune prise de contact notée'}</div>
     </div>
@@ -2811,25 +3672,39 @@ function aVoirItem(v, compact) {
     <i class="dot" style="background:var(--${v.activite || 'perso'})" data-tip="${esc(SECTEURS[v.activite]?.label || '')}" aria-label="${esc(SECTEURS[v.activite]?.label || '')}"></i>
   </li>`;
 }
+let avQ = '';
+/* Recherche : nom, entreprise, téléphone, ville, notes et tout le journal, sans accents ni majuscules */
+const trouveContact = (v, q) => sansAccents([v.nom, v.entreprise, v.tel, v.ville, v.notes, ...(v.historique || []).map(h => h.texte)].join(' ')).includes(q);
+function listeContactsHtml() {
+  const t = today(), q = sansAccents(avQ.trim());
+  const rows = (q ? state.aVoir.filter(v => trouveContact(v, q)) : state.aVoir.filter(v => avFiltre === 'tous' || (avFiltre === 'attente' ? v.statut === 'suivi' && v.attente : v.statut === avFiltre))).sort(aVoirTri);
+  if (!rows.length) return `<div class="empty">${q ? 'Personne ne correspond à cette recherche.' : state.aVoir.length ? 'Personne dans ce filtre.' : 'Tu croises quelqu\'un, vous parlez d\'un service : note-le ici en 10 secondes avec un rappel dans 2 ou 3 jours. Le jour venu, il apparaît en alerte sur l\'accueil.'}</div>`;
+  if (q || avFiltre !== 'suivi') return `${q ? `<p class="meta av-compte">${rows.length > 1 ? rows.length + ' contacts' : '1 contact'}</p>` : ''}<ul class="list">${rows.map(v => aVoirItem(v)).join('')}</ul>`;
+  /* En cours : en retard ou aujourd'hui, cette semaine, plus tard */
+  const dim = iso(addDays(monday(new Date()), 6));
+  const groupe = v => (v.rappel && v.rappel <= t) || rdvPasse(v) ? 0 : v.rappel && v.rappel <= dim ? 1 : 2;
+  return ['En retard ou aujourd\'hui', 'Cette semaine', 'Plus tard'].map((titre, i) => {
+    const g = rows.filter(v => groupe(v) === i);
+    return g.length ? `<h3 class="av-groupe">${titre} <span class="meta">${g.length}</span></h3><ul class="list">${g.map(v => aVoirItem(v)).join('')}</ul>` : '';
+  }).join('');
+}
+function refreshContacts() { const l = $('#av-liste'); if (l) l.innerHTML = listeContactsHtml(); }
 function aVoirView() {
   tipInit();
   const t = today();
   const suivis = state.aVoir.filter(v => v.statut === 'suivi');
   const dus = rappelsContacts();
   const attente = suivis.filter(v => v.attente);
-  const rows = state.aVoir.filter(v => avFiltre === 'tous' || (avFiltre === 'attente' ? v.statut === 'suivi' && v.attente : v.statut === avFiltre)).sort(aVoirTri);
+  const nTour = fileTournee().length;
   const chips = [['suivi', `En cours (${suivis.length})`], ['attente', `En attente d'infos (${attente.length})`], ['planifie', `RDV planifié (${state.aVoir.filter(v => v.statut === 'planifie').length})`], ['clos', `Clos (${state.aVoir.filter(v => v.statut === 'clos').length})`], ['tous', 'Tous']]
     .map(([k, l]) => `<button class="chip ${avFiltre === k ? 'on' : ''}" onclick="avFiltre='${k}';render()">${l}</button>`).join('');
   return `
   <div class="page-head">
     <div><h1>Contacts</h1><p>Les gens croisés à qui présenter un service · ${dus.length ? `${dus.length} à rappeler aujourd'hui` : 'rien à rappeler aujourd\'hui'}${attente.length ? ` · ${attente.length} en attente d'informations` : ''}</p></div>
-    <button class="btn primary" onclick="openContact()">+ Prise de contact</button>
+    <div class="btn-row">${nTour ? `<button class="btn" onclick="lancerTournee()">Lancer la tournée (${nTour})</button>` : ''}<button class="btn primary" onclick="openContact()">+ Prise de contact</button></div>
   </div>
-  <div class="toolbar">${chips}</div>
-  <div class="card">
-    ${rows.length ? `<ul class="list">${rows.map(v => aVoirItem(v)).join('')}</ul>`
-      : `<div class="empty">${state.aVoir.length ? 'Personne dans ce filtre.' : 'Tu croises quelqu\'un, vous parlez d\'un service : note-le ici en 10 secondes avec un rappel dans 2 ou 3 jours. Le jour venu, il apparaît en alerte sur l\'accueil.'}</div>`}
-  </div>`;
+  <div class="toolbar">${chips}<input id="av-q" type="search" aria-label="Rechercher un contact" placeholder="Rechercher un nom, une ville, un mot du journal…" value="${esc(avQ)}" oninput="avQ=this.value;refreshContacts()"></div>
+  <div class="card" id="av-liste">${listeContactsHtml()}</div>`;
 }
 /* Le RDV d'un contact est fait ou supprimé : le contact repart en suivi, avec un rappel au plus tard aujourd'hui */
 function libererContact(e) {
@@ -3151,8 +4026,60 @@ async function installerAppli() {
   if (outcome !== 'accepted') toast('Installation annulée');
   installPrompt = null; render();
 }
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => { /* hors ligne indisponible */ }); });
+/* ---------- Appli installée : ouverture sans réseau, nouvelle version proposée (jamais imposée) ----------
+   Le service worker est enregistré tout de suite (https, ou en local pour les essais). Une nouvelle version attend :
+   le toast « Nouvelle version prête · Recharger » la propose, jamais pendant une saisie (Noter ou une fiche ouverte). */
+const swPermis = 'serviceWorker' in navigator && (location.protocol === 'https:' || (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && (!navigator.webdriver || lireCle('kgd-sw') === '1')));
+let swReg = null, majDemandee = false, majAttente = null;
+const swAvaitControleur = swPermis && !!navigator.serviceWorker.controller;
+function proposerMaj() {
+  if (!swReg || !swReg.waiting) return;
+  clearTimeout(majAttente);
+  if (modal().open || !$('#rencontre').hidden || occupe()) { majAttente = setTimeout(proposerMaj, 2000); return; } // après la saisie
+  toastAction('Nouvelle version prête', 'Recharger', () => { majDemandee = true; if (swReg && swReg.waiting) swReg.waiting.postMessage({ type: 'SKIP_WAITING' }); }, 0);
+}
+function suivreInstallation(w) {
+  if (!w) return;
+  w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) proposerMaj(); });
+}
+if (swPermis) {
+  navigator.serviceWorker.register('./sw.js').then(reg => {
+    swReg = reg;
+    if (reg.waiting && navigator.serviceWorker.controller) proposerMaj();
+    suivreInstallation(reg.installing);
+    reg.addEventListener('updatefound', () => suivreInstallation(reg.installing));
+  }).catch(() => { /* hors ligne indisponible : l'appli marche quand même */ });
+  /* La nouvelle version a pris la main : un seul rechargement, demandé (Recharger) ou sans risque (rien n'est en cours) */
+  let recharge = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (recharge) return;
+    if (!majDemandee && (!swAvaitControleur || modal().open || !$('#rencontre').hidden || occupe())) return;
+    recharge = true; location.reload();
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && swReg) swReg.update().catch(() => {}); });
+}
+
+/* Hors ligne : une pastille le dit, tout continue (les données sont sur le téléphone) */
+function majHorsLigne() {
+  let p = $('#hors-ligne');
+  if (!p) { p = document.createElement('div'); p.id = 'hors-ligne'; p.setAttribute('role', 'status'); p.textContent = 'Hors ligne · tout reste enregistré sur le téléphone'; document.body.appendChild(p); }
+  p.hidden = navigator.onLine !== false;
+}
+window.addEventListener('offline', majHorsLigne);
+window.addEventListener('online', majHorsLigne);
+
+/* Partage reçu (« Partager » vers KGD depuis une autre appli) : Noter s'ouvre avec le texte, l'adresse redevient propre */
+function partageRecu() {
+  let q;
+  try { q = new URLSearchParams(location.search); } catch (e) { return; }
+  const texte = ['title', 'text', 'url'].map(k => (q.get(k) || '').trim()).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join('\n').slice(0, 2000);
+  if (!['title', 'text', 'url'].some(k => q.has(k))) return;
+  try { history.replaceState(null, '', location.pathname + '#dashboard'); } catch (e) { /* adresse gardée */ }
+  render();
+  if (!texte) return;
+  openContact(null);
+  const ta = $('#r-note');
+  if (ta) { ta.value = texte; noteSaisie(texte); }
 }
 
 /* ---------- Bouton + (téléphone) : l'action de la vue ; ailleurs, Noter. Appui long : les 4 actions ---------- */
@@ -3260,3 +4187,5 @@ function demanderProtection() {
 render();
 reprendreCouche();
 demanderProtection();
+partageRecu();
+if (navigator.onLine === false) majHorsLigne();

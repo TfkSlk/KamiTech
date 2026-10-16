@@ -102,7 +102,7 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
       septembre: gainsPeriode('kamifood', '2026-09-01', '2026-09-30'),
       kpi: [...document.querySelectorAll('.kpis .kpi')].map(x => x.textContent.replace(/\s+/g, ' ').trim()).find(t => /^Gagné/.test(t)) || '',
     }));
-    verifier(`${ecran} 1 bis. Stripe, factures au 1er : octobre = 149 encaissés + 0 attendu (et non + 101)`, r.mois.gagne === 149 && r.mois.prevu === 0 && /\+ 0 € encore attendu/.test(r.kpi.replace(/\u202f|\u00a0/g, ' ')), JSON.stringify(r.mois) + ' · ' + r.kpi);
+    verifier(`${ecran} 1 bis. Stripe, factures au 1er : octobre = 149 encaissés + 0 attendu (et non + 101)`, r.mois.gagne === 149 && r.mois.prevu === 0 && /\+ 0 € attendus d'ici fin octobre/.test(r.kpi.replace(/\u202f|\u00a0/g, ' ')), JSON.stringify(r.mois) + ' · ' + r.kpi);
     verifier(`${ecran} 1 bis. Stripe, factures au 1er : année = 1490 + 298 (12 mois, pas 13)`, r.annee.gagne === 1490 && proche(r.annee.prevu, 298), JSON.stringify(r.annee));
     verifier(`${ecran} 1 bis. Stripe : une semaine sans facture = 0 + 149 × 7 / 31 ; un mois passé payé = 149 + 0`, r.semaine.gagne === 0 && proche(r.semaine.prevu, 149 * 7 / 31) && r.septembre.gagne === 149 && r.septembre.prevu === 0, JSON.stringify([r.semaine, r.septembre]));
     await p.evaluate(() => { location.hash = '#kamifood'; }); await pause(p);

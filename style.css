@@ -1,3 +1,10 @@
+/* Polices sur place (Inter et Sora, licence SIL OFL 1.1, voir fonts/) : rien n'est demandé à Google, l'appli s'affiche pareil hors ligne */
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('fonts/inter-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('fonts/inter-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/inter-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/inter-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Sora'; font-style: normal; font-weight: 600; font-display: swap; src: url('fonts/sora-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Sora'; font-style: normal; font-weight: 700; font-display: swap; src: url('fonts/sora-latin-700-normal.woff2') format('woff2'); }
 /* ===== Kami Groupe — système visuel =====
    Clair par défaut (data-theme="light"), sombre au choix. Couleurs des secteurs validées
    pour la lisibilité (contraste, daltonisme) : ne pas changer une teinte sans revalider. */
@@ -46,6 +53,7 @@ html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--text);
   font: 15px/1.5 var(--font); -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none; -webkit-tap-highlight-color: transparent;
   display: grid; grid-template-columns: 236px 1fr; min-height: 100vh;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -1024,3 +1032,154 @@ details.connexions .card { margin-bottom: 16px; }
 .suite-ligne .r-label { margin: 0; white-space: nowrap; }
 .suite-ligne input { flex: 1; min-width: 0; min-height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 8px 11px; background: var(--surface); color: inherit; font: inherit; }
 .suite .opt.clore b { color: var(--danger); }
+
+/* Appli installée : rien sous l'encoche, pas de rebond qui entraîne la page derrière une fenêtre */
+#rencontre, #modal { overscroll-behavior: contain; }
+@media (max-width: 760px) {
+  main { padding-top: calc(18px + env(safe-area-inset-top)); }
+  .r-head { padding-top: calc(16px + env(safe-area-inset-top)); }
+}
+/* Hors ligne : une pastille discrète en haut, rien n'est bloqué */
+#hors-ligne { position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 70; pointer-events: none;
+  background: var(--text); color: var(--bg); font-size: 12.5px; font-weight: 500; padding: 5px 12px; border-radius: 99px; box-shadow: var(--shadow-lg); white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
+#hors-ligne[hidden] { display: none; }
+
+/* Ton argent : barre encaissé / attendu / en retard, et qui te doit quoi */
+.argent { display: grid; gap: 10px; margin-bottom: 16px; }
+.argent .card-head { margin-bottom: 0; }
+.argent-barre { display: block; width: 100%; height: 12px; border-radius: 99px; overflow: hidden; background: var(--surface-2); }
+.argent-leg { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--text-2, var(--muted)); }
+.argent-leg i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.argent-leg .late b, .argent-leg .late { color: var(--danger); }
+.argent-retards li { flex-wrap: wrap; }
+.argent-act { display: flex; gap: 8px; flex: none; }
+.rows.delais .row { align-items: center; }
+.delai-lab { min-width: 120px; font-weight: 500; }
+@media (max-width: 760px) { .argent-act { width: 100%; } .argent-act .btn { flex: 1 1 0; justify-content: center; } }
+
+/* Tournée de relances : même cadre que Noter, une carte qu'on vide d'un toucher ou d'un glissé */
+#tournee { position: fixed; inset: 0; z-index: 40; background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px); display: grid; place-items: center; padding: 16px; overscroll-behavior: contain; }
+#tournee[hidden] { display: none; }
+.t-prog { flex: 0 0 64px; height: 4px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.t-prog i { display: block; height: 100%; background: var(--text); }
+.t-body { gap: 12px; }
+.t-carte { position: relative; flex: 1 1 auto; min-height: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); touch-action: pan-y; user-select: none; transition: transform .18s ease; overflow: hidden; }
+.t-carte.glisse { transition: none; }
+.t-contenu { position: relative; z-index: 1; background: var(--surface); padding: 14px 16px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+.t-fond { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 18px; font-weight: 700; color: #fff; opacity: 0; }
+.t-fond-d { background: var(--ok); }
+.t-fond-g { background: var(--muted); justify-content: flex-end; }
+.t-carte[data-sens="d"] .t-fond-d, .t-carte[data-sens="g"] .t-fond-g { opacity: 1; }
+.t-carte[data-sens="d"] .t-contenu, .t-carte[data-sens="g"] .t-contenu { opacity: .9; }
+.t-nom { font-family: var(--font-head); font-size: 24px; font-weight: 700; line-height: 1.15; letter-spacing: -.01em; }
+.t-sous { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; color: var(--muted); }
+.t-attente { margin: 2px 0 0; font-weight: 600; }
+.t-attente.doit { color: var(--danger); }
+.t-der { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.t-meta { margin: auto 0 0; color: var(--muted); font-size: 13px; }
+.t-contact { display: flex; gap: 8px; }
+.t-contact .btn { flex: 1 1 0; justify-content: center; min-height: 44px; }
+.t-sans-tel { margin: 0; }
+.t-issues .opt { min-height: 56px; justify-content: center; }
+.t-issues .opt.clore b { color: var(--danger); }
+.t-ligne { display: flex; justify-content: space-between; }
+.t-retour { align-self: flex-start; }
+.t-fin { justify-content: center; text-align: center; }
+.t-fin-gros { font-family: var(--font-head); font-size: 20px; font-weight: 700; line-height: 1.35; margin: 0; }
+.av-groupe { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 2px; font-family: var(--font); font-weight: 600; }
+.av-groupe:first-child { margin-top: 0; }
+.av-compte { margin: 0 0 6px; }
+.t-lancer { width: 100%; justify-content: center; margin-top: 10px; }
+.when-ligne { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; }
+.anciennete { color: var(--muted); font-size: 12px; }
+#av-q { flex: 1 1 220px; min-width: 0; border: 1px solid var(--border-strong); background: var(--surface); border-radius: 10px; padding: 8px 11px; min-height: 44px; font: inherit; }
+@media (max-width: 760px) {
+  #tournee { padding: 0; place-items: start stretch; }
+  .t-nom { font-size: 22px; }
+  .t-contact .btn span { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .t-carte { transition: none; } }
+
+/* Sauvegarde : relance douce sur l'accueil, carte en tête des Réglages */
+.sauvegarde-mini { flex-wrap: wrap; }
+.sauvegarde-mini .masquer { font-weight: 500; color: var(--muted); text-decoration: none; }
+.sauvegarde-mini.rouge, .sauvegarde-mini.rouge span { color: var(--danger); }
+.sauvegarde-mini.rouge::before { background: var(--danger); }
+.carte-sauvegarde.rouge { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.carte-sauvegarde.rouge .etat-sauvegarde b { color: var(--danger); }
+.etat-sauvegarde { margin: 0 0 6px; }
+.agenda-tel { width: 100%; justify-content: center; margin-bottom: 12px; }
+
+/* Rituels : « Ta journée » et « Clôturer », même cadre que Noter */
+#brief, #cloture { position: fixed; inset: 0; z-index: 40; background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px); display: grid; place-items: center; padding: 16px; overscroll-behavior: contain; }
+#brief[hidden], #cloture[hidden] { display: none; }
+.b-body { gap: 10px; }
+.b-liste { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.b-item { border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; transition: opacity .15s, transform .15s; }
+.b-item.part { opacity: 0; transform: translateX(24px); }
+.b-item.traite { opacity: .7; }
+.b-txt { display: flex; flex-direction: column; min-width: 0; }
+.b-txt b, .b-txt .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b-act { display: flex; gap: 6px; }
+.b-act .btn { flex: 1 1 0; justify-content: center; padding-left: 6px; padding-right: 6px; min-width: 0; }
+.b-act .btn, .t-contact .btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.b-date { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
+.b-date input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.b-ok { color: var(--ok); font-weight: 600; font-size: 14px; align-self: center; }
+.b-tout { width: 100%; justify-content: center; }
+.b-vide { color: var(--muted); margin: 8px 0; }
+.b-alertes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.b-alertes li { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.b-alertes li span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b-alertes .compte { flex: none; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--surface-2); }
+.b-alertes .fort .compte { background: var(--danger); color: #fff; }
+.b-jauge { display: grid; gap: 4px; }
+.b-barre { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.b-barre i { display: block; height: 100%; background: var(--text); }
+.b-barre.trop i { background: var(--danger); }
+.b-jour { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.b-jour li { display: flex; gap: 10px; min-width: 0; }
+.b-jour li b { flex: none; width: 46px; font-variant-numeric: tabular-nums; }
+.b-jour li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b-obj ul { margin: 4px 0 0; padding-left: 18px; }
+.b-pages { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.b-bilan { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: auto 0 0; padding-top: 8px; border-top: 1px solid var(--border); font-size: 14px; }
+.b-bilan dt { color: var(--muted); }
+.b-bilan dd { margin: 0; font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.carte-cloture { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; width: 100%; text-align: left; margin: 0 0 14px; padding: 12px 16px; border-radius: 14px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.carte-cloture b { font-family: var(--font-head); }
+.carte-cloture span:not(.a-chevron) { color: var(--muted); font-size: 14px; }
+.carte-cloture .a-chevron { margin-left: auto; color: var(--muted); }
+.badge-report { display: inline-block; font-size: 11.5px; font-weight: 600; color: var(--muted); border: 1px solid var(--border-strong); border-radius: 99px; padding: 0 7px; vertical-align: 1px; }
+.reports-act { display: flex; gap: 8px; margin-top: 6px; }
+.settings label.check { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; cursor: pointer; }
+.settings label.check > span { display: flex; flex-direction: column; gap: 2px; }
+.settings label.check small { color: var(--muted); font-size: 13px; }
+.settings .row input.short { width: 96px; flex: 0 0 96px; }
+@media (max-width: 760px) {
+  #brief, #cloture { padding: 0; place-items: start stretch; }
+}
+@media (prefers-reduced-motion: reduce) { .b-item { transition: none; } }
+
+/* Le lundi : pastilles de comparaison, revue de la semaine, objectifs */
+.kpi .value .variation { display: inline-block; vertical-align: middle; margin-left: 8px; font-family: var(--font); font-size: 12px; font-weight: 600; letter-spacing: 0; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+.variation.hausse { background: var(--text); color: var(--bg); }
+.variation.baisse { background: var(--danger); color: #fff; }
+.variation.stable { border: 1px solid var(--argent-bord); background: linear-gradient(180deg, var(--argent-1), var(--argent-2)); color: var(--argent-texte); }
+#revue { position: fixed; inset: 0; z-index: 40; background: rgba(10, 12, 16, .5); backdrop-filter: blur(2px); display: grid; place-items: center; padding: 16px; overscroll-behavior: contain; }
+#revue[hidden] { display: none; }
+.r-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.r-table th { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; padding: 0 4px 6px; }
+.r-table td { padding: 7px 4px; border-top: 1px solid var(--border); vertical-align: top; }
+.r-table td small { display: block; color: var(--muted); font-size: 11.5px; }
+.r-table td small.late { color: var(--danger); }
+.r-phrase { font-family: var(--font-head); font-weight: 700; font-size: 17px; margin: 4px 0 0; }
+.r-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.r-stats div { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; display: grid; }
+.r-stats b { font-family: var(--font-head); font-size: 24px; }
+.r-stats span { color: var(--muted); font-size: 13px; }
+.r-objectif { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 10px; padding: 10px 12px; font-size: 16px; width: 100%; box-sizing: border-box; min-height: 44px; color: inherit; }
+.objectifs-semaine { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: -4px 0 14px; padding: 0 4px; font-size: 14px; }
+.objectifs-semaine ul { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; }
+.objectifs-semaine li::before { content: "○ "; color: var(--muted); }
+@media (max-width: 760px) { #revue { padding: 0; place-items: start stretch; } .kpi .value .variation { display: block; margin: 4px 0 0; width: max-content; } }
