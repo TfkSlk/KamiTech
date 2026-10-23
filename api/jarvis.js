@@ -10,7 +10,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 
-const MODEL = process.env.JARVIS_MODEL || 'claude-opus-5';
+const MODEL = process.env.JARVIS_MODEL || 'claude-opus-5-5';
 const EFFORT = process.env.JARVIS_EFFORT || 'medium';
 const MAX_TOURS = 8;
 
@@ -390,7 +390,7 @@ export async function runJarvis(body, client) {
 
   for (let tour = 0; tour < MAX_TOURS; tour++) {
     const params = {
-      model: MODEL, max_tokens: 8000,
+      model: MODEL, max_tokens: 16000, // la réflexion (toujours active sur Opus 5.5) compte dans cette limite, en plus de la réponse
       thinking: { type: 'adaptive' }, output_config: { effort: EFFORT },
       system, tools: TOOLS, messages: convo,
       ...(fallbacks ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),

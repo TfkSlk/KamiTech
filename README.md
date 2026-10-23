@@ -25,7 +25,7 @@ Les données sont enregistrées **uniquement dans le navigateur** (localStorage)
 
 ## Jarvis (le cerveau)
 
-`api/jarvis.js` est une fonction Vercel qui appelle l'API Claude (`claude-opus-5`, thinking adaptatif, repli serveur activé).
+`api/jarvis.js` est une fonction Vercel qui appelle l'API Claude (`claude-opus-5-5`, thinking adaptatif, repli serveur activé).
 Le tableau de bord lui envoie la conversation et une projection de ses données ; le cerveau exécute ses outils
 (chercher, agenda, ajouter/modifier RDV, dossiers, abonnés, retenir, ouvrir) et renvoie le texte + les actions,
 que le tableau de bord rejoue sur ses propres données. Le serveur ne stocke rien.
@@ -36,7 +36,7 @@ Variables d'environnement Vercel :
 |---|---|
 | `ANTHROPIC_API_KEY` | clé API Anthropic (console.anthropic.com) — obligatoire |
 | `JARVIS_TOKEN` | jeton partagé ; à coller aussi dans Réglages → Jarvis |
-| `JARVIS_MODEL` | optionnel, défaut `claude-opus-5` |
+| `JARVIS_MODEL` | optionnel, défaut `claude-opus-5-5` |
 | `JARVIS_EFFORT` | optionnel, `low` / `medium` (défaut) / `high` |
 | `JARVIS_FALLBACKS` | `off` pour désactiver le repli serveur |
 
