@@ -609,7 +609,7 @@ body.no-scroll #toast.show { transform: translateX(-50%); }
 .r-body textarea:focus-visible, .r-body input:focus-visible { outline: none; border-color: var(--text-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 9%, transparent); }
 .r-body .r-saisie textarea { flex: 1; min-height: 0; height: auto; }
 .r-saisie.micro textarea { padding-right: 56px; }
-.r-mic { position: absolute; right: 8px; bottom: 8px; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); cursor: pointer; }
+.r-mic { position: absolute; right: 6px; bottom: 6px; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); cursor: pointer; }
 .r-mic:hover { color: var(--text); border-color: var(--border-strong); }
 .r-mic.on { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); animation: pulse 1.2s infinite; }
 .r-compris { display: flex; align-items: flex-start; gap: 8px; min-height: 28px; }
@@ -648,7 +648,8 @@ body.no-scroll #toast.show { transform: translateX(-50%); }
 #rencontre.clavier .r-body { padding: 10px 16px; gap: 8px; }
 #rencontre.clavier .r-saisie { min-height: 64px; }
 #rencontre.clavier .r-saisie textarea { min-height: 64px; padding-top: 8px; padding-bottom: 8px; }
-#rencontre.clavier .r-mic { width: 36px; height: 36px; right: 6px; bottom: 6px; }
+#rencontre.clavier .r-mic { width: 40px; height: 40px; right: 4px; bottom: 4px; }
+#rencontre.clavier .r-interim { right: 48px; }
 #rencontre.clavier .r-jetons { flex-wrap: nowrap; overflow: hidden; }
 #rencontre.clavier .jeton { flex: none; }
 #rencontre.clavier .r-zone { padding-top: 8px; gap: 6px; }
@@ -1183,3 +1184,8 @@ details.connexions .card { margin-bottom: 16px; }
 .objectifs-semaine ul { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; }
 .objectifs-semaine li::before { content: "○ "; color: var(--muted); }
 @media (max-width: 760px) { #revue { padding: 0; place-items: start stretch; } .kpi .value .variation { display: block; margin: 4px 0 0; width: max-content; } }
+
+/* Dictée : texte reconnu en direct (sur le bas du champ, sans prendre de place), bouton en mode clavier */
+.r-interim { position: absolute; left: 10px; right: 56px; bottom: 8px; font-size: 13px; font-style: italic; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.r-interim[hidden] { display: none; }
+.r-mic.clavier { border-style: dashed; }

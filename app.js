@@ -2366,9 +2366,10 @@ function rencRender() {
   let corps = '';
   if (r.etape === 0) corps = `
     <div class="r-bandeaux" id="r-bandeaux">${bandeauxHtml(r)}</div>
-    <div class="r-saisie ${SR ? 'micro' : ''}">
+    <div class="r-saisie micro">
       <textarea id="r-note" rows="3" enterkeyhint="done" autocomplete="off" autocapitalize="sentences" aria-label="Ta note" placeholder="${r.v ? 'Ex. : il m\'envoie ses factures, rappelle-moi jeudi' : 'Ex. : croisé Karim de Karim SARL pour les CEE, je lui envoie le devis, rappelle-moi jeudi'}" oninput="noteSaisie(this.value)" onkeydown="noteTouche(event)">${esc(r.note)}</textarea>
-      ${SR ? `<button type="button" class="r-mic ${recNote ? 'on' : ''}" id="r-mic" onclick="dicteeRencontre()" aria-label="${recNote ? 'Arrêter la dictée' : 'Dicter'}" title="Dicter">${ICONES.micro}</button>` : ''}
+      <div class="r-interim" id="r-interim" aria-live="polite" hidden></div>
+      <button type="button" class="r-mic ${recNote ? 'on' : ''} ${dicteeDispo() ? '' : 'clavier'}" id="r-mic" onclick="dicteeRencontre()" aria-label="${recNote ? 'Arrêter la dictée' : 'Dicter'}" title="${dicteeDispo() ? 'Dicter' : 'Dicter avec le clavier'}">${ICONES.micro}</button>
     </div>
     <div class="r-compris"><div class="r-jetons" id="r-jetons" aria-label="Ce qui a été compris">${jetonsHtml(r)}</div><div id="r-kami">${kamiHtml(r)}</div></div>
     <div class="r-zone" id="r-zone">${r.qui ? quiHtml(r) : pucesHtml(r)}</div>`;
@@ -2486,20 +2487,96 @@ function messageRencontre(v, clore, ev) {
   if (parts.length === 1) parts.push('enregistré');
   return parts.join(' · ');
 }
-/* Dictée de la note (reconnaissance vocale du navigateur, en français) */
+/* ---------- Dictée de la note ----------
+   Reconnaissance vocale du navigateur (en français, texte affiché au fil de la parole) quand elle marche vraiment ;
+   sinon la dictée du clavier (touche micro), qui fonctionne partout, appli installée sur iPhone comprise.
+   Un appareil où la reconnaissance ne démarre pas (iPhone en appli installée, service refusé) est retenu 7 jours
+   dans localStorage['kgd-dictee'] : le bouton ouvre alors directement le clavier, sans faire semblant. */
+const DICTEE_CLE = 'kgd-dictee';
+const estIOS = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function dicteeDispo() {
+  if (!SR) return false;
+  try { const m = JSON.parse(lireCle(DICTEE_CLE) || 'null'); if (m && m.mode === 'clavier' && Date.now() - m.t < 7 * 864e5) return false; } catch (e) { /* valeur illisible : on réessaie */ }
+  return true;
+}
+function retenirDicteeClavier() { try { localStorage.setItem(DICTEE_CLE, JSON.stringify({ mode: 'clavier', t: Date.now() })); } catch (e) { /* stockage indisponible */ } }
+/* Dictée du clavier : le champ prend le focus (le clavier s'ouvre) et on dit où est la touche micro */
+function dicteeClavier(raison) {
+  const b = $('#r-mic'); if (b) b.classList.add('clavier');
+  focusNote();
+  const ou = estIOS() ? 'la touche micro du clavier (en bas à droite)' : coarse() ? 'la touche micro du clavier' : navigator.platform.startsWith('Win') ? 'Win + H' : navigator.platform.startsWith('Mac') ? 'la touche micro ou fn ×2' : 'la dictée du système';
+  toast(`${raison ? raison + ' · ' : ''}Dicte avec ${ou}`, 5000);
+}
 let recNote = null;
+function majInterim(txt) {
+  const el = $('#r-interim'); if (!el) return;
+  el.textContent = txt || ''; el.hidden = !txt;
+}
+/* Le texte reconnu s'ajoute à la note (une espace entre deux dictées), puis la note est relue */
+function ajouterDicte(t) {
+  const ta = $('#r-note'); if (!ta || !t || !renc) return;
+  const avant = ta.value.trimEnd();
+  ta.value = (avant ? avant + ' ' : '') + t.trim();
+  noteSaisie(ta.value);
+  try { ta.selectionStart = ta.selectionEnd = ta.value.length; } catch (e) { /* ignore */ }
+}
+const MESSAGES_DICTEE = {
+  'not-allowed': 'Micro refusé : autorise-le dans les réglages du navigateur pour ce site',
+  'service-not-allowed': 'Dictée du navigateur indisponible ici',
+  network: 'La dictée du navigateur a besoin d\'internet',
+  'audio-capture': 'Aucun micro trouvé',
+  'language-not-supported': 'Dictée en français indisponible sur cet appareil',
+};
 function dicteeRencontre() {
-  if (!SR) return;
   if (recNote) { arreterDictee(); return; }
-  recNote = new SR(); recNote.lang = 'fr-FR'; recNote.continuous = true; recNote.interimResults = false;
-  recNote.onresult = e => { const t = Array.from(e.results).slice(e.resultIndex).map(x => x[0].transcript).join(' ').trim(); const ta = $('#r-note'); if (ta && t && renc) { ta.value = (ta.value ? ta.value.trim() + ' ' : '') + t; noteSaisie(ta.value); } };
-  /* Fin de la dictée : la note est relue tout de suite */
-  recNote.onend = () => { recNote = null; majMicNote(); if (renc && renc.etape === 0) { clearTimeout(noteSaisie.t); lireRencontre(); majNoter(); } };
-  recNote.onerror = () => { arreterDictee(); toast('Micro indisponible'); };
-  try { recNote.start(); majMicNote(); } catch (e) { recNote = null; }
+  if (!dicteeDispo()) return dicteeClavier();
+  let r;
+  try { r = new SR(); } catch (e) { retenirDicteeClavier(); return dicteeClavier('Dictée du navigateur indisponible'); }
+  r.lang = 'fr-FR'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+  const etat = { demarre: false, redemarrages: 0, voulu: true };
+  r.onstart = () => { etat.demarre = true; clearTimeout(etat.garde); majMicNote(); };
+  r.onaudiostart = r.onstart;
+  r.onresult = e => {
+    let final = '', interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = (e.results[i][0] && e.results[i][0].transcript) || '';
+      if (e.results[i].isFinal) final += t + ' '; else interim += t;
+    }
+    if (final.trim()) { ajouterDicte(final); majInterim(''); }
+    else majInterim(interim.trim());
+  };
+  /* Au téléphone, le navigateur coupe la reconnaissance après un silence : tant que le bouton est allumé, on la relance */
+  r.onend = () => {
+    if (recNote === r && etat.voulu && etat.demarre && etat.redemarrages < 12) {
+      etat.redemarrages++;
+      try { r.start(); return; } catch (e) { /* on termine */ }
+    }
+    if (recNote === r) recNote = null;
+    majMicNote(); majInterim('');
+    if (renc && renc.etape === 0) { clearTimeout(noteSaisie.t); lireRencontre(); majNoter(); }
+  };
+  r.onerror = e => {
+    const code = e && e.error;
+    if (code === 'no-speech' || code === 'aborted') return; // rien entendu : onend relance ; arrêt volontaire
+    etat.voulu = false; clearTimeout(etat.garde);
+    arreterDictee();
+    if (code === 'service-not-allowed' || (code === 'not-allowed' && estIOS() && estInstalle())) { retenirDicteeClavier(); return dicteeClavier(MESSAGES_DICTEE['service-not-allowed']); }
+    toast(MESSAGES_DICTEE[code] || 'Dictée interrompue', 4500);
+    if (!MESSAGES_DICTEE[code]) { retenirDicteeClavier(); dicteeClavier(); }
+  };
+  try { r.start(); } catch (e) { retenirDicteeClavier(); return dicteeClavier('Dictée du navigateur indisponible'); }
+  recNote = r; recNote.etat = etat; majMicNote();
+  /* Garde-fou : si rien ne démarre en 3 s (iPhone en appli installée : la reconnaissance reste muette), on passe au clavier */
+  etat.garde = setTimeout(() => { if (recNote === r && !etat.demarre) { etat.voulu = false; arreterDictee(); retenirDicteeClavier(); dicteeClavier('Dictée du navigateur muette'); } }, 3000);
 }
 function majMicNote() { const b = $('#r-mic'); if (b) { b.classList.toggle('on', !!recNote); b.setAttribute('aria-label', recNote ? 'Arrêter la dictée' : 'Dicter'); } }
-function arreterDictee() { if (recNote) { try { recNote.stop(); } catch (e) { /* ignore */ } recNote = null; majMicNote(); } }
+function arreterDictee() {
+  const r = recNote; if (!r) return;
+  if (r.etat) { r.etat.voulu = false; clearTimeout(r.etat.garde); }
+  recNote = null;
+  try { r.stop(); } catch (e) { /* ignore */ }
+  majMicNote(); majInterim('');
+}
 /* Kami lit la note et remplit toutes les étapes ; on saute au récapitulatif */
 async function analyserRencontre() {
   if (!renc || renc.kamiEnCours) return; // une seule demande à la fois
@@ -3893,7 +3970,12 @@ function creerRec() {
     if (!texte) { parler('Oui ?'); return; }
     jarvisEnvoyer(texte, true);
   };
-  r.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { toast('Micro refusé : autorise-le dans le navigateur'); mainsLibres(false); } };
+  r.onerror = e => {
+    const code = e && e.error;
+    if (code === 'no-speech' || code === 'aborted') return;
+    toast(MESSAGES_DICTEE[code] || 'Écoute interrompue', 4500);
+    if (code !== 'network') mainsLibres(false);
+  };
   r.onend = () => { if (ecoute && !enTrainDeParler) { try { r.start(); } catch (e) { /* déjà lancé */ } } };
   return r;
 }
@@ -3914,7 +3996,12 @@ function apresMotCle(transcription) {
   }
   return null;
 }
-function demarrerEcoute() { if (!SR) return; rec = rec || creerRec(); ecoute = true; try { rec.start(); } catch (e) { /* déjà lancé */ } majMic(); }
+function demarrerEcoute() {
+  if (!SR) { toast('Pas de reconnaissance vocale dans ce navigateur : écris ta question'); return; }
+  rec = rec || creerRec(); ecoute = true;
+  try { rec.start(); } catch (e) { if (!(e && e.name === 'InvalidStateError')) { ecoute = false; toast('Micro indisponible : ' + (e && e.message || 'erreur')); } }
+  majMic();
+}
 function arreterEcoute() { ecoute = false; if (rec) { try { rec.stop(); } catch (e) { /* ignore */ } } majMic(); }
 function majMic() { const b = $('#chat-mic'); if (b) b.classList.toggle('on', ecoute); }
 function mainsLibres(on) {
