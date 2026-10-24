@@ -369,6 +369,8 @@ function validerMessages(messages) {
   if (!Array.isArray(messages) || !messages.length) throw new Error('messages manquants');
   const out = messages.slice(-30).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content ?? '').slice(0, 8000) }))
     .filter(m => m.content.trim());
+  /* L'API exige que la conversation commence par Toufek : la fenêtre glissante du client peut commencer par une réponse de Kami */
+  while (out.length && out[0].role !== 'user') out.shift();
   if (!out.length || out[out.length - 1].role !== 'user') throw new Error('le dernier message doit venir de Toufek');
   return out;
 }
@@ -421,8 +423,16 @@ export async function runJarvis(body, client) {
     convo.push({ role: 'user', content: resultats });
   }
 
-  const texte = reponse.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim()
-    || (actions.length ? "C'est fait." : "Je n'ai pas de réponse.");
+  /* Sortie sans réponse finale : on dit ce qui s'est passé, sans annoncer « C'est fait » pour ce qui n'a pas été fait */
+  let texte = reponse.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+  const resteOutils = reponse.content.some(b => b.type === 'tool_use');
+  if (!texte || resteOutils) {
+    const faites = actions.length ? `${actions.length} action${actions.length > 1 ? 's' : ''} faite${actions.length > 1 ? 's' : ''}` : '';
+    if (reponse.stop_reason === 'max_tokens') texte = [faites, 'je me suis arrêté avant la fin (réponse trop longue) : redemande-moi la suite en plus court'].filter(Boolean).join(', puis ');
+    else if (resteOutils) texte = [faites, "je n'ai pas pu terminer : redis-moi ce qu'il reste à faire"].filter(Boolean).join(', mais ');
+    else if (!texte) texte = actions.length ? "C'est fait." : "Je n'ai pas de réponse.";
+    texte = texte.charAt(0).toUpperCase() + texte.slice(1);
+  }
   return { texte, actions, modele: reponse.model, usage };
 }
 

@@ -212,3 +212,27 @@ test('validation du corps : dernier message doit venir de Toufek', async () => {
   await assert.rejects(runJarvis(corps([]), client), /messages manquants/);
   assert.equal(appels.length, 0, 'aucun appel au modèle');
 });
+
+/* ---------- Fenêtre glissante du client : elle peut commencer par une réponse de Kami ---------- */
+test('historique qui commence par Kami : Kami est retiré en tête, le premier message envoyé vient de Toufek', async () => {
+  const appels = [];
+  const client = { beta: { messages: { create: async params => { appels.push(structuredClone(params)); return { model: 'claude-opus-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text: 'Bien reçu.' }], usage: { input_tokens: 10, output_tokens: 5 } }; } } } };
+  const messages = [];
+  for (let i = 0; i < 10; i++) { messages.push({ role: 'user', content: `question ${i}` }, { role: 'assistant', content: `réponse ${i}` }); }
+  messages.push({ role: 'user', content: 'question 10' });
+  const r = await runJarvis({ messages: messages.slice(-20), state: etat(), mode: 'text', aujourdhui: AUJOURDHUI, heure: '09:30' }, client);
+  assert.equal(appels.length, 1);
+  assert.equal(appels[0].messages[0].role, 'user');
+  assert.equal(appels[0].messages[0].content, 'question 1');
+  assert.equal(appels[0].messages.at(-1).content, 'question 10');
+  assert.equal(r.texte, 'Bien reçu.');
+});
+
+/* ---------- Sortie sans réponse finale : pas de « C'est fait » pour ce qui n'a pas été fait ---------- */
+test('réponse coupée (max_tokens) avec un outil non exécuté : le message le dit, sans « C\'est fait »', async () => {
+  const client = { beta: { messages: { create: async () => ({ model: 'claude-opus-5-5', stop_reason: 'max_tokens', content: [{ type: 'thinking', thinking: '' }, { type: 'tool_use', id: 't1', name: 'ajouter_rdv', input: {} }], usage: { input_tokens: 10, output_tokens: 5 } }) } } };
+  const r = await runJarvis({ messages: [{ role: 'user', content: 'cale un rdv' }], state: etat(), mode: 'text', aujourdhui: AUJOURDHUI, heure: '09:30' }, client);
+  assert.equal(r.actions.length, 0);
+  assert.match(r.texte, /arrêté avant la fin/);
+  assert.doesNotMatch(r.texte, /C'est fait/);
+});
