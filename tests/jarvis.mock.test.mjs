@@ -153,6 +153,32 @@ test('boucle d\'outils : ajouter_rdv puis réponse finale (historique en ajout s
   assert.deepEqual(out.usage, { input: 1500, output: 240, cache: 2500 }, 'usage cumulé, cache_read_input_tokens compris');
 });
 
+test('prise_de_contact antidatée sur un contact existant (« ce qui a déjà été fait ») : journal complété à sa date, rappel et statut intacts', async () => {
+  const outil = TOOLS.find(t => t.name === 'prise_de_contact');
+  assert.match(outil.description, /date passée/, 'la description dit le cas du journal seul');
+  const r1 = reponse([pensee('sig_a'), { type: 'tool_use', id: 'toolu_p1', name: 'prise_de_contact', input: { id: 'c1', sujet: 'devis envoyé', date: '2026-10-19' } }], 'tool_use', { input_tokens: 10, output_tokens: 5 });
+  const r2 = reponse([pensee('sig_b'), { type: 'text', text: 'Noté dans le journal de Karim.' }], 'end_turn', { input_tokens: 10, output_tokens: 5 });
+  const { client, appels } = fauxClient([r1, r2]);
+  const out = await runJarvis(corps([{ role: 'user', content: 'note que j\'ai envoyé le devis à Karim lundi dernier' }]), client);
+  assert.equal(appels.length, 2);
+  assert.equal(out.actions.length, 1);
+  const a = out.actions[0];
+  assert.equal(a.op, 'update'); assert.equal(a.collection, 'aVoir'); assert.equal(a.id, 'c1');
+  assert.deepEqual(Object.keys(a.fields), ['historique'], 'seul le journal change : ni rappel, ni statut, ni attente');
+  assert.deepEqual(a.fields.historique.map(h => h.date + ' ' + h.texte), ['2026-10-19 devis envoyé', '2026-10-20 Taxe foncière, il m\'envoie ses avis'], 'entrée insérée à sa date, avant celle du 20');
+  const res = JSON.parse(appels[1].messages[2].content[0].content);
+  assert.equal(res.contact.rappel, AUJOURDHUI, 'le rappel du jour est gardé');
+  assert.equal(res.contact.statut, 'suivi');
+
+  /* La même entrée datée du jour reste une vraie prise de contact : rappel posé (3 jours ouvrés), statut suivi */
+  const r3 = reponse([pensee('sig_c'), { type: 'tool_use', id: 'toolu_p2', name: 'prise_de_contact', input: { id: 'c1', sujet: 'il rappelle', date: AUJOURDHUI } }], 'tool_use', { input_tokens: 10, output_tokens: 5 });
+  const r4 = reponse([pensee('sig_d'), { type: 'text', text: 'Noté.' }], 'end_turn', { input_tokens: 10, output_tokens: 5 });
+  const out2 = await runJarvis(corps([{ role: 'user', content: 'Karim m\'a rappelé' }]), fauxClient([r3, r4]).client);
+  const f2 = out2.actions[0].fields;
+  assert.equal(f2.statut, 'suivi'); assert.equal(f2.rappel, '2026-10-26', 'rappel du jour dépassé → rappel dans 3 jours (vendredi 23 → lundi 26)');
+  assert.equal(f2.historique.length, 2); assert.equal(f2.historique[1].texte, 'il rappelle');
+});
+
 test('stop_reason refusal : message de refus, aucune action, un seul appel', async () => {
   const refus = reponse([], 'refusal', { input_tokens: 900, output_tokens: 0 },
     { stop_details: { type: 'refusal', category: 'cyber', explanation: 'Déclinée par un classifieur.' } });

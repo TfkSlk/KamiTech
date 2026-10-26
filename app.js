@@ -2546,7 +2546,7 @@ function dicteeRencontre() {
   let r;
   try { r = new SR(); } catch (e) { retenirDicteeClavier(); return dicteeClavier('Dictée du navigateur indisponible'); }
   r.lang = 'fr-FR'; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
-  const etat = { demarre: false, redemarrages: 0, voulu: true };
+  const etat = { demarre: false, redemarrages: 0, voulu: true, renc }; // renc : la rencontre que cette dictée remplit
   r.onstart = () => { etat.demarre = true; clearTimeout(etat.garde); majMicNote(); };
   r.onaudiostart = r.onstart;
   r.onresult = e => {
@@ -2555,7 +2555,7 @@ function dicteeRencontre() {
       const t = (e.results[i][0] && e.results[i][0].transcript) || '';
       if (e.results[i].isFinal) final += t + ' '; else interim += t;
     }
-    if (final.trim()) { ajouterDicte(final); majInterim(''); }
+    if (final.trim()) { ajouterDicte(final); etat.recu = true; majInterim(''); }
     else majInterim(interim.trim());
   };
   /* Au téléphone, le navigateur coupe la reconnaissance après un silence : tant que le bouton est allumé, on la relance */
@@ -2567,7 +2567,7 @@ function dicteeRencontre() {
     if (recNote === r) recNote = null;
     majMicNote(); majInterim('');
     if (renc && renc.etape === 0) { clearTimeout(noteSaisie.t); lireRencontre(); majNoter(); }
-    if (etat.recu) kamiApresDictee();
+    if (etat.recu && renc === etat.renc) { etat.recu = false; clearTimeout(etat.garde2); kamiApresDictee(); }
   };
   r.onerror = e => {
     const code = e && e.error;
@@ -2590,7 +2590,8 @@ function arreterDictee() {
   recNote = null;
   try { r.stop(); } catch (e) { /* ignore */ }
   majMicNote(); majInterim('');
-  if (r.etat && r.etat.recu) { r.etat.recu = false; kamiApresDictee(); }
+  /* Le dernier mot arrive souvent après stop() : Kami lit la note à onend (ou 1,5 s plus tard si le navigateur ne le signale pas) */
+  if (r.etat && r.etat.recu) r.etat.garde2 = setTimeout(() => { if (r.etat.recu && renc === r.etat.renc) { r.etat.recu = false; kamiApresDictee(); } }, 1500);
 }
 /* Dictée terminée : si Kami est branché, il lit la note et prépare le récapitulatif (le lecteur local a déjà fait le premier tri) */
 function kamiApresDictee() {
@@ -2605,6 +2606,7 @@ async function analyserRencontre() {
   const texte = (renc.note || '').trim();
   if (!texte) { toast('Écris ou dicte d\'abord une phrase'); return; }
   if (!jarvis.token) { toast('Colle ton jeton Kami dans Réglages'); return; }
+  if (texte.length > 4000) toast('Note très longue : Kami lit les 4000 premiers caractères', 4000);
   clearTimeout(noteSaisie.t);
   lireRencontre(); // le lecteur local d'abord : si Kami ne répond pas, ce qu'il a lu reste
   const x = renc;
@@ -2612,13 +2614,13 @@ async function analyserRencontre() {
   const b = $('#r-affiner'); if (b) { b.disabled = true; b.textContent = 'Kami lit…'; }
   try {
     /* Kami lit aussi les dates par rapport au jour où la note a été commencée (brouillon de la veille repris) */
-    const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: x.noteT ? jourLocal(x.noteT) : today(), connus: nomsConnus() }) });
+    const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: x.noteT ? jourLocal(x.noteT) : today(), connus: nomsConnus(), contact: x.v ? [x.v.nom, x.v.entreprise].filter(Boolean).join(' · ') : '' }) });
     const j = await r.json();
     x.kamiEnCours = false;
     if (!r.ok) throw new Error(j.erreur || `Erreur ${r.status}`);
     if (renc !== x) return; // Rencontre fermée entre-temps
     /* Pas une prise de contact (un RDV à poser ou déplacer, un dossier qui avance…) : Kami la traite avec tout le contexte */
-    if (j.intention && j.intention !== 'contact') { confierAKami(x, texte, j.intention); return; }
+    if (j.intention && j.intention !== 'contact' && !x.v) { confierAKami(x, texte, j.intention); return; }
     /* Kami complète : ce qu'il lit remplace, ce qu'il laisse vide ne retire rien au lecteur local */
     appliquerLecture(x, j, true);
     x.resume = j.resume || '';
@@ -2639,15 +2641,23 @@ async function confierAKami(x, texte, intention) {
   /* Kami déjà en train de répondre ailleurs : la note reste dans Noter, rien n'est perdu */
   if (jarvisOccupe) { toast(`${jarvis.nom || 'Kami'} est occupé : réessaie dans un instant`); if (renc === x) rencRender(); return; }
   const dicte = !!x.dicte;
+  if (renc === x) rencLire();
+  const envoi = (x.note || '').trim() || texte; // ce qui a été ajouté pendant la lecture part aussi
   effacerBrouillonDe(x); x.note = '';
   if (renc === x) await fermerPuis(fermerRencontre);
   if (location.hash !== '#jarvis') location.hash = '#jarvis';
   const avant = JSON.stringify(state), nAvant = jarvis.historique.length;
-  await jarvisEnvoyer(texte, dicte);
+  await jarvisEnvoyer(envoi, dicte);
   const dernier = jarvis.historique.length > nAvant ? jarvis.historique[jarvis.historique.length - 1] : null;
   const n = dernier && dernier.role === 'assistant' && !dernier.erreur ? dernier.actions || 0 : 0;
   if (!n) return;
-  toastAction(`${jarvis.nom || 'Kami'} a mis à jour ${OU_KAMI[intention] || 'tes données'} (${pluriel(n, 'action')})`, 'Annuler', () => { remplacerEtat(JSON.parse(avant)); toast('Remis comme avant'); }, 10000);
+  toastAction(`${jarvis.nom || 'Kami'} a mis à jour ${OU_KAMI[intention] || 'tes données'} (${pluriel(n, 'action')})`, 'Annuler', () => {
+    if (aRecharger || revStocke() > revCourant) { toast('Modifié dans une autre fenêtre entre-temps : rien n\'est annulé'); return; }
+    remplacerEtat(JSON.parse(avant));
+    /* Kami le sait aussi : sa réponse ne compte plus d'action, et il ne croira pas l'avoir fait */
+    dernier.actions = 0; dernier.content += ' (annulé par Toufek : rien n\'a été gardé)'; saveJarvis(); majChat();
+    toast('Remis comme avant');
+  }, 10000);
 }
 /* Ferme une feuille à entrée d'historique (Noter) et attend que le retour soit passé, pour changer de vue ensuite sans être rattrapé */
 function fermerPuis(fermer) {

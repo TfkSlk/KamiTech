@@ -8,7 +8,7 @@ const FAUX = () => {
   class FakeSR {
     constructor() { this.lang = ''; window.__fake.instances.push(this); }
     start() { window.__fake.starts++; setTimeout(() => { if (this.onstart) this.onstart(); }, 0); }
-    stop() { setTimeout(() => { if (this.onend) this.onend(); }, 0); }
+    stop() { setTimeout(() => { if (this.onend) this.onend(); }, window.__fake.finLente ? 150 : 0); }
     abort() { this.stop(); }
   }
   window.webkitSpeechRecognition = FakeSR; window.SpeechRecognition = FakeSR;
@@ -82,6 +82,24 @@ const PHRASE = 'croisé Nadia de la boulangerie pour les CEE je lui ai envoyé l
     fait && fait.entreprise === 'Boulangerie Nadia' && fait.activite === 'cee' && fait.attente === 'lui' && fait.rappel === '2026-10-15' && fait.statut === 'planifie'
     && fait.journal.join('|') === '2026-10-06 Déjà fait · devis envoyé|2026-10-10 elle attend ma proposition CEE' && fait.ev && fait.ev.date === '2026-10-13' && fait.ev.heure === '15:00' && /Nadia/.test(fait.ev.titre) && fait.ev.lie && /RDV/.test(fait.toast || ''), JSON.stringify(fait));
 
+  /* Le dernier mot arrive souvent après l'arrêt du micro : Kami lit la note complète */
+  await p.evaluate(() => { effacerBrouillonDe(renc); fermerRencontre(); window.__fake.finLente = true; });
+  vus = await stubs(p, { intention: 'contact' });
+  await p.click('.parle-btn'); await p.waitForTimeout(150);
+  await p.evaluate(() => window.__emit('croisé Nadia de la boulangerie', true)); await p.waitForTimeout(50);
+  await p.click('#r-mic');
+  await p.evaluate(() => window.__emit('rappelle-moi jeudi', true)); await p.waitForTimeout(600);
+  verifier('Un mot reconnu juste après l\'arrêt fait partie de ce que Kami lit', vus.analyser.length === 1 && vus.analyser[0].texte === 'croisé Nadia de la boulangerie rappelle-moi jeudi', JSON.stringify(vus.analyser.map(a => a.texte)));
+  await p.evaluate(() => { window.__fake.finLente = false; effacerBrouillonDe(renc); fermerRencontre(); });
+
+  /* Note dictée depuis la fiche d'un contact : Kami sait de qui on parle, et la note reste dans Noter même si elle ressemble à du planning */
+  vus = await stubs(p, { intention: 'planning' });
+  await p.evaluate(() => { openContact(state.aVoir[0].id); dicteeRencontre(); }); await p.waitForTimeout(150);
+  await p.evaluate(() => window.__emit('on se voit mardi à quinze heures', true)); await p.waitForTimeout(50);
+  await p.click('#r-mic'); await p.waitForTimeout(600);
+  const fiche = await p.evaluate(() => ({ ouvert: !document.querySelector('#rencontre').hidden, etape: renc && renc.etape, v: renc && renc.v && nomDe(renc.v) }));
+  verifier('Depuis une fiche : le contact est nommé à Kami, la note reste dans Noter (récapitulatif), pas de détour par la conversation', vus.analyser.length === 1 && (vus.analyser[0].contact || '').startsWith(fiche.v) && /Pharmacie/.test(vus.analyser[0].contact) && vus.jarvis.length === 0 && fiche.ouvert && fiche.etape === 4, JSON.stringify({ fiche, contact: vus.analyser[0]?.contact }));
+
   /* Autre chose qu'une prise de contact : Kami agit avec le planning sous les yeux, « Annuler » remet tout */
   await p.evaluate(() => { effacerBrouillonDe(renc); fermerRencontre(); });
   vus = await stubs(p, { intention: 'planning', jarvisTexte: "C'est fait : garage mardi quinze heures.", actions: [{ op: 'add', collection: 'events', item: { id: 'h1-ev', titre: 'Garage Central · déplacé', date: '2026-10-13', heure: '15:00', activite: 'perso', mode: 'place', duree: 60, fait: false } }] });
@@ -96,7 +114,8 @@ const PHRASE = 'croisé Nadia de la boulangerie pour les CEE je lui ai envoyé l
   verifier("La réponse de Kami s'affiche dans sa conversation ; le brouillon de Noter n'est pas gardé", k.bulles.some(b => /garage mardi quinze heures/.test(b)) && !/garage central/.test(k.brouillon), JSON.stringify({ bulles: k.bulles, brouillon: k.brouillon }));
   verifier('« Kami a mis à jour le planning (1 action) · Annuler » proposé', /a mis à jour le planning \(1 action\)/.test(k.toast) && k.action === 'Annuler', k.toast + ' / ' + k.action);
   await p.click('#toast .toast-action'); await p.waitForTimeout(250);
-  verifier('Annuler : le planning revient comme avant', await p.evaluate(() => !state.events.find(e => e.id === 'h1-ev')) && /Remis comme avant/.test(await toastTxt(p)));
+  const apres = await p.evaluate(() => ({ ev: !!state.events.find(e => e.id === 'h1-ev'), bulle: [...document.querySelectorAll('#chat-log .bulle.assistant')].at(-1)?.textContent || '', hist: jarvis.historique.at(-1) }));
+  verifier('Annuler : le planning revient comme avant, et la réponse de Kami dit « annulé par Toufek » sans action comptée', !apres.ev && /Remis comme avant/.test(await toastTxt(p)) && /annulé par Toufek/.test(apres.bulle) && !/action/.test(apres.bulle) && apres.hist.actions === 0, JSON.stringify(apres));
 
   /* « Noté aujourd'hui » : les contacts notés dans la journée restent à portée sur l'accueil */
   await p.evaluate(() => { const v = state.aVoir[0]; (v.historique = v.historique || []).push({ date: today(), texte: 'test H1' }); save(); location.hash = '#dashboard'; }); await p.waitForTimeout(350);

@@ -47,16 +47,20 @@ Une prise de contact complète : qui (nom, entreprise, service), de quoi ils ont
 
 Classe d'abord la note (intention) : contact quand Toufek parle d'une personne à suivre (croisée, appelée, à rappeler, à qui envoyer quelque chose) ; planning pour un RDV ou une tâche à poser, déplacer, annuler ou cocher sans nouvelle personne (« décale le garage à mardi quinze heures », « mets-moi une tâche demain, le devis ») ; dossier quand un dossier déjà ouvert avance (« Karim SARL a signé le dossier CEE », « le cabinet a payé ») ; abonne pour un restaurant KamiFood (nouvelle formule, résiliation) ; autre pour un mémo, une question ou des heures. Dans le doute entre contact et le reste, choisis contact. Pour une intention autre que contact, remplis quand même sujet et resume : le tableau de bord confie alors la note à l'assistant qui a le planning et les dossiers sous les yeux.`;
 
-export async function analyserNote({ texte, aujourdhui, connus }, client) {
-  const liste = Array.isArray(connus) ? connus.filter(x => typeof x === 'string').map(x => x.trim().slice(0, 80)).filter(Boolean).slice(0, 150) : [];
+export async function analyserNote({ texte, aujourdhui, connus, contact }, client) {
+  /* Les noms viennent des données de Toufek : une ligne chacun, sans retour à la ligne ni point-virgule (le séparateur de la liste) */
+  const propre = x => String(x).replace(/[\r\n;]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const liste = Array.isArray(connus) ? connus.filter(x => typeof x === 'string').map(x => propre(x).slice(0, 80)).filter(Boolean).slice(0, 150) : [];
+  const qui = typeof contact === 'string' ? propre(contact).slice(0, 120) : '';
   const r = await client.beta.messages.create({
-    model: MODEL, max_tokens: 2000,
+    model: MODEL, max_tokens: 4000, // la réflexion (toujours active sur Opus 5.5, courte en effort low) compte dans cette limite
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
     betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
     system: SYSTEM,
-    messages: [{ role: 'user', content: `Date du jour : ${aujourdhui}.${liste.length ? `\nPersonnes et entreprises déjà connues (pour l'orthographe des noms) : ${liste.join(' ; ')}.` : ''}\nNote : ${texte}` }],
+    messages: [{ role: 'user', content: `Date du jour : ${aujourdhui}.${qui ? `\nLa note concerne un contact dont la fiche existe déjà : ${qui} (intention contact ; nom et entreprise déjà connus, ne les change pas).` : ''}${liste.length ? `\nPersonnes et entreprises déjà connues (pour l'orthographe des noms) : ${liste.join(' ; ')}.` : ''}\nNote : ${texte}` }],
   });
   if (r.stop_reason === 'refusal') throw new Error('Kami ne peut pas traiter cette note.');
+  if (r.stop_reason === 'max_tokens') throw new Error('Note trop longue pour Kami : raccourcis-la, ou coupe-la en deux.');
   const txt = r.content.filter(b => b.type === 'text').map(b => b.text).join('');
   const out = JSON.parse(txt);
   const dateOk = s => /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
@@ -75,11 +79,11 @@ export default async function handler(req, res) {
   if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ erreur: "ANTHROPIC_API_KEY n'est pas définie sur Vercel : ajoute-la dans Settings → Environment Variables (même procédure que la clé Stripe), puis redéploie." });
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-    const texte = String(body.texte || '').trim().slice(0, 2000);
+    const texte = String(body.texte || '').trim().slice(0, 4000);
     if (!texte) return res.status(400).json({ erreur: 'note vide' });
     const aujourdhui = /^\d{4}-\d{2}-\d{2}$/.test(body.aujourdhui || '') ? body.aujourdhui : new Date().toISOString().slice(0, 10);
     const client = new Anthropic({ maxRetries: 2, timeout: 60_000 });
-    return res.status(200).json(await analyserNote({ texte, aujourdhui, connus: body.connus }, client));
+    return res.status(200).json(await analyserNote({ texte, aujourdhui, connus: body.connus, contact: body.contact }, client));
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) return res.status(502).json({ erreur: 'La clé API Anthropic est refusée. Vérifie ANTHROPIC_API_KEY sur Vercel.' });
     if (e instanceof Anthropic.RateLimitError) return res.status(429).json({ erreur: 'Trop de demandes, réessaie dans quelques secondes.' });
