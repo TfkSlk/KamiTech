@@ -183,6 +183,14 @@ function carteArgent(p) {
   </section>`;
 }
 
+/* Sous « Parle, je note » : les personnes notées aujourd'hui, pour voir que c'est bien pris */
+function notesDuJourHtml() {
+  const t = today();
+  const notes = state.aVoir.filter(v => (v.historique || []).some(h => h.date === t)).slice(-4).reverse();
+  if (!notes.length) return '';
+  return `<div class="notes-jour" id="notes-jour"><span class="meta">Noté${notes.length > 1 ? 's' : ''} aujourd'hui</span>${notes.map(v => `<button type="button" class="chip" onclick="openAVoir('${v.id}')">${esc(nomDe(v))}</button>`).join('')}</div>`;
+}
+
 /* Premier lancement : trois gestes guidés plutôt qu'une page de zéros */
 function videAccueil() {
   const action = (ico, titre, aide, js) => `<button type="button" class="vide-action" onclick="${js}"><span class="va-ico">${ICONES[ico]}</span><span class="va-txt"><b>${titre}</b><small>${aide}</small></span></button>`;
@@ -230,9 +238,14 @@ function dashboard() {
       </div>
     </div>
   </div>
-  <button type="button" class="noter-bar" onclick="openContact();focusNote()" aria-label="Noter quelqu'un que tu viens de croiser">
-    <span class="noter-ico">${ICONES.noter}</span><span class="noter-txt">Noter quelqu'un…</span><span class="noter-aide">Une phrase : nom, service, rappel</span>
-  </button>
+  <section class="noter-bar parle" aria-label="Noter à la voix">
+    <button type="button" class="parle-btn" onclick="parleJeNote()" aria-label="Parle, je note : Noter s'ouvre et l'écoute démarre">
+      <span class="parle-ico">${ICONES.micro}</span>
+      <span class="parle-txt"><b>Parle, je note</b><small>${dicteeDispo() ? 'Qui tu as vu, un RDV à poser ou déplacer, un dossier qui avance' : 'Touche micro du clavier : qui tu as vu, un RDV, un dossier qui avance'}</small></span>
+    </button>
+    <button type="button" class="btn noter-ecrire" onclick="openContact();focusNote()" aria-label="Noter quelqu'un au clavier">Écrire</button>
+  </section>
+  ${notesDuJourHtml()}
   ${bandeauMaintenant()}
   ${empty ? '' : carteClotureHtml()}
   ${empty ? '' : carteRevueHtml()}

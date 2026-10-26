@@ -45,8 +45,8 @@ const flag = p => p.evaluate(() => { try { return JSON.parse(localStorage.getIte
   const defile = await p.evaluate(() => { const b = document.querySelector('#rencontre .r-body'); return b.scrollHeight > b.clientHeight + 1; });
   verifier('Le texte provisoire ne fait rien défiler', !defile);
   await p.evaluate(() => window.__emit('croisé Karim de Karim SARL pour les CEE, je lui envoie le devis', true)); await p.waitForTimeout(300);
-  const f1 = await p.evaluate(() => ({ note: document.querySelector('#r-note').value, interim: document.querySelector('#r-interim').hidden, nom: renc && renc.nom, jetons: document.querySelector('#r-jetons').textContent }));
-  verifier('Texte final ajouté à la note, provisoire effacé, note relue (Karim reconnu)', f1.note === 'croisé Karim de Karim SARL pour les CEE, je lui envoie le devis' && f1.interim && /Karim/.test(f1.jetons), JSON.stringify(f1));
+  const f1 = await p.evaluate(() => ({ note: document.querySelector('#r-note').value, interim: document.querySelector('#r-interim').textContent, ecoute: document.querySelector('#r-interim').classList.contains('ecoute'), nom: renc && renc.nom, jetons: document.querySelector('#r-jetons').textContent }));
+  verifier('Texte final ajouté à la note, provisoire remplacé par « J\'écoute… » (micro toujours allumé), note relue (Karim reconnu)', f1.note === 'croisé Karim de Karim SARL pour les CEE, je lui envoie le devis' && f1.interim === 'J\'écoute…' && f1.ecoute && /Karim/.test(f1.jetons), JSON.stringify(f1));
   await p.evaluate(() => window.__emit('rappelle-moi jeudi', true)); await p.waitForTimeout(200);
   verifier('Une seconde dictée s\'ajoute avec une espace', (await p.evaluate(() => document.querySelector('#r-note').value)).endsWith('devis rappelle-moi jeudi'));
   /* Silence : le navigateur coupe, l'appli relance tant que le bouton est allumé */
@@ -104,17 +104,19 @@ const flag = p => p.evaluate(() => { try { return JSON.parse(localStorage.getIte
   await fermer();
 }
 
-/* 3. Ordinateur : iPhone détecté en appli installée + « not-allowed » → clavier retenu ; sinon simple message */
+/* 3. iPhone en appli installée (écran d'accueil) : WebKit n'y a pas de reconnaissance vocale → le micro ouvre la dictée du clavier d'emblée, sans tenter le navigateur */
 {
   const { p, erreurs, fermer } = await ouvrir({ largeur: 1366, hauteur: 900, exemple: true });
   await p.addInitScript(FAUX);
   await p.addInitScript(() => { Object.defineProperty(navigator, 'userAgent', { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15' }); Object.defineProperty(navigator, 'standalone', { get: () => true }); });
   await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(300);
   await ouvrirNoter(p);
-  await p.evaluate(() => { window.__fake.mode = 'error:not-allowed'; });
+  const m3 = await mic(p);
+  verifier('iPhone en appli installée : le micro est d\'emblée en mode clavier', m3 && m3.clavier, JSON.stringify(m3));
+  const avant3 = await p.evaluate(() => window.__fake.starts);
   await p.click('#r-mic'); await p.waitForTimeout(150);
-  const fl = await flag(p);
-  verifier('iPhone en appli installée + not-allowed : dictée du clavier retenue, aide affichée', fl && fl.mode === 'clavier' && /touche micro du clavier/.test(await toastTxt(p)), JSON.stringify(fl) + ' ' + await toastTxt(p));
+  const k3 = await p.evaluate(s => ({ starts: window.__fake.starts - s, actif: document.activeElement && document.activeElement.id }), avant3);
+  verifier('Un toucher : la reconnaissance du navigateur n\'est pas tentée, focus sur la note, aide « touche micro du clavier (en bas à droite) »', k3.starts === 0 && k3.actif === 'r-note' && /touche micro du clavier \(en bas à droite\)/.test(await toastTxt(p)), JSON.stringify(k3) + ' ' + await toastTxt(p));
   verifier('Pas d\'erreur JS (3)', erreurs.length === 0, erreurs.join(' | '));
   await fermer();
 }

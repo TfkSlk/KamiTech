@@ -1189,3 +1189,25 @@ details.connexions .card { margin-bottom: 16px; }
 .r-interim { position: absolute; left: 10px; right: 56px; bottom: 8px; font-size: 13px; font-style: italic; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
 .r-interim[hidden] { display: none; }
 .r-mic.clavier { border-style: dashed; }
+
+/* Accueil : « Parle, je note », la fonction première de l'appli, juste sous l'en-tête */
+.noter-bar.parle { height: auto; min-height: 92px; padding: 10px 10px 10px 12px; gap: 10px; align-items: center; cursor: default; }
+.noter-bar.parle:hover { box-shadow: none; border-color: var(--border-strong); }
+.parle-btn { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 14px; min-height: 72px; padding: 4px 6px 4px 2px; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; border-radius: 14px; }
+.parle-btn:hover .parle-ico, .parle-btn:focus-visible .parle-ico { transform: scale(1.04); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 45%, transparent); }
+.parle-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.parle-ico { flex: none; display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: var(--accent-contrast); box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent); transition: transform .15s, box-shadow .15s; }
+.parle-ico svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.parle-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.parle-txt b { font-family: var(--font-head); font-size: 19px; line-height: 1.15; letter-spacing: -.01em; }
+.parle-txt small { color: var(--muted); font-size: 13px; line-height: 1.3; }
+.noter-ecrire { flex: none; min-height: 44px; }
+.notes-jour { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: -8px 0 14px; padding: 0 4px; }
+.notes-jour .meta { font-size: 13px; margin-right: 2px; }
+.r-interim.ecoute { color: var(--accent); font-style: normal; font-weight: 600; }
+.r-interim.ecoute::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 6px; vertical-align: 1px; animation: pulse 1.2s infinite; }
+@media (max-width: 760px) {
+  .noter-bar.parle { min-height: 88px; }
+  .parle-txt b { font-size: 18px; }
+  .parle-txt small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+}

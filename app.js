@@ -1848,7 +1848,7 @@ function nouvelleRenc(v, p = {}) {
     activite: v ? (v.activite || 'perso') : (APPORT.includes(filtre.activite) ? filtre.activite : 'energie'),
     sujet: p.sujet || '', attente: v ? (v.attente || '') : '', rappel: garder ? v.rappel : rappelDans(3), rappelJ: garder ? 'garder' : '3',
     creneau: 'aucun', crDate: today(), crHeure: '', crSemaine: iso(monday(addDays(new Date(), 7))), crDu: today(), crAu: iso(addMonths(new Date(), 1)),
-    objet: 'Présentation des services', tel: '', lien: v ? (v.lien || '') : '', date: today(), resume: '', important: false,
+    objet: 'Présentation des services', tel: '', lien: v ? (v.lien || '') : '', date: today(), resume: '', fait: '', faitDate: '', important: false,
     /* Noter : jetons écartés d'un toucher, dernière lecture, champ « Qui ? », contact d'origine et brouillon repris */
     ignores: [], lecture: null, cleLue: null, qui: false, depuis: v ? v.id : null, brouillonT: 0,
     /* noteT : moment où la note a été commencée (un brouillon de la veille se relit par rapport à la veille) ;
@@ -2082,6 +2082,8 @@ function premierNom(note) {
   return window.Lire ? Lire.premierNom(note) : String(note || '').split(/[,:.]/)[0].trim().slice(0, 40);
 }
 /* Les fiches déjà connues, pour que la lecture d'une note reconnaisse quelqu'un (contacts, dossiers, abonnés hors licence) */
+/* Pour Kami : les noms et entreprises déjà dans l'appli (il corrige un nom mal entendu, sans rien inventer) */
+const nomsConnus = () => [...new Set(connus().map(c => [c.nom, c.entreprise].filter(Boolean).join(' · ')).filter(Boolean))].slice(0, 150);
 const connus = () => [
   ...state.aVoir.map(v => ({ type: 'c', id: v.id, nom: v.nom || '', entreprise: v.entreprise || '', activite: v.activite || '' })),
   ...state.dossiers.map(d => ({ type: 'd', id: d.id, nom: d.contact || '', entreprise: d.entreprise || '', activite: d.activite || '' })),
@@ -2399,7 +2401,7 @@ function rencRender() {
     <div class="recap">
       <div class="recap-nom">${esc(r.nom || '?')}${r.entreprise ? ` <span class="meta">· ${esc(r.entreprise)}</span>` : ''} ${tag(r.activite)}</div>
       <label class="r-label" for="r-sujet">De quoi vous avez parlé</label><input id="r-sujet" value="${esc(r.sujet || r.note)}">
-      <ul class="recap-list"><li>${esc(r.rappelJ === 'clos' && !creneauOk(r) ? 'Rien en attente' : ATTENTES[r.attente] || 'Rien en attente')}</li></ul>
+      <ul class="recap-list">${r.fait ? `<li class="recap-fait">Déjà fait${r.faitDate ? ' ' + esc(jourCourt(r.faitDate)) : ''} : ${esc(r.fait)}</li>` : ''}<li>${esc(r.rappelJ === 'clos' && !creneauOk(r) ? 'Rien en attente' : ATTENTES[r.attente] || 'Rien en attente')}</li></ul>
       <div class="recap-suite ${suite.ok ? '' : 'manque'}" id="r-suite"><span class="r-label">La suite</span>${suite.lignes.map(l => `<b>${esc(l)}</b>`).join('')}</div>
       ${r.resume ? `<p class="meta recap-resume" title="${esc(r.resume)}">${esc(r.resume)}</p>` : ''}
       ${r.v ? '' : `<label class="r-label" for="r-tel">Téléphone (facultatif)</label><input id="r-tel" type="tel" value="${esc(r.tel)}">`}
@@ -2459,6 +2461,8 @@ function enregistrerRencontre() {
   else { target.attente = r.attente; target.rappel = r.rappelJ === 'clos' ? '' : (r.rappel || ''); if (target.statut === 'clos') target.statut = 'suivi'; }
   const sujet = (r.sujet || r.note || '').trim();
   if (!Array.isArray(target.historique)) target.historique = [];
+  /* Ce qui était déjà fait avant cette note (lu par Kami) : une ligne du journal, à sa date, avant celle du jour */
+  if ((r.fait || '').trim()) target.historique.push({ date: r.faitDate || r.date || today(), texte: `Déjà fait · ${r.fait.trim()}` });
   target.historique.push({ date: r.date || today(), texte: sujet || 'Prise de contact' });
   delete target.tentatives; // un vrai échange noté : les appels sans réponse repartent de zéro
   if (!v) state.aVoir.push(target);
@@ -2496,6 +2500,7 @@ const DICTEE_CLE = 'kgd-dictee';
 const estIOS = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function dicteeDispo() {
   if (!SR) return false;
+  if (estIOS() && estInstalle()) return false; // WebKit : pas de reconnaissance vocale dans une appli ajoutée à l'écran d'accueil
   try { const m = JSON.parse(lireCle(DICTEE_CLE) || 'null'); if (m && m.mode === 'clavier' && Date.now() - m.t < 7 * 864e5) return false; } catch (e) { /* valeur illisible : on réessaie */ }
   return true;
 }
@@ -2507,16 +2512,24 @@ function dicteeClavier(raison) {
   const ou = estIOS() ? 'la touche micro du clavier (en bas à droite)' : coarse() ? 'la touche micro du clavier' : navigator.platform.startsWith('Win') ? 'Win + H' : navigator.platform.startsWith('Mac') ? 'la touche micro ou fn ×2' : 'la dictée du système';
   toast(`${raison ? raison + ' · ' : ''}Dicte avec ${ou}`, 5000);
 }
+/* Accueil, « Parle, je note » : Noter s'ouvre et l'écoute démarre dans le même geste (ou le clavier et sa touche micro) */
+function parleJeNote() {
+  openContact();
+  if (dicteeDispo()) dicteeRencontre(); else dicteeClavier();
+}
 let recNote = null;
 function majInterim(txt) {
   const el = $('#r-interim'); if (!el) return;
-  el.textContent = txt || ''; el.hidden = !txt;
+  const t = txt || (recNote ? 'J\'écoute…' : '');
+  el.textContent = t; el.hidden = !t; el.classList.toggle('ecoute', !txt && !!recNote);
 }
 /* Le texte reconnu s'ajoute à la note (une espace entre deux dictées), puis la note est relue */
 function ajouterDicte(t) {
   const ta = $('#r-note'); if (!ta || !t || !renc) return;
   const avant = ta.value.trimEnd();
   ta.value = (avant ? avant + ' ' : '') + t.trim();
+  if (recNote && recNote.etat) recNote.etat.recu = true;
+  renc.dicte = true; // dictée : Kami répondra à voix haute s'il prend la note en charge
   noteSaisie(ta.value);
   try { ta.selectionStart = ta.selectionEnd = ta.value.length; } catch (e) { /* ignore */ }
 }
@@ -2554,6 +2567,7 @@ function dicteeRencontre() {
     if (recNote === r) recNote = null;
     majMicNote(); majInterim('');
     if (renc && renc.etape === 0) { clearTimeout(noteSaisie.t); lireRencontre(); majNoter(); }
+    if (etat.recu) kamiApresDictee();
   };
   r.onerror = e => {
     const code = e && e.error;
@@ -2565,7 +2579,7 @@ function dicteeRencontre() {
     if (!MESSAGES_DICTEE[code]) { retenirDicteeClavier(); dicteeClavier(); }
   };
   try { r.start(); } catch (e) { retenirDicteeClavier(); return dicteeClavier('Dictée du navigateur indisponible'); }
-  recNote = r; recNote.etat = etat; majMicNote();
+  recNote = r; recNote.etat = etat; majMicNote(); majInterim('');
   /* Garde-fou : si rien ne démarre en 3 s (iPhone en appli installée : la reconnaissance reste muette), on passe au clavier */
   etat.garde = setTimeout(() => { if (recNote === r && !etat.demarre) { etat.voulu = false; arreterDictee(); retenirDicteeClavier(); dicteeClavier('Dictée du navigateur muette'); } }, 3000);
 }
@@ -2576,6 +2590,13 @@ function arreterDictee() {
   recNote = null;
   try { r.stop(); } catch (e) { /* ignore */ }
   majMicNote(); majInterim('');
+  if (r.etat && r.etat.recu) { r.etat.recu = false; kamiApresDictee(); }
+}
+/* Dictée terminée : si Kami est branché, il lit la note et prépare le récapitulatif (le lecteur local a déjà fait le premier tri) */
+function kamiApresDictee() {
+  if (!renc || renc.etape !== 0 || renc.kamiEnCours || !jarvis.token || state.prefs.kamiAuto === false) return;
+  if ((renc.note || '').trim().length < 12) return;
+  analyserRencontre();
 }
 /* Kami lit la note et remplit toutes les étapes ; on saute au récapitulatif */
 async function analyserRencontre() {
@@ -2591,20 +2612,54 @@ async function analyserRencontre() {
   const b = $('#r-affiner'); if (b) { b.disabled = true; b.textContent = 'Kami lit…'; }
   try {
     /* Kami lit aussi les dates par rapport au jour où la note a été commencée (brouillon de la veille repris) */
-    const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: x.noteT ? jourLocal(x.noteT) : today() }) });
+    const r = await fetch('/api/analyser', { method: 'POST', headers: { 'content-type': 'application/json', 'x-jarvis-token': jarvis.token }, body: JSON.stringify({ texte, aujourdhui: x.noteT ? jourLocal(x.noteT) : today(), connus: nomsConnus() }) });
     const j = await r.json();
     x.kamiEnCours = false;
     if (!r.ok) throw new Error(j.erreur || `Erreur ${r.status}`);
     if (renc !== x) return; // Rencontre fermée entre-temps
+    /* Pas une prise de contact (un RDV à poser ou déplacer, un dossier qui avance…) : Kami la traite avec tout le contexte */
+    if (j.intention && j.intention !== 'contact') { confierAKami(x, texte, j.intention); return; }
     /* Kami complète : ce qu'il lit remplace, ce qu'il laisse vide ne retire rien au lecteur local */
     appliquerLecture(x, j, true);
     x.resume = j.resume || '';
+    /* Ce qui a déjà été fait avec la personne (« je lui ai envoyé le devis lundi ») : une ligne datée du journal, à l'enregistrement */
+    x.fait = String(j.fait || '').trim(); x.faitDate = /^\d{4}-\d{2}-\d{2}$/.test(j.faitDate || '') ? j.faitDate : '';
     x.etape = 4; rencRender();
   } catch (e) {
     x.kamiEnCours = false;
     if (renc !== x) return;
     toast(e.message || 'Analyse impossible'); rencRender();
   }
+}
+/* La note dictée n'est pas une prise de contact (RDV à poser ou déplacer, dossier qui avance, abonné KamiFood, mémo…) : Kami la
+   reçoit telle quelle, avec le planning, les dossiers et les contacts sous les yeux, et agit avec ses outils. Le brouillon de Noter
+   s'efface (la note est chez Kami), la réponse s'affiche dans sa conversation, et « Annuler » remet toutes les données comme avant. */
+const OU_KAMI = { planning: 'le planning', dossier: 'les dossiers', abonne: 'KamiFood', autre: 'tes notes' };
+async function confierAKami(x, texte, intention) {
+  /* Kami déjà en train de répondre ailleurs : la note reste dans Noter, rien n'est perdu */
+  if (jarvisOccupe) { toast(`${jarvis.nom || 'Kami'} est occupé : réessaie dans un instant`); if (renc === x) rencRender(); return; }
+  const dicte = !!x.dicte;
+  effacerBrouillonDe(x); x.note = '';
+  if (renc === x) await fermerPuis(fermerRencontre);
+  if (location.hash !== '#jarvis') location.hash = '#jarvis';
+  const avant = JSON.stringify(state), nAvant = jarvis.historique.length;
+  await jarvisEnvoyer(texte, dicte);
+  const dernier = jarvis.historique.length > nAvant ? jarvis.historique[jarvis.historique.length - 1] : null;
+  const n = dernier && dernier.role === 'assistant' && !dernier.erreur ? dernier.actions || 0 : 0;
+  if (!n) return;
+  toastAction(`${jarvis.nom || 'Kami'} a mis à jour ${OU_KAMI[intention] || 'tes données'} (${pluriel(n, 'action')})`, 'Annuler', () => { remplacerEtat(JSON.parse(avant)); toast('Remis comme avant'); }, 10000);
+}
+/* Ferme une feuille à entrée d'historique (Noter) et attend que le retour soit passé, pour changer de vue ensuite sans être rattrapé */
+function fermerPuis(fermer) {
+  return new Promise(resolve => {
+    let fait = false;
+    const ensuite = () => { if (fait) return; fait = true; window.removeEventListener('popstate', ensuite); setTimeout(resolve, 0); };
+    const poussee = couches.some(c => c.nom === 'rencontre' && c.pousse);
+    if (poussee) window.addEventListener('popstate', ensuite);
+    fermer();
+    if (!poussee) return ensuite();
+    setTimeout(ensuite, 350);
+  });
 }
 /* Le créneau choisi dans la prise de contact devient une entrée du planning liée au contact */
 function creneauContact(v, f) {

@@ -9,6 +9,7 @@ Tableau de bord personnel pour piloter toutes les activités du groupe :
 
 ## Fonctionnalités
 
+- **Parle, je note** (le cœur de l'appli, en tête de l'accueil) : un toucher, Noter s'ouvre et l'écoute démarre. La note dictée est comprise avec le contexte : une prise de contact remplit la fiche en entier (qui, de quoi, ce qui est déjà fait, rappel, prochain RDV) et « Enregistrer » crée tout ; un RDV à poser ou déplacer, un dossier qui avance ou un abonné part chez Kami, qui agit avec le planning et les dossiers sous les yeux, « Annuler » à portée. Sans reconnaissance vocale (iPhone en appli installée), la touche micro du clavier prend le relais.
 - **Accueil** : gains de la période, tendance sur 6 mois, camembert par secteur, charge de la semaine, agenda du jour, retards, 7 prochains jours.
 - **Planning** : vues Jour / Semaine / Mois, grille horaire (clic sur un créneau pour ajouter), charge par jour et par secteur, relances affichées automatiquement.
 - **Apport** : suivi des prospects et clients (Prospect → RDV → Étude → Signé → Payé / Perdu), filtres et recherche.

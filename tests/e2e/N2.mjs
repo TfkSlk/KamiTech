@@ -12,7 +12,7 @@ const ouverte = p => p.evaluate(() => !document.querySelector('#rencontre').hidd
 const titre = p => p.$eval('#rencontre h2', e => e.textContent.trim());
 const KARIM = 'croisé Karim de Karim SARL pour les CEE, je lui envoie le devis, rappelle-moi jeudi';
 /* Ouvre Noter comme Toufek : le bouton de l'accueil (focus immédiat) */
-const noter = async p => { await p.evaluate(() => { location.hash = '#dashboard'; }); await pause(p); await p.click('.noter-bar'); await pause(p); };
+const noter = async p => { await p.evaluate(() => { location.hash = '#dashboard'; }); await pause(p); await p.click('.noter-ecrire'); await pause(p); };
 const jetons = p => p.$$eval('#r-jetons .jeton:not(.jeton-plus)', l => l.map(j => ({ t: j.textContent.trim(), cl: [...j.classList].filter(c => c !== 'jeton').join(' '), c: getComputedStyle(j).color, fond: getComputedStyle(j).backgroundImage })));
 
 for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
@@ -22,8 +22,8 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   /* ---------- 1. Une phrase, UN toucher sur Enregistrer ---------- */
   {
     const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur });
-    const focusImmediat = await p.evaluate(() => { document.querySelector('.noter-bar').click(); return document.activeElement && document.activeElement.id; });
-    verifier(`${ecran} accueil : « Noter quelqu'un… » ouvre Noter et donne le focus à la note tout de suite (même geste)`, focusImmediat === 'r-note' && await titre(p) === 'Noter', String(focusImmediat));
+    const focusImmediat = await p.evaluate(() => { document.querySelector('.noter-ecrire').click(); return document.activeElement && document.activeElement.id; });
+    verifier(`${ecran} accueil : « Écrire » ouvre Noter et donne le focus à la note tout de suite (même geste)`, focusImmediat === 'r-note' && await titre(p) === 'Noter', String(focusImmediat));
     const champs = await p.evaluate(() => { const t = $('#r-note'); return { rows: t.rows, hint: t.getAttribute('enterkeyhint'), taille: getComputedStyle(t).fontSize }; });
     verifier(`${ecran} 1. #r-note : textarea de 3 lignes, 16px, enterkeyhint=done`, champs.rows === 3 && champs.hint === 'done' && champs.taille === '16px', JSON.stringify(champs));
     await p.keyboard.type(KARIM, { delay: 2 });
@@ -350,9 +350,9 @@ for (const [largeur, hauteur] of [[390, 844], [1366, 800]]) {
   /* ---------- 8. Accueil : « Noter quelqu'un » en haut ; 10. #noter ---------- */
   for (const exemple of [false, true]) {
     const { p, erreurs, fermer } = await ouvrir({ largeur, hauteur, exemple });
-    const b = await p.evaluate(() => { const e = document.querySelector('.noter-bar'), r = e.getBoundingClientRect(), h = document.querySelector('.page-head').getBoundingClientRect(); return { top: r.top, h: r.height, w: r.width, apresTete: r.top >= h.bottom - 1, txt: e.textContent.replace(/\s+/g, ' ').trim(), capture: !!document.querySelector('.card.capture'), main: document.querySelector('#main').clientWidth }; });
-    verifier(`${ecran} ${exemple ? 'exemple' : 'vide'} 8. bouton « Noter quelqu'un… » de 48 px, pleine largeur, juste sous l'en-tête${tel ? `, top ${b.top} <= 200` : ''}`,
-      /^Noter quelqu'un…/.test(b.txt) && b.h === 48 && b.apresTete && !b.capture && (!tel || b.top <= 200), JSON.stringify(b));
+    const b = await p.evaluate(() => { const e = document.querySelector('.noter-bar.parle'), r = e.getBoundingClientRect(), h = document.querySelector('.page-head').getBoundingClientRect(), pb = e.querySelector('.parle-btn').getBoundingClientRect(), ic = e.querySelector('.parle-ico').getBoundingClientRect(); return { top: r.top, h: r.height, w: r.width, apresTete: r.top >= h.bottom - 1, txt: e.textContent.replace(/\s+/g, ' ').trim(), capture: !!document.querySelector('.card.capture'), main: document.querySelector('#main').clientWidth, btn: pb.height, ico: ic.width, ecrire: !!e.querySelector('.noter-ecrire') }; });
+    verifier(`${ecran} ${exemple ? 'exemple' : 'vide'} 8. « Parle, je note » pleine largeur juste sous l'en-tête : bouton ≥ 64 px, micro de 64 px, « Écrire » à côté${tel ? `, top ${b.top} <= 200` : ''}`,
+      /^Parle, je note/.test(b.txt) && b.h >= 88 && b.btn >= 64 && b.ico === 64 && b.ecrire && b.apresTete && !b.capture && (!tel || b.top <= 200), JSON.stringify(b));
     await capture(p, `n2-accueil-${exemple ? 'exemple' : 'vide'}-${largeur}`);
     verifier(`${ecran} ${exemple ? 'exemple' : 'vide'} accueil sans défilement horizontal`, await sansScrollHorizontal(p));
     await fermer();

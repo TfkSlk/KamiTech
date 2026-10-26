@@ -4,7 +4,7 @@
    - Les appels /api ne sont jamais mis en cache.
    - Une nouvelle version attend que l'utilisateur choisisse « Recharger » (message SKIP_WAITING) : rien ne change sous ses doigts.
    VERSION est à changer à chaque déploiement qui touche ces fichiers. */
-const VERSION = 'kgd-v21';
+const VERSION = 'kgd-v22';
 const SHELL = ['./', './index.html', './style.css', './app.js', './views.js', './lire.js', './manifest.json', './favicon.svg',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/logo.svg', './icons/apple-touch-icon.png',
   './fonts/inter-latin-400-normal.woff2', './fonts/inter-latin-500-normal.woff2', './fonts/inter-latin-600-normal.woff2', './fonts/inter-latin-700-normal.woff2', './fonts/sora-latin-600-normal.woff2', './fonts/sora-latin-700-normal.woff2'];
